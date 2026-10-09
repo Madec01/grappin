@@ -30,6 +30,9 @@ src/
   data/tiers.ts         Noms des paliers de hauteur
   input/pointer.ts      Un seul pointeur : appui et relâché
   render/camera.ts      Mètres vers pixels, suivi, avance, dézoom selon la vitesse
+  render/cues.ts        Repères purs lus de l'état : ombre prédictive, usure de l'accroche fragile tenue
+  render/effects.ts     Temps réel à l'écran : trait du grappin, textes flottants, bannière de palier
+  render/format.ts      Nombres à la française
   render/renderer.ts    Dessin PixiJS en formes grises et interface
   app/game.ts           Écrans, accumulateur de temps, réglages depuis l'adresse, état de débogage
   main.ts               Démarrage et point d'accès window.__grappin
@@ -94,7 +97,9 @@ Les points, obstacles et étoiles passés dix mètres sous la brume sont retiré
 
 ## Rendu, caméra et entrée
 
-PixiJS 8 sert de renderer pur, en formes et textes, sans aucun asset. `render/renderer.ts` redessine chaque image une cinquantaine de formes à partir de coordonnées d'écran déjà calculées par la caméra : lignes d'altitude tous les 10 m, toit de départ, points d'accroche, anneau du point visé, corde, brume, personnage, puis l'interface (hauteur, multiplicateur, score) et les écrans titre et fin sur un voile. Le trait du grappin se dessine du personnage vers le point en 60 ms de temps réel, pour l'œil seulement : la physique accroche à l'instant du tap.
+PixiJS 8 sert de renderer pur, en formes et textes, sans aucun asset. `render/renderer.ts` redessine chaque image les formes visibles à partir de coordonnées d'écran déjà calculées par la caméra, du fond vers l'avant : lignes d'altitude tous les 10 m, toit de départ, obstacles (rectangles à liseré clair), points d'accroche (normal en disque ; fragile en disque clair à anneau tireté et fissure, avec un anneau qui se vide pendant la tenue ; propulseur en disque dans un anneau plein surmonté de chevrons ; un point cassé n'est pas dessiné), étoiles, anneau du point visé, corde, ombre prédictive en six points, brume, personnage, textes flottants, puis l'interface (hauteur, multiplicateur, score), la bannière de palier et les écrans titre et fin sur un voile, avec la cause de la défaite.
+
+`render/cues.ts` calcule sans PixiJS ni temps réel ce que le rendu montre de l'état : l'ombre prédictive, six positions de vol libre jusqu'à `shadowSeconds` avec la vitesse que donnerait le lâcher, propulseur compris, par la règle `releaseVelocity` de la simulation ; et l'usure de l'accroche fragile tenue, en pas de simulation pour tomber à zéro au pas exact de la casse. `render/effects.ts` porte tout le temps réel à l'écran, sans PixiJS : le trait du grappin qui se dessine en 60 ms, les textes flottants (« Frôlé ! », « +10 », « Parfait ×1,25 », « Boost », « Crac ») qui montent et s'effacent en 0,7 s en s'empilant s'ils se recouvriraient, et la bannière de palier qui vit 2 s. Le jeu y verse les événements de règles et le temps écoulé ; le rendu les relit.
 
 `render/camera.ts` ne connaît ni PixiJS ni le DOM : dix mètres de large tiennent dans l'écran à zoom 1 ; le zoom cible vaut `1 / (1 + vitesse / 18)`, borné à 0,6 et de sorte que le personnage garde 14 px de diamètre ; centre et zoom sont lissés avec une constante de 0,25 s ; l'avance vers le haut vaut 2,5 m plus 0,08 m par m/s de vitesse verticale, bornée entre 1 et 5 m ; une bande dure garde le personnage entre 45 % et 70 % de la hauteur d'écran. La caméra reste centrée sur x = 0 pour ne pas balancer tout le décor avec le pendule, et ne suit en x que si le personnage s'approche à moins d'un mètre du bord.
 
@@ -102,14 +107,14 @@ PixiJS 8 sert de renderer pur, en formes et textes, sans aucun asset. `render/re
 
 ## Écrans et boucle de jeu
 
-`app/game.ts` tient trois écrans, titre, partie et fin. Sur le titre et sur la fin, l'appui lance la partie et compte comme l'appui d'accroche. Le temps réel est converti en pas fixes par un accumulateur plafonné à 100 ms par image ; la simulation ne voit jamais le temps réel. Les réglages viennent de l'adresse : `?graine=` fixe la graine, et tout paramètre nommé comme une clé de `Tuning` surcharge la valeur. `debugState()` expose un instantané lisible aux tests de bout en bout et aux séances de réglage, via `window.__grappin`.
+`app/game.ts` tient trois écrans, titre, partie et fin. Sur le titre et sur la fin, l'appui lance la partie et compte comme l'appui d'accroche. Le temps réel est converti en pas fixes par un accumulateur plafonné à 100 ms par image ; la simulation ne voit jamais le temps réel. Chaque image : simulation, caméra, puis les événements de règles sont passés aux effets avec la position du personnage à l'écran, la mort retient sa cause, et le rendu dessine. Les réglages viennent de l'adresse : `?graine=` fixe la graine, et tout paramètre nommé comme une clé de `Tuning` surcharge la valeur, `?tierHeight=4` par exemple fait apparaître obstacles, fragiles et propulseurs dès les premiers mètres. `debugState()` expose un instantané lisible aux tests de bout en bout et aux séances de réglage, via `window.__grappin` : écran, pas, corde, point visé, hauteur, score, combo, position, vitesse, brume, graine, cause de la mort, palier, obstacles chargés et étoiles prises.
 
 ## Tests et intégration continue
 
 | Niveau | Outil | Ce qui est vérifié |
 |---|---|---|
-| Unitaire | Vitest en Node | Parabole, plafond de vitesse, corde à longueur constante, énergie, treuil, accroche, impulsion, lâcher parfait, combo, score, sol, brume, mémoire d'appui, visée, coyote time, parcours, déterminisme, caméra, écrans et réglages d'URL |
-| Bout en bout | Playwright, Chromium, 390 × 844 | Chargement sans erreur, doigt posé qui accroche au toucher et à la souris, relâché qui libère, tap qui lance, graine d'URL respectée |
+| Unitaire | Vitest en Node | Parabole, plafond de vitesse, corde à longueur constante, énergie, treuil, pompage, accroche, impulsion, lâcher parfait, combo, score, sol, brume, mémoire d'appui, visée et ligne de vue, coyote time, géométrie, fragiles, propulseurs, obstacles et frôlé, étoiles, paliers, générateur et profils, vérificateur sur deux cents graines, robots, déterminisme, caméra, repères, effets, écrans et réglages d'URL |
+| Bout en bout | Playwright, Chromium, 390 × 844 | Chargement sans erreur, doigt posé qui accroche au toucher et à la souris, relâché qui libère, tap qui lance, graine d'URL respectée, pilote automatique qui grimpe sans erreur de console |
 | Qualité | ESLint, tsc strict | Règles de déterminisme, typage strict avec index non vérifiés et propriétés optionnelles exactes |
 
 Le workflow `.github/workflows/ci.yml` enchaîne lint, typage, tests, fumée mobile et build à chaque push, puis déploie `dist/` sur GitHub Pages depuis `main`. Le dépôt doit avoir GitHub Pages configuré sur la source « GitHub Actions ». Le build Pages utilise la base `/grappin/` via la variable `GRAPPIN_BASE`.

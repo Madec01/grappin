@@ -27,9 +27,15 @@ const BANNER_FADE_OUT_SECONDS = 0.6;
 /** Un texte naît au-dessus du personnage et monte encore de quelques pixels. */
 const FLOAT_START_LIFT = 34;
 const FLOAT_RISE = 26;
-/** Un texte a presque fini de monter après ce temps : un texte né plus tôt s'empile au lieu de se recouvrir. */
-const STACK_WINDOW_SECONDS = 0.45;
+/**
+ * Deux textes qui se recouvriraient s'empilent : à moins de `STACK_WIDTH` pixels
+ * à l'horizontale et `STACK_CLASH` pixels à la verticale, le nouveau naît une
+ * ligne au-dessus de l'ancien. `STACK_MAX` borne la recherche.
+ */
+const STACK_WIDTH = 130;
+const STACK_CLASH = 20;
 const STACK_LINE_HEIGHT = 26;
+const STACK_MAX = 4;
 
 export interface FloatingText {
   readonly text: string;
@@ -126,8 +132,18 @@ export class Effects {
     if (event.type === 'tier') this.current = { text: `${event.name} · ${event.tier * this.tuning.tierHeight} m`, age: 0 };
     const text = floatingTextFor(event, this.tuning);
     if (text === null) return;
-    const stacked = this.floating.filter((item) => item.age < STACK_WINDOW_SECONDS).length;
-    this.floating.push({ text, x: hero.x, y: hero.y - FLOAT_START_LIFT - stacked * STACK_LINE_HEIGHT, age: 0 });
+    this.floating.push({ text, x: hero.x, y: this.freeY(hero.x, hero.y - FLOAT_START_LIFT), age: 0 });
+  }
+
+  /** Ordonnée de naissance d'un texte en `x` : `bornY`, ou plus haut s'il y recouvrirait un texte encore visible. */
+  private freeY(x: number, bornY: number): number {
+    let y = bornY;
+    for (let attempt = 0; attempt < STACK_MAX; attempt += 1) {
+      const clash = this.floating.find((item) => Math.abs(item.x - x) < STACK_WIDTH && Math.abs(item.y - floatRise(item.age) - y) < STACK_CLASH);
+      if (!clash) break;
+      y = clash.y - floatRise(clash.age) - STACK_LINE_HEIGHT;
+    }
+    return y;
   }
 
   /** Efface tout : nouvelle partie. */

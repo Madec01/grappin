@@ -1,4 +1,4 @@
-import { add, clampLength, distance, dot, length, normalize, perpendicular, scale, sub } from '../core/math/vec2';
+import { add, clampLength, distance, dot, length, normalize, perpendicular, scale, sub, type Vec2 } from '../core/math/vec2';
 import { tierName } from '../data/tiers';
 import { circleBoxGap } from './geometry';
 import { constrainVelocity } from './physics';
@@ -126,15 +126,26 @@ export function multiplier(combo: number, tuning: Tuning): number {
   return Math.min(tuning.comboMaxMultiplier, 1 + tuning.comboStep * combo);
 }
 
+/**
+ * Vitesse que prendrait le personnage s'il lâchait maintenant : la sienne, ou
+ * celle-ci multipliée par `boostFactor` sous le plafond s'il tient un
+ * propulseur, sans changer de direction. Le lâcher et l'ombre prédictive
+ * l'utilisent tous deux, pour que l'ombre dise vrai.
+ */
+export function releaseVelocity(state: SwingContext, tuning: Tuning): Vec2 {
+  const anchor = state.rope ? findAnchor(state, state.rope.anchorId) : undefined;
+  if (anchor?.kind !== 'booster') return state.hero.vel;
+  return clampLength(scale(state.hero.vel, tuning.boostFactor), tuning.maxSpeed);
+}
+
 /** Libère le personnage avec la vitesse du moment. Renvoie vrai si une corde a été lâchée. */
 export function release(state: SimState, tuning: Tuning, events: RuleEvent[]): boolean {
   // Lever le doigt annule un appui encore en mémoire.
   state.pressStep = -1;
   if (!state.rope) return false;
-  const anchor = findAnchor(state, state.rope.anchorId);
-  if (anchor?.kind === 'booster') {
-    // Propulseur : la direction ne change pas, la vitesse gagne un tiers, sous le plafond.
-    state.hero.vel = clampLength(scale(state.hero.vel, tuning.boostFactor), tuning.maxSpeed);
+  const boosted = releaseVelocity(state, tuning);
+  if (boosted !== state.hero.vel) {
+    state.hero.vel = boosted;
     events.push({ type: 'boost' });
   }
   const perfect = isPerfectRelease(state.hero.vel.x, state.hero.vel.y, tuning);

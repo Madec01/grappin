@@ -99,18 +99,36 @@ describe('textes flottants', () => {
     expect(effects.texts).toHaveLength(0);
   });
 
-  it('s\'empilent quand ils naissent presque ensemble au lieu de se recouvrir', () => {
+  it('s\'empilent d\'une ligne quand ils naissent au même endroit, au lieu de se recouvrir', () => {
     const effects = new Effects(DEFAULT_TUNING);
     effects.handle({ type: 'boost' }, HERO);
     effects.handle(perfect(1), HERO);
-    const [first, second] = effects.texts;
-    expect(second!.y).toBeLessThan(first!.y);
-    expect(first!.y - second!.y).toBeGreaterThan(20);
+    effects.handle({ type: 'pickup', pickupId: 1 }, HERO);
+    const [first, second, third] = effects.texts;
+    expect(first!.y - second!.y).toBe(26);
+    expect(second!.y - third!.y).toBe(26);
+  });
 
-    // Une fois le premier presque fini de monter, la place est libre : le suivant repart de la même hauteur.
-    effects.update(0.5);
+  it('enjambent un texte qui monte encore, mais reprennent la place d\'un texte presque arrivé en haut', () => {
+    const effects = new Effects(DEFAULT_TUNING);
+    effects.handle({ type: 'boost' }, HERO);
+    const bornY = effects.texts[0]!.y;
+
+    effects.update(0.3);
+    effects.handle(perfect(1), HERO);
+    expect(effects.texts[1]!.y).toBeCloseTo(bornY - floatRise(0.3) - 26, 9);
+
+    // Le premier a maintenant 0,6 s : il a presque fini de monter et laisse la hauteur de naissance libre.
+    effects.update(0.3);
     effects.handle({ type: 'break', anchorId: 1 }, HERO);
-    expect(effects.texts.at(-1)!.y).toBe(first!.y);
+    expect(effects.texts.at(-1)!.y).toBe(bornY);
+  });
+
+  it('ne s\'empilent pas quand ils naissent loin les uns des autres', () => {
+    const effects = new Effects(DEFAULT_TUNING);
+    effects.handle({ type: 'boost' }, { x: 60, y: 500 });
+    effects.handle({ type: 'boost' }, { x: 330, y: 500 });
+    expect(effects.texts[0]!.y).toBe(effects.texts[1]!.y);
   });
 
   it('ne naissent que des événements qui en ont un', () => {
