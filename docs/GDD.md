@@ -115,7 +115,7 @@ Valeurs de départ pour le prototype, à régler à la main sur téléphone. Ell
 | Gravité | 7,5 m/s², soit environ trois quarts de la gravité réelle |
 | Pas de simulation | 1/120 s |
 | Longueur de corde | distance au moment du tap, bornée par la portée, puis raccourcie par le treuil jusqu'à 1,5 m |
-| Treuil | 2,5 m/s de raccourcissement, moitié de la conservation du moment cinétique |
+| Treuil | 3,5 m/s de raccourcissement, 60 % de la conservation du moment cinétique (2,5 et 50 % avant le retour du propriétaire du 9 octobre 2026 : « difficile de prendre de la vitesse ») |
 | Vitesse maximale | 24 m/s |
 | Portée du grappin | 7 m |
 | Élan minimal à l'accroche, sinon impulsion | 2 m/s tangentiels, impulsion à 3 m/s |

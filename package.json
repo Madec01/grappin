@@ -1,6 +1,6 @@
 {
   "name": "grappin",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "GRAPPIN, jeu d'arcade de mouvement où l'on monte au grappin",
   "private": true,
   "type": "module",

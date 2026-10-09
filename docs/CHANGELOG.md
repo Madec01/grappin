@@ -2,6 +2,14 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.2.1] — 2026-10-09 — Vitesse plus facile à prendre
+
+Retour du propriétaire sur la 0.2.0 : difficile de prendre de la vitesse.
+
+### Modifié
+
+- Treuil plus franc : 3,5 m/s de raccourcissement et 60 % de conservation du moment cinétique, au lieu de 2,5 m/s et 50 %. Mesure des robots : un bon joueur atteint 8 m/s en 2,4 s au lieu de 6,4 s, un débutant monte 62 m en vingt secondes au lieu de 32, dix parties sur dix encore vivantes, aucun repli du générateur. L'ancien réglage se retrouve avec `?reelSpeed=2.5&reelSpin=0.5`.
+
 ## [0.2.0] — 2026-10-09 — Génération vérifiée et difficulté
 
 ### Ajouté
