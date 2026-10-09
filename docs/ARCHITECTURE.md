@@ -1,6 +1,6 @@
 # Architecture technique — GRAPPIN
 
-Dernière mise à jour : 9 octobre 2026, version 0.2.0. Ce document décrit ce qui existe, pas ce qui est prévu. La feuille de route tient le reste.
+Dernière mise à jour : 9 octobre 2026, version 0.3.0. Ce document décrit ce qui existe, pas ce qui est prévu. La feuille de route tient le reste.
 
 ## Principes
 
@@ -28,6 +28,11 @@ src/
   sim/robot.ts          Robots joueurs raisonnable et débutant, pour mesurer un réglage
   sim/simulation.ts     Pas fixe, ordre des règles, journal, clone, rejeu
   data/tiers.ts         Noms des paliers de hauteur
+  meta/levels.ts        Expérience et niveaux de grimpeur
+  meta/talismans.ts     Catalogue des talismans et leur effet sur les réglages
+  meta/missions.ts      Catalogue des missions, avancement et remplacement
+  meta/runTracker.ts    Relevé d'une partie pour les missions, depuis les événements
+  meta/profile.ts       Profil sauvegardé, relecture tolérante, fin de partie, équipement
   input/pointer.ts      Un seul pointeur : appui et relâché
   render/camera.ts      Mètres vers pixels, suivi, avance, dézoom selon la vitesse
   render/cues.ts        Repères purs lus de l'état : ombre prédictive, usure de l'accroche fragile tenue
@@ -78,6 +83,10 @@ Le lâcher ne touche pas à la vitesse : le personnage part avec celle du moment
 - **Paliers.** Quand la hauteur maximale franchit un multiple de `tierHeight`, un événement porte le nom du palier.
 - **Sol.** Le toit de départ est en y = 0 : sans corde, le personnage s'y pose.
 - **Brume.** Monte à `fogBaseSpeed`, plus `fogSpeedGain` tous les `fogStepHeight` mètres, plafonnée. Le personnage passe dessous : partie terminée, la corde lâche.
+
+## Progression
+
+`src/meta` est un modèle pur, sans rendu ni navigateur. `levels.ts` : le niveau L demande `120 × L × (L − 1) / 2` points au total. `talismans.ts` : chaque talisman est une fonction des réglages vers des réglages, appliquée par `applyTalismans` dans l'ordre du catalogue ; ils ne font que faciliter, et la partie entière, vérificateur compris, joue avec les réglages qui en résultent. Deux talismans passent par la simulation : `startKickSpeed` donne son élan à la toute première accroche de la partie, `secondChances` fait renvoyer le personnage vers le haut par la brume au lieu de le prendre, avec un événement `rescue`. `missions.ts` : dix-huit missions ordonnées, trois actives, `settleMissions` applique le relevé d'une partie, remplit les missions de comptage par accumulation et celles de record par maximum, et remplace les accomplies. `runTracker.ts` relève depuis les événements de règles ce dont les missions ont besoin ; l'événement de lâcher porte pour cela la durée de tenue, le genre du point et le caractère forcé d'une casse. `profile.ts` tient le profil en données versionnées, l'écrit sur un stockage injecté, `localStorage` dans le navigateur et une mémoire dans les tests, et relit avec tolérance : toute donnée douteuse ramène au profil neuf. `endRun` fait le bilan d'une partie : expérience, missions, records, niveau et déblocages.
 
 ## Visée
 

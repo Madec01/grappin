@@ -15,7 +15,7 @@ import { DEFAULT_TUNING } from '../src/sim/tuning';
 
 const HERO = { x: 195, y: 500 };
 const tier = (n: number, name: string): RuleEvent => ({ type: 'tier', tier: n, name });
-const perfect = (combo: number): RuleEvent => ({ type: 'release', perfect: true, combo });
+const perfect = (combo: number): RuleEvent => ({ type: 'release', perfect: true, combo, held: 1, kind: 'normal', forced: false });
 
 describe('formatDecimal', () => {
   it('écrit à la française, sans zéros inutiles, deux décimales au plus', () => {
@@ -46,7 +46,7 @@ describe('texte d\'un événement', () => {
   });
 
   it('ne dit rien d\'un lâcher raté, ni des événements sans texte', () => {
-    expect(floatingTextFor({ type: 'release', perfect: false, combo: 0 }, DEFAULT_TUNING)).toBeNull();
+    expect(floatingTextFor({ type: 'release', perfect: false, combo: 0, held: 1, kind: 'normal', forced: false }, DEFAULT_TUNING)).toBeNull();
     expect(floatingTextFor({ type: 'attach', anchorId: 1 }, DEFAULT_TUNING)).toBeNull();
     expect(floatingTextFor({ type: 'kick' }, DEFAULT_TUNING)).toBeNull();
     expect(floatingTextFor(tier(1, 'Les gouttières'), DEFAULT_TUNING)).toBeNull();
@@ -133,7 +133,7 @@ describe('textes flottants', () => {
 
   it('ne naissent que des événements qui en ont un', () => {
     const effects = new Effects(DEFAULT_TUNING);
-    for (const event of [{ type: 'kick' }, { type: 'attach', anchorId: 1 }, { type: 'release', perfect: false, combo: 0 }] as const) {
+    for (const event of [{ type: 'kick' }, { type: 'attach', anchorId: 1 }, { type: 'release', perfect: false, combo: 0, held: 1, kind: 'normal', forced: false }] as const) {
       effects.handle(event, HERO);
     }
     expect(effects.texts).toHaveLength(0);

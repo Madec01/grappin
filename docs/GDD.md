@@ -1,6 +1,6 @@
 # GRAPPIN, document de conception
 
-Version 0.2, 9 octobre 2026. Le propriétaire du projet est le seul valideur du game design, du lore et de la direction artistique. Les points marqués [VALIDÉ] ont été tranchés par lui le 9 octobre 2026. Le Lead Game Architect a les pleins pouvoirs sur le code et l'architecture.
+Version 0.3, 9 octobre 2026. Le propriétaire du projet est le seul valideur du game design, du lore et de la direction artistique. Les points marqués [VALIDÉ] ont été tranchés par lui le 9 octobre 2026. Le Lead Game Architect a les pleins pouvoirs sur le code et l'architecture.
 
 ## 1. Vision [VALIDÉ]
 
@@ -39,7 +39,7 @@ Le héros, son nom, et le détail du décor restent à proposer au propriétaire
 - Les balancements doivent être courts et nerveux : le vol ne doit jamais devenir une attente.
 - **Jamais immobile.** Si l'élan est trop faible à l'accroche, ou si le personnage pend immobile sous le point plus d'une demi-seconde, une petite impulsion automatique et invisible le pousse vers l'accroche suivante. Le joueur ne peut pas rester pendu, et la brume qui monte s'occupe du reste.
 - **Le treuil [VALIDÉ le 9 octobre 2026 sur le prototype 0.1].** Constat du Lead au premier prototype : un pendule pur conserve son énergie, le personnage ne monte jamais plus haut que son élan de départ, et un robot joueur plafonne à sept mètres avant de mourir dans la brume. Il faut une source d'énergie. Proposition : tant que le doigt reste posé, le grappin tire comme un treuil, la corde raccourcit à vitesse constante jusqu'à une longueur minimale, et le balancement s'accélère comme un patineur qui ramène les bras. Tenir plus longtemps rapproche du point et donne de la vitesse ; lâcher au bon moment transforme cette vitesse en vol. Le réglage est débrayable (`reelSpeed=0` redonne le pendule pur). Mesure du robot raisonnable sur cinq graines : deux mètres par seconde de montée, accroches tenues six dixièmes de seconde.
-- **Le pompage [PROPOSÉ LE 9 OCTOBRE 2026, À VALIDER].** Une fois la corde au plus court, le treuil n'apporte plus rien et un joueur qui tient trop longtemps finit avec un balancement mou. Dans l'esprit de « jamais immobile » : accroché et sans élan, le personnage se relance le long du cercle dans le sens où il va, jusqu'à une vitesse plancher de 4,5 m/s au point bas, bien sous ce qu'un lâcher donne. Un robot débutant, maladroit et lent à réagir, survit désormais plus de dix secondes sur vingt graines sur vingt. Débrayable (`swingAssistAccel=0`).
+- **Le pompage [VALIDÉ le 9 octobre 2026].** Une fois la corde au plus court, le treuil n'apporte plus rien et un joueur qui tient trop longtemps finit avec un balancement mou. Dans l'esprit de « jamais immobile » : accroché et sans élan, le personnage se relance le long du cercle dans le sens où il va, jusqu'à une vitesse plancher de 4,5 m/s au point bas, bien sous ce qu'un lâcher donne. Un robot débutant, maladroit et lent à réagir, survit désormais plus de dix secondes sur vingt graines sur vingt. Débrayable (`swingAssistAccel=0`).
 
 ## 5. Cœur du jeu : l'élan [VALIDÉ]
 
@@ -69,13 +69,34 @@ Le héros, son nom, et le détail du décor restent à proposer au propriétaire
 - Difficulté croissante, une nouvelle contrainte à la fois, par paliers de 50 m : palier 0, points normaux espacés de 3 m ; palier 1, un obstacle par segment et la fourche haute-basse ; palier 2, accroches fragiles ; palier 3, un propulseur par segment ; ensuite l'espacement grandit jusqu'à 5 m et jusqu'à trois obstacles par segment.
 - Les premiers obstacles enseignent par la pratique comment le lâcher influence la trajectoire.
 - **Fourche.** À une fourche, la route basse est proche et sûre, la route haute plus lointaine, avec une étoile qui rapporte, puis les deux se rejoignent. Le joueur choisit par le moment du lâcher et par le moment du tap : le point visé change au fil du vol.
-- Paliers de hauteur nommés pour donner un sentiment d'étape. Noms proposés pour la ville de nuit, à valider : Les toits, Les gouttières, Les enseignes, Les clochers, Les antennes, Les grues, Les nuages.
+- Paliers de hauteur nommés pour donner un sentiment d'étape. Noms pour la ville de nuit, validés le 9 octobre 2026 : Les toits, Les gouttières, Les enseignes, Les clochers, Les antennes, Les grues, Les nuages.
 - **Garantie du vérificateur.** Avant d'afficher un segment, un robot joue chaque point avec la vraie physique, en supposant le pire élan d'arrivée, et exige qu'il existe toujours un instant de lâcher qui mène plus haut sans toucher d'obstacle ; pour une fourche, chaque branche doit être atteignable avec un élan ordinaire. Un segment refusé est régénéré ; un segment de repli serré, vérifié lui aussi, prend la place après six refus. Mesure : zéro repli sur quarante graines à tous les paliers, six millisecondes par segment.
 
 ## 9. Modes [VALIDÉ]
 
 - **Course infinie**, mode principal.
 - **Traversées**, des niveaux avec une arrivée, construits par le même générateur avec une graine fixe et une longueur donnée. Livrées après la course infinie.
+
+## 9 bis. Progression [VALIDÉ le 9 octobre 2026]
+
+Retour du propriétaire sur la 0.2.0 : « difficile de prendre de la vitesse, on pourrait ajouter une progression par niveaux qui donne accès à des bonus ». Analyse du Lead : bonne idée à condition qu'elle ne serve jamais à réparer la sensation de base, corrigée d'abord par le treuil plus franc de la 0.2.1. Placée avant l'habillage, à la demande du propriétaire.
+
+- **Indice de départ.** Sur l'écran titre, tant que le joueur n'a pas atteint 30 m : « Garde le doigt posé pour prendre de l'élan, relâche en montant ».
+- **Missions.** Trois missions actives, affichées sur l'écran titre avec leur avancement, réglées à la fin de chaque partie. Elles enseignent la technique : tenir la corde une seconde, enchaîner des lâchers parfaits, frôler, ramasser, monter, survivre, lâcher une fragile avant qu'elle casse, lâcher depuis un propulseur. Les missions de comptage s'accumulent d'une partie à l'autre, celles de record gardent le meilleur d'une partie. Une mission remplie rapporte de l'expérience et laisse place à la suivante du catalogue, du facile au difficile.
+- **Niveaux de grimpeur.** L'expérience est la somme des scores de toutes les parties et des récompenses de missions. Le niveau 2 demande 120 points, le 3 en demande 360, le 4 en demande 720 : les premiers tombent vite, les suivants se méritent. L'écran de fin annonce l'expérience gagnée, les missions accomplies, le niveau atteint et ce qu'il débloque.
+- **Talismans.** Des bonus débloqués par niveau et équipés avant la partie, un emplacement d'abord, deux à partir du niveau 4. Ils ne font que faciliter, jamais autre chose, et le robot vérificateur joue avec les réglages de la partie, talismans compris, donc sa garantie tient.
+
+| Talisman | Niveau | Effet |
+|---|---|---|
+| Treuil renforcé | 1 | Le grappin tire 15 % plus vite |
+| Corde longue | 2 | Un mètre de portée en plus |
+| Élan de départ | 3 | La première accroche part à 6 m/s |
+| Seconde chance | 4 | Une fois par partie, la brume renvoie vers le haut au lieu de prendre |
+| Aimant à étoiles | 5 | Rayon de ramassage multiplié par 2,5 |
+| Frôleur | 6 | Frôlés doublés, comptés 20 cm plus loin |
+
+- **Ce que cela implique pour le score.** Un score obtenu avec un talisman ne se compare pas tout à fait à un score sans. Accepté pour un jeu solo.
+- **Plus tard.** Les niveaux débloqueront les traversées une à une.
 
 ## 10. Caméra [VALIDÉ]
 

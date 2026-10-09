@@ -75,7 +75,7 @@ describe('lâcher parfait et combo', () => {
     sim.state.hero.vel = { x: 5, y: 5 };
     sim.release();
     expect(sim.state.combo).toBe(1);
-    expect(sim.drain().at(-1)).toEqual({ type: 'release', perfect: true, combo: 1 });
+    expect(sim.drain().at(-1)).toMatchObject({ type: 'release', perfect: true, combo: 1, forced: false });
     sim.step();
     sim.state.rope = { anchorId: sim.state.anchors[0]!.id, length: 3 };
     sim.state.hero.vel = { x: 5, y: -5 };

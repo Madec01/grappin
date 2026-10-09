@@ -19,6 +19,8 @@ export function createState(seed: number, tuning: Tuning): SimState {
     hero: { pos: { x: 0, y: tuning.heroRadius }, vel: { x: 0, y: 0 }, grounded: true },
     rope: null,
     attachStep: 0,
+    attachCount: 0,
+    chancesLeft: tuning.secondChances,
     anchors: [],
     obstacles: [],
     pickups: [],

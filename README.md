@@ -2,7 +2,7 @@
 
 Jeu d'arcade de mouvement en portrait, sur téléphone. Le personnage monte en se balançant de point d'accroche en point d'accroche avec un grappin. Toute la maîtrise tient dans un seul geste : sentir le bon instant de lâcher pour conserver son élan.
 
-Version 0.2 : prototype en formes grises. Un seul geste, une brume qui monte, un parcours engendré par segments et vérifié par un robot avant d'être affiché, des fourches entre une route basse sûre et une route haute étoilée, des obstacles à frôler, des accroches fragiles et propulseuses, des paliers nommés, le score et le combo de lâchers parfaits. Aucun habillage, aucun son : ils viennent après que la sensation est validée.
+Version 0.3 : prototype en formes grises avec progression : missions, niveaux de grimpeur et talismans. Un seul geste, une brume qui monte, un parcours engendré par segments et vérifié par un robot avant d'être affiché, des fourches entre une route basse sûre et une route haute étoilée, des obstacles à frôler, des accroches fragiles et propulseuses, des paliers nommés, le score et le combo de lâchers parfaits. Aucun habillage, aucun son : ils viennent après que la sensation est validée.
 
 **Jouer : [madec01.github.io/grappin](https://madec01.github.io/grappin/)**, une fois GitHub Pages réglé sur la source « GitHub Actions » dans les réglages du dépôt (Settings, Pages, Build and deployment, Source : GitHub Actions).
 
@@ -15,6 +15,7 @@ Version 0.2 : prototype en formes grises. Un seul geste, une brume qui monte, un
 5. La brume monte. Passer dessous termine la partie, toucher un obstacle aussi ; touchez pour rejouer. Frôler un obstacle sans le toucher rapporte un bonus.
 6. À partir de 50 m, les chemins se séparent parfois : la route basse est sûre, la route haute porte une étoile. Le grappin ne traverse pas les obstacles : un point caché n'est pas visable.
 7. Une accroche en pointillés casse après une seconde ; une accroche à chevron propulse le lâcher.
+8. Chaque partie rapporte de l'expérience, les missions aussi. Les niveaux débloquent des talismans, à équiper depuis le bouton « Talismans » avant de partir.
 
 Le jeu se joue aussi à la souris, avec le même geste : clic maintenu, puis relâché.
 

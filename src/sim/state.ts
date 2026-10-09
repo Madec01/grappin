@@ -55,7 +55,16 @@ export type Status = 'alive' | 'dead';
 /** Événements de règles émis pendant un pas, consommés par le rendu et le son. */
 export type RuleEvent =
   | { readonly type: 'attach'; readonly anchorId: number }
-  | { readonly type: 'release'; readonly perfect: boolean; readonly combo: number }
+  | {
+      readonly type: 'release';
+      readonly perfect: boolean;
+      readonly combo: number;
+      /** Durée de la tenue, en secondes, et genre du point lâché ; `forced` si la casse a lâché le personnage. */
+      readonly held: number;
+      readonly kind: AnchorKind;
+      readonly forced: boolean;
+    }
+  | { readonly type: 'rescue'; readonly chancesLeft: number }
   | { readonly type: 'kick' }
   | { readonly type: 'boost' }
   | { readonly type: 'break'; readonly anchorId: number }
@@ -71,6 +80,10 @@ export interface SimState {
   rope: Rope | null;
   /** Pas de la dernière accroche, pour la casse des accroches fragiles. */
   attachStep: number;
+  /** Nombre d'accroches depuis le début de la partie : la première reçoit l'élan de départ. */
+  attachCount: number;
+  /** Secondes chances restantes contre la brume, talisman « Seconde chance ». */
+  chancesLeft: number;
   anchors: Anchor[];
   obstacles: Obstacle[];
   pickups: Pickup[];

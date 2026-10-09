@@ -35,6 +35,11 @@ export interface Tuning {
   readonly kickSpeed: number;
   /** Durée pendue sous `minSwingSpeed` qui déclenche une nouvelle impulsion. */
   readonly hangSeconds: number;
+  /** Vitesse donnée à la toute première accroche de la partie si l'élan est moindre (talisman « Élan de départ »). */
+  readonly startKickSpeed: number;
+  /** Secondes chances contre la brume par partie, et vitesse du rebond qui en résulte (talisman « Seconde chance »). */
+  readonly secondChances: number;
+  readonly rescueSpeed: number;
   /** Pompage : accroché sous cette vitesse, le personnage accélère le long du cercle de `swingAssistAccel` m/s². 0 désactive. */
   readonly swingAssistSpeed: number;
   readonly swingAssistAccel: number;
@@ -96,6 +101,9 @@ export const DEFAULT_TUNING: Tuning = {
   minSwingSpeed: 2,
   kickSpeed: 3,
   hangSeconds: 0.5,
+  startKickSpeed: 3,
+  secondChances: 0,
+  rescueSpeed: 12,
   swingAssistSpeed: 4.5,
   swingAssistAccel: 4,
   aimLookaheadSeconds: 0.35,

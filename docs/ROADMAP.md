@@ -57,7 +57,20 @@ Tests : dix mille graines générées sans un seul passage impossible ; un robot
 
 Critère de sortie : une partie de trois minutes ne contient aucun passage impossible ni aucune mort injuste, constaté par le propriétaire.
 
-## Phase 3 — Habillage ville de nuit — v0.3
+## Phase 3 — Progression — v0.3 — en cours
+
+Décision du propriétaire du 9 octobre 2026 : missions et niveaux à talismans, avant l'habillage. Conception en section 9 bis du GDD.
+
+- Profil sauvegardé sur l'appareil : expérience, niveau, records, talismans équipés, missions.
+- Indice de départ, trois missions qui enseignent, catalogue du facile au difficile.
+- Six talismans débloqués par niveau, un puis deux emplacements, équipés depuis un écran dédié.
+- Écrans titre, fin et talismans ; expérience gagnée et déblocages annoncés en fin de partie.
+
+Tests : niveaux, talismans, missions, profil et sa relecture tolérante, suiveur de partie, écrans et boutons, fumée de bout en bout avec sauvegarde entre deux chargements.
+
+Critère de sortie : le propriétaire rejoue pour une mission ou un talisman, et la technique s'apprend sans explication orale.
+
+## Phase 4 — Habillage ville de nuit — v0.4
 
 - Silhouettes et lueurs : toits, lampadaires, enseignes, cloches, fenêtres, brume lumineuse.
 - Accroches réactives au passage. Traînée, étirement, sifflement du vent, éclat et son du lâcher parfait.
@@ -66,21 +79,21 @@ Critère de sortie : une partie de trois minutes ne contient aucun passage impos
 
 Critère de sortie : la première minute est amusante sur un vrai téléphone, constatée par au moins une personne qui n'a pas travaillé sur le jeu. La validation technique ne vaut pas preuve de plaisir.
 
-## Phase 4 — Mouvement et contraintes finales — v0.4
+## Phase 5 — Mouvement et contraintes finales — v0.5
 
 - Accroches mobiles et rotatives, obstacles mobiles, vérificateur étendu à leur cycle.
 - Vent et dérive, toujours signalés, en dernière contrainte.
 
 Critère de sortie : chaque contrainte passe le vérificateur et ne dégrade pas la lisibilité.
 
-## Phase 5 — Traversées et confort — v0.5
+## Phase 6 — Traversées et confort — v0.6
 
-- Traversées : niveaux à arrivée, construits par le générateur avec graine fixe et longueur donnée, sélection de niveau.
+- Traversées : niveaux à arrivée, construits par le générateur avec graine fixe et longueur donnée, débloqués par les niveaux de grimpeur.
 - Mode facile avec ombre prédictive longue, ligne de record, statistiques de fin de partie.
 
 Critère de sortie : une traversée se termine, se rejoue à l'identique et se classe.
 
-## Phase 6 — Polish et publication — v1.0
+## Phase 7 — Polish et publication — v1.0
 
 - Équilibrage piloté par le robot joueur, accessibilité, performance sur téléphones modestes, crédits complets.
 - Publication sur GitHub Pages, page d'évaluation pour recueillir les retours.

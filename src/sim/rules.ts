@@ -77,7 +77,10 @@ export function tryAttach(state: SimState, tuning: Tuning, events: RuleEvent[]):
   state.attachStep = state.step;
   state.grazed = [];
   events.push({ type: 'attach', anchorId: anchor.id });
-  kickIfSlow(state, tuning, events);
+  // La première accroche de la partie peut recevoir un élan de départ plus généreux.
+  const first = state.attachCount === 0 && tuning.startKickSpeed > tuning.kickSpeed;
+  kickIfSlow(state, first ? { ...tuning, kickSpeed: tuning.startKickSpeed, minSwingSpeed: tuning.startKickSpeed } : tuning, events);
+  state.attachCount += 1;
   return true;
 }
 
@@ -138,11 +141,13 @@ export function releaseVelocity(state: SwingContext, tuning: Tuning): Vec2 {
   return clampLength(scale(state.hero.vel, tuning.boostFactor), tuning.maxSpeed);
 }
 
-/** Libère le personnage avec la vitesse du moment. Renvoie vrai si une corde a été lâchée. */
-export function release(state: SimState, tuning: Tuning, events: RuleEvent[]): boolean {
+/** Libère le personnage avec la vitesse du moment. Renvoie vrai si une corde a été lâchée. `forced` : la casse a lâché le personnage. */
+export function release(state: SimState, tuning: Tuning, events: RuleEvent[], forced = false): boolean {
   // Lever le doigt annule un appui encore en mémoire.
   state.pressStep = -1;
   if (!state.rope) return false;
+  const kind = findAnchor(state, state.rope.anchorId)?.kind ?? 'normal';
+  const held = (state.step - state.attachStep) * tuning.stepSeconds;
   const boosted = releaseVelocity(state, tuning);
   if (boosted !== state.hero.vel) {
     state.hero.vel = boosted;
@@ -154,7 +159,7 @@ export function release(state: SimState, tuning: Tuning, events: RuleEvent[]): b
   state.releaseStep = state.step;
   state.rope = null;
   state.hangSteps = 0;
-  events.push({ type: 'release', perfect, combo: state.combo });
+  events.push({ type: 'release', perfect, combo: state.combo, held, kind, forced });
   return true;
 }
 
@@ -166,7 +171,7 @@ export function applyFragile(state: SimState, tuning: Tuning, events: RuleEvent[
   if ((state.step - state.attachStep) * tuning.stepSeconds < tuning.fragileSeconds) return;
   anchor.broken = true;
   events.push({ type: 'break', anchorId: anchor.id });
-  release(state, tuning, events);
+  release(state, tuning, events, true);
 }
 
 /** Obstacles fixes : les toucher tue, les frôler rapporte une fois par obstacle et par corde. */
@@ -256,12 +261,23 @@ export function fogSpeed(height: number, tuning: Tuning): number {
   return Math.min(tuning.fogMaxSpeed, tuning.fogBaseSpeed + tuning.fogSpeedGain * steps);
 }
 
-/** La brume monte ; passer dessous est la mort. */
+/**
+ * La brume monte ; passer dessous est la mort, sauf seconde chance : le
+ * personnage est alors renvoyé vers le haut depuis la ligne de brume, corde lâchée.
+ */
 export function applyFog(state: SimState, tuning: Tuning, events: RuleEvent[]): void {
   state.fogY += fogSpeed(state.height, tuning) * tuning.stepSeconds;
-  if (state.status === 'alive' && state.hero.pos.y < state.fogY) {
-    state.status = 'dead';
+  if (state.status !== 'alive' || state.hero.pos.y >= state.fogY) return;
+  if (state.chancesLeft > 0) {
+    state.chancesLeft -= 1;
     state.rope = null;
-    events.push({ type: 'death', height: state.height, cause: 'fog' });
+    state.hero.pos = { x: state.hero.pos.x, y: state.fogY + tuning.heroRadius };
+    state.hero.vel = { x: state.hero.vel.x * 0.5, y: tuning.rescueSpeed };
+    state.hero.grounded = false;
+    events.push({ type: 'rescue', chancesLeft: state.chancesLeft });
+    return;
   }
+  state.status = 'dead';
+  state.rope = null;
+  events.push({ type: 'death', height: state.height, cause: 'fog' });
 }
