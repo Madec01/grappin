@@ -1,0 +1,21 @@
+# Système
+.DS_Store
+Thumbs.db
+
+# Dépendances et builds
+node_modules/
+dist/
+.vite/
+
+# Tests et rapports
+coverage/
+playwright-report/
+test-results/
+
+# Environnement local
+.env
+.env.*
+!.env.example
+
+# Captures d'écran et vidéos de livraison
+captures/

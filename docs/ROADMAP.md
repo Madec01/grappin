@@ -8,7 +8,7 @@ Dernière mise à jour : 9 octobre 2026. Versionnage sémantique, versions 0.x p
 - Physique maison : un pendule est une seule règle, écrite et maîtrisée par nous, sans moteur du commerce.
 - La physique d'abord, le contenu ensuite. Rien n'est habillé avant que le balancement soit agréable sur un vrai téléphone.
 - Course infinie d'abord, traversées à arrivée ensuite, sur le même générateur.
-- Stack : TypeScript strict, Vite, PixiJS 8 en rendu pur, moteur ECS maison, Web Audio, Vitest, Playwright, PWA, déploiement GitHub Pages.
+- Stack : TypeScript strict, Vite, PixiJS 8 en rendu pur, simulation maison en données simples et clonables, Web Audio, Vitest, Playwright, PWA, déploiement GitHub Pages. Un moteur à entités et composants serait disproportionné pour un seul personnage et des points fixes.
 - Assets uniquement libres de droits, licences vérifiées et créditées. La direction silhouettes et lueurs est dessinée en code autant que possible.
 
 ## Phase 0 — Cadrage — terminée le 9 octobre 2026

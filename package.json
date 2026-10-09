@@ -1,0 +1,45 @@
+{
+  "name": "grappin",
+  "version": "0.1.0",
+  "description": "GRAPPIN, jeu d'arcade de mouvement où l'on monte au grappin",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Madec01/grappin.git"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --host",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "check": "npm run lint && npm run typecheck && npm run test",
+    "captures": "tsx scripts/capture.ts",
+    "robot": "tsx scripts/robot.ts"
+  },
+  "dependencies": {
+    "pixi.js": "8.22.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.64.0",
+    "@types/node": "26.6.4",
+    "@types/pngjs": "6.0.5",
+    "eslint": "10.12.0",
+    "gifenc": "1.0.3",
+    "pngjs": "7.0.0",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.1",
+    "vite": "8.3.3",
+    "vitest": "5.0.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

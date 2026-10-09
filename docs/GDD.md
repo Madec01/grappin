@@ -37,7 +37,8 @@ Le héros, son nom, et le détail du décor restent à proposer au propriétaire
 - Douce mais crédible, gravité légèrement réduite pour le plaisir.
 - C'est le cœur du jeu, réglé et testé avant tout contenu.
 - Les balancements doivent être courts et nerveux : le vol ne doit jamais devenir une attente.
-- **Jamais immobile.** Si l'élan est trop faible à l'accroche, une petite impulsion automatique et invisible pousse le personnage vers l'accroche suivante. Le joueur ne peut pas rester pendu, et la brume qui monte s'occupe du reste.
+- **Jamais immobile.** Si l'élan est trop faible à l'accroche, ou si le personnage pend immobile sous le point plus d'une demi-seconde, une petite impulsion automatique et invisible le pousse vers l'accroche suivante. Le joueur ne peut pas rester pendu, et la brume qui monte s'occupe du reste.
+- **Le treuil [PROPOSÉ LE 9 OCTOBRE 2026, À VALIDER].** Constat du Lead au premier prototype : un pendule pur conserve son énergie, le personnage ne monte jamais plus haut que son élan de départ, et un robot joueur plafonne à sept mètres avant de mourir dans la brume. Il faut une source d'énergie. Proposition : tant que le doigt reste posé, le grappin tire comme un treuil, la corde raccourcit à vitesse constante jusqu'à une longueur minimale, et le balancement s'accélère comme un patineur qui ramène les bras. Tenir plus longtemps rapproche du point et donne de la vitesse ; lâcher au bon moment transforme cette vitesse en vol. Le réglage est débrayable (`reelSpeed=0` redonne le pendule pur). Mesure du robot raisonnable sur cinq graines : deux mètres par seconde de montée, accroches tenues six dixièmes de seconde.
 
 ## 5. Cœur du jeu : l'élan [VALIDÉ]
 
@@ -108,7 +109,8 @@ Valeurs de départ pour le prototype, à régler à la main sur téléphone. Ell
 |---|---|
 | Gravité | 7,5 m/s², soit environ trois quarts de la gravité réelle |
 | Pas de simulation | 1/120 s |
-| Longueur de corde | distance au moment du tap, bornée entre 1,5 et 6 m |
+| Longueur de corde | distance au moment du tap, bornée par la portée, puis raccourcie par le treuil jusqu'à 1,5 m |
+| Treuil | 2,5 m/s de raccourcissement, moitié de la conservation du moment cinétique |
 | Vitesse maximale | 24 m/s |
 | Portée du grappin | 7 m |
 | Élan minimal à l'accroche, sinon impulsion | 2 m/s tangentiels, impulsion à 3 m/s |
