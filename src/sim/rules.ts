@@ -1,4 +1,6 @@
-import { distance, dot, length, normalize, perpendicular, scale, sub, add } from '../core/math/vec2';
+import { add, clampLength, distance, dot, length, normalize, perpendicular, scale, sub } from '../core/math/vec2';
+import { tierName } from '../data/tiers';
+import { circleBoxGap } from './geometry';
 import { constrainVelocity } from './physics';
 import type { Anchor, RuleEvent, SimState } from './state';
 import type { Tuning } from './tuning';
@@ -11,16 +13,19 @@ import type { Tuning } from './tuning';
  * événements dans `events`. Elles ne lisent ni horloge ni aléatoire.
  */
 
-function findAnchor(state: SimState, id: number): Anchor | undefined {
+/** Ce dont le balancement a besoin : partagé avec le vérificateur, qui n'a pas d'état complet. */
+export type SwingContext = Pick<SimState, 'hero' | 'rope' | 'anchors'>;
+
+function findAnchor(state: SwingContext, id: number): Anchor | undefined {
   return state.anchors.find((a) => a.id === id);
 }
 
-/** Point le plus proche au-dessus d'un point donné, vers lequel orienter l'impulsion. */
-function nextAnchorAbove(state: SimState, from: Anchor): Anchor | null {
+/** Point intact le plus proche au-dessus d'un point donné, vers lequel orienter l'impulsion. */
+function nextAnchorAbove(state: SwingContext, from: Anchor): Anchor | null {
   let best: Anchor | null = null;
   let bestDist = Infinity;
   for (const a of state.anchors) {
-    if (a.id === from.id || a.pos.y <= from.pos.y) continue;
+    if (a.id === from.id || a.broken || a.pos.y <= from.pos.y) continue;
     const d = distance(a.pos, from.pos);
     if (d < bestDist) {
       best = a;
@@ -35,7 +40,7 @@ function nextAnchorAbove(state: SimState, from: Anchor): Anchor | null {
  * faible, elle est portée à `kickSpeed` dans la direction du prochain point.
  * Renvoie vrai si une impulsion a été donnée.
  */
-export function kickIfSlow(state: SimState, tuning: Tuning, events: RuleEvent[]): boolean {
+export function kickIfSlow(state: SwingContext, tuning: Tuning, events: RuleEvent[]): boolean {
   if (!state.rope) return false;
   const anchor = findAnchor(state, state.rope.anchorId);
   if (!anchor) return false;
@@ -59,7 +64,7 @@ export function tryAttach(state: SimState, tuning: Tuning, events: RuleEvent[]):
   const coyoteSteps = Math.round(tuning.coyoteSeconds / tuning.stepSeconds);
   if (state.step - state.targetValidStep > coyoteSteps) return false;
   const anchor = findAnchor(state, state.targetId);
-  if (!anchor) return false;
+  if (!anchor || anchor.broken) return false;
   const reach = tuning.ropeMax * tuning.coyoteReach;
   const d = distance(anchor.pos, state.hero.pos);
   if (d > reach) return false;
@@ -69,6 +74,8 @@ export function tryAttach(state: SimState, tuning: Tuning, events: RuleEvent[]):
   state.hero.vel = constrainVelocity(state.hero.pos, state.hero.vel, anchor.pos, ropeLength);
   state.hangSteps = 0;
   state.pressStep = -1;
+  state.attachStep = state.step;
+  state.grazed = [];
   events.push({ type: 'attach', anchorId: anchor.id });
   kickIfSlow(state, tuning, events);
   return true;
@@ -124,6 +131,12 @@ export function release(state: SimState, tuning: Tuning, events: RuleEvent[]): b
   // Lever le doigt annule un appui encore en mémoire.
   state.pressStep = -1;
   if (!state.rope) return false;
+  const anchor = findAnchor(state, state.rope.anchorId);
+  if (anchor?.kind === 'booster') {
+    // Propulseur : la direction ne change pas, la vitesse gagne un tiers, sous le plafond.
+    state.hero.vel = clampLength(scale(state.hero.vel, tuning.boostFactor), tuning.maxSpeed);
+    events.push({ type: 'boost' });
+  }
   const perfect = isPerfectRelease(state.hero.vel.x, state.hero.vel.y, tuning);
   state.combo = perfect ? state.combo + 1 : 0;
   state.lastAnchorId = state.rope.anchorId;
@@ -132,6 +145,54 @@ export function release(state: SimState, tuning: Tuning, events: RuleEvent[]): b
   state.hangSteps = 0;
   events.push({ type: 'release', perfect, combo: state.combo });
   return true;
+}
+
+/** Accroche fragile tenue trop longtemps : elle casse et lâche le personnage avec sa vitesse. */
+export function applyFragile(state: SimState, tuning: Tuning, events: RuleEvent[]): void {
+  if (!state.rope) return;
+  const anchor = findAnchor(state, state.rope.anchorId);
+  if (!anchor || anchor.kind !== 'fragile') return;
+  if ((state.step - state.attachStep) * tuning.stepSeconds < tuning.fragileSeconds) return;
+  anchor.broken = true;
+  events.push({ type: 'break', anchorId: anchor.id });
+  release(state, tuning, events);
+}
+
+/** Obstacles fixes : les toucher tue, les frôler rapporte une fois par obstacle et par corde. */
+export function applyObstacles(state: SimState, tuning: Tuning, events: RuleEvent[]): void {
+  if (state.status !== 'alive') return;
+  for (const box of state.obstacles) {
+    const gap = circleBoxGap(state.hero.pos, tuning.heroRadius, box);
+    if (gap <= 0) {
+      state.status = 'dead';
+      state.rope = null;
+      events.push({ type: 'death', height: state.height, cause: 'obstacle' });
+      return;
+    }
+    if (gap <= tuning.grazeDistance && !state.grazed.includes(box.id)) {
+      state.grazed.push(box.id);
+      state.score += tuning.grazeScore * multiplier(state.combo, tuning);
+      events.push({ type: 'graze', obstacleId: box.id });
+    }
+  }
+}
+
+/** Étoiles de la route haute : ramassées au contact. */
+export function applyPickups(state: SimState, tuning: Tuning, events: RuleEvent[]): void {
+  for (const pickup of state.pickups) {
+    if (pickup.taken || distance(pickup.pos, state.hero.pos) > tuning.heroRadius + tuning.pickupRadius) continue;
+    pickup.taken = true;
+    state.score += tuning.pickupScore * multiplier(state.combo, tuning);
+    events.push({ type: 'pickup', pickupId: pickup.id });
+  }
+}
+
+/** Paliers nommés : un événement quand la hauteur maximale franchit un nouveau palier. */
+export function applyTier(state: SimState, tuning: Tuning, events: RuleEvent[]): void {
+  const tier = Math.floor(state.height / tuning.tierHeight);
+  if (tier <= state.tier) return;
+  state.tier = tier;
+  events.push({ type: 'tier', tier, name: tierName(tier) });
 }
 
 /** Le toit de départ, en y = 0 : le personnage s'y pose s'il n'est pas accroché. */
@@ -190,6 +251,6 @@ export function applyFog(state: SimState, tuning: Tuning, events: RuleEvent[]): 
   if (state.status === 'alive' && state.hero.pos.y < state.fogY) {
     state.status = 'dead';
     state.rope = null;
-    events.push({ type: 'death', height: state.height });
+    events.push({ type: 'death', height: state.height, cause: 'fog' });
   }
 }

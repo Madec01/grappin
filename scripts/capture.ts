@@ -20,7 +20,8 @@ const { GIFEncoder, applyPalette, quantize } = gifenc;
  * pour en extraire les images du GIF ; sans lui, seules les captures sont faites.
  */
 
-/** Le GIF : durée, cadence et largeur, pour rester léger sur un téléphone. */
+/** Le GIF : début, durée, cadence et largeur, pour rester léger sur un téléphone. */
+const GIF_START_SECONDS = 18;
 const GIF_SECONDS = 14;
 const GIF_FPS = 12;
 const GIF_WIDTH = 300;
@@ -55,17 +56,18 @@ function startPreview(): ChildProcess {
  * jamais plus de deux secondes et demie pendu. Il passe par la même API que
  * les tests de fumée, jusqu'à la mort ou la fin du temps imparti.
  */
-async function autoplay(page: Page, seconds: number): Promise<void> {
+async function autoplay(page: Page, seconds: number, untilHeight = Infinity): Promise<void> {
   // Le pilote est passé en texte : tsx réécrit les fonctions avec un helper `__name` qui n'existe pas dans la page.
   const script = `new Promise((done) => {
     const api = window.__grappin;
     const limitMs = ${seconds * 1000};
+    const untilHeight = ${Number.isFinite(untilHeight) ? untilHeight : 'Infinity'};
     const start = performance.now();
     let holdSince = 0;
     const tick = () => {
       const s = api.state();
       const now = performance.now();
-      if (s.screen === 'dead' || now - start > limitMs) { done(); return; }
+      if (s.screen === 'dead' || now - start > limitMs || s.height >= untilHeight) { done(); return; }
       if (!s.attached && s.targetId !== null) {
         api.press();
         holdSince = now;
@@ -94,7 +96,7 @@ function encodeGif(ffmpeg: string, webm: string, gif: string): void {
   mkdirSync(framesDir, { recursive: true });
   const result = spawnSync(
     ffmpeg,
-    ['-y', '-loglevel', 'error', '-t', String(GIF_SECONDS), '-i', webm, '-r', String(GIF_FPS), '-vf', `scale=${GIF_WIDTH}:-2`, join(framesDir, '%04d.png')],
+    ['-y', '-loglevel', 'error', '-ss', String(GIF_START_SECONDS), '-t', String(GIF_SECONDS), '-i', webm, '-r', String(GIF_FPS), '-vf', `scale=${GIF_WIDTH}:-2`, join(framesDir, '%04d.png')],
     { encoding: 'utf8' },
   );
   if (result.status !== 0) {
@@ -157,9 +159,14 @@ async function main(): Promise<void> {
     await page.waitForTimeout(250);
     await page.screenshot({ path: join(outDir, '03-vol-libre.png') });
 
-    await autoplay(page, 6);
+    // Le pilote monte ; on capture la chaîne, puis le premier palier avec ses obstacles et sa fourche,
+    // puis les accroches fragiles, tant qu'il survit : il ne sait pas éviter les obstacles.
+    await autoplay(page, 30, 22);
     await page.screenshot({ path: join(outDir, '04-chaine.png') });
-    await autoplay(page, 20);
+    await autoplay(page, 60, 58);
+    await page.screenshot({ path: join(outDir, '05-obstacles-et-fourche.png') });
+    await autoplay(page, 60, 112);
+    await page.screenshot({ path: join(outDir, '06-fragiles.png') });
     const final = await page.evaluate(() => window.__grappin!.state());
     console.log(`Partie du robot : ${final.height.toFixed(1)} m, score ${Math.round(final.score)}, écran ${final.screen}`);
 
@@ -172,7 +179,7 @@ async function main(): Promise<void> {
     await ending.evaluate(() => window.__grappin!.release());
     await ending.waitForFunction(() => window.__grappin?.state().screen === 'dead', undefined, { timeout: 20_000 });
     await ending.waitForTimeout(200);
-    await ending.screenshot({ path: join(outDir, '05-fin.png') });
+    await ending.screenshot({ path: join(outDir, '07-fin.png') });
     if (errors.length > 0) console.warn('Erreurs console :', errors);
 
     const videoPath = await page.video()?.path();

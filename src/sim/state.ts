@@ -9,12 +9,31 @@ import type { CourseState } from './course';
  * vérificateur de parcours possibles.
  */
 
-export type AnchorKind = 'normal';
+/** Normal ; fragile, casse après une seconde de tenue ; propulseur, booste le lâcher. */
+export type AnchorKind = 'normal' | 'fragile' | 'booster';
 
 export interface Anchor {
   readonly id: number;
   readonly pos: Vec2;
   readonly kind: AnchorKind;
+  /** Vrai une fois cassée : ni visée, ni dessinée. */
+  broken: boolean;
+}
+
+/** Obstacle fixe : boîte alignée sur les axes, en mètres, Y vers le haut. Le toucher tue, le frôler rapporte. */
+export interface Obstacle {
+  readonly id: number;
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+}
+
+/** Étoile de la route haute : ramassée au passage. */
+export interface Pickup {
+  readonly id: number;
+  readonly pos: Vec2;
+  taken: boolean;
 }
 
 export interface Rope {
@@ -38,14 +57,27 @@ export type RuleEvent =
   | { readonly type: 'attach'; readonly anchorId: number }
   | { readonly type: 'release'; readonly perfect: boolean; readonly combo: number }
   | { readonly type: 'kick' }
-  | { readonly type: 'death'; readonly height: number };
+  | { readonly type: 'boost' }
+  | { readonly type: 'break'; readonly anchorId: number }
+  | { readonly type: 'graze'; readonly obstacleId: number }
+  | { readonly type: 'pickup'; readonly pickupId: number }
+  | { readonly type: 'tier'; readonly tier: number; readonly name: string }
+  | { readonly type: 'death'; readonly height: number; readonly cause: 'fog' | 'obstacle' };
 
 export interface SimState {
   /** Numéro du pas courant. */
   step: number;
   hero: Hero;
   rope: Rope | null;
+  /** Pas de la dernière accroche, pour la casse des accroches fragiles. */
+  attachStep: number;
   anchors: Anchor[];
+  obstacles: Obstacle[];
+  pickups: Pickup[];
+  /** Obstacles déjà frôlés depuis la dernière accroche : un bonus par obstacle et par corde. */
+  grazed: number[];
+  /** Palier nommé atteint. */
+  tier: number;
   /** Point visé, surligné avant le tap, ou null si aucun point n'est à portée. */
   targetId: number | null;
   /** Dernier pas où le point visé était réellement à portée, pour le coyote time. */

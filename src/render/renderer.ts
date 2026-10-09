@@ -1,8 +1,12 @@
 import { Application, Container, Graphics, Text } from 'pixi.js';
+import type { Vec2 } from '../core/math/vec2';
 import { multiplier } from '../sim/rules';
-import type { SimState } from '../sim/state';
+import type { AnchorKind, RuleEvent, SimState } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
 import type { Camera } from './camera';
+import { fragileGauge, shadowPoints } from './cues';
+import { bannerAlpha, floatAlpha, floatRise, type Effects } from './effects';
+import { formatDecimal } from './format';
 
 /**
  * Rendu PixiJS du prototype gris : formes et textes, aucun asset.
@@ -10,29 +14,51 @@ import type { Camera } from './camera';
  * Le rendu lit l'état de la simulation et la caméra, il ne décide rien. Toutes
  * les formes sont redessinées à chaque image à partir de coordonnées d'écran
  * déjà calculées par la caméra ; leur nombre reste de l'ordre de la
- * cinquantaine, ce qui ne coûte presque rien.
+ * cinquantaine, ce qui ne coûte presque rien. Règle de lisibilité : rien de ce
+ * qui est dessiné ici ne masque jamais une accroche ni un danger.
  */
 
 /** Écran du jeu à habiller : le rendu ne sait que l'afficher, c'est le jeu qui le choisit. */
 export type GameScreen = 'title' | 'playing' | 'dead';
+
+/** Ce qui a tué le personnage. */
+export type DeathCause = Extract<RuleEvent, { type: 'death' }>['cause'];
+
+/** Ce que le jeu ajoute à l'état de la simulation pour un dessin : l'écran à montrer, la cause de la mort et les effets de temps réel. */
+export interface GameFrame {
+  readonly screen: GameScreen;
+  readonly deathCause: DeathCause | null;
+  readonly effects: Effects;
+}
 
 const COLOR = {
   background: '#0b0f1e',
   altitudeLine: 0x1c2542,
   altitudeLabel: 0x6f7a96,
   roof: 0x58627a,
+  obstacle: 0x3a4360,
+  obstacleEdge: 0x8a94a6,
   anchor: 0x8a94a6,
+  anchorFragile: 0xc9d1e3,
+  crack: 0x0b0f1e,
+  kindMark: 0xc9d1e3,
+  wear: 0xf4f6fb,
   target: 0xe8eefc,
   rope: 0xc9d1e3,
+  shadow: 0xc9d1e3,
+  star: 0xf4f6fb,
   fog: 0x5b6b9a,
   fogEdge: 0xa9b8e6,
   hero: 0xf4f6fb,
   text: 0xf4f6fb,
   textDim: 0xb4bdd2,
+  textOutline: 0x0b0f1e,
   shade: 0x0b0f1e,
 } as const;
 
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+
+const TAU = Math.PI * 2;
 
 /** Géométrie du monde, en mètres. */
 const ALTITUDE_STEP = 10;
@@ -45,6 +71,40 @@ const ROOF_THICKNESS = 0.4;
 const ROPE_WIDTH = 2;
 const TARGET_RING_WIDTH = 3;
 const FOG_EDGE_WIDTH = 2;
+const OBSTACLE_EDGE_WIDTH = 3;
+const KIND_MARK_WIDTH = 1.5;
+const WEAR_RING_WIDTH = 3;
+const CHEVRON_WIDTH = 2;
+
+/**
+ * Marques des accroches spéciales, en pixels CSS. L'anneau de marque entoure
+ * le disque de quatre pixels : il reste donc toujours plus petit que l'anneau
+ * de visée, même très dézoomé.
+ */
+const KIND_RING_GAP = 4;
+/** Accroche fragile : anneau en huit tirets, chacun couvrant cette part de son huitième. */
+const DASH_COUNT = 8;
+const DASH_FILL = 0.55;
+/** Accroche fragile : trait de fissure en éclair, en fractions du rayon du disque autour de son centre. */
+const CRACK: readonly (readonly [number, number])[] = [
+  [-0.55, -0.8],
+  [0.1, -0.25],
+  [-0.15, 0.2],
+  [0.5, 0.8],
+];
+/** Propulseur : deux chevrons empilés au-dessus de l'anneau. Demi-largeur d'un chevron en mètres, au moins en pixels. */
+const CHEVRON_HALF_WIDTH = 0.22;
+const CHEVRON_MIN_HALF_WIDTH = 4;
+const CHEVRON_COUNT = 2;
+const CHEVRON_GAP = 2;
+
+/** Étoile à quatre branches : rayon d'une pointe au moins en pixels, creux à cette part du rayon. */
+const STAR_MIN_RADIUS = 5;
+const STAR_PINCH = 0.28;
+
+/** Ombre prédictive : rayon d'un point en pixels, opacité. */
+const SHADOW_DOT_RADIUS = 1.8;
+const SHADOW_ALPHA = 0.5;
 
 /** Mise en page de l'interface, en pixels CSS. */
 const HUD_SIDE_MARGIN = 16;
@@ -52,17 +112,34 @@ const HUD_MIN_TOP = 24;
 const HUD_SAFE_GAP = 16;
 const HEIGHT_FONT_SIZE = 44;
 const OVERLAY_GAP = 18;
+/** La bannière de palier, centrée, sous l'interface : distance sous le haut de l'interface. */
+const BANNER_OFFSET = 100;
+const FLOAT_FONT_SIZE = 20;
+const BANNER_FONT_SIZE = 26;
+const OUTLINE_WIDTH = 4;
 
-function makeText(text: string, size: number, color: number, weight: 'normal' | 'bold' = 'normal'): Text {
+const DEATH_MESSAGES: Record<DeathCause, string> = {
+  fog: "La brume t'a rattrapé",
+  obstacle: "Un obstacle t'a arrêté",
+};
+
+function makeText(text: string, size: number, color: number, weight: 'normal' | 'bold' = 'normal', outlined = false): Text {
   return new Text({
     text,
-    style: { fontFamily: FONT, fontSize: size, fontWeight: weight, fill: color, align: 'center' },
+    style: {
+      fontFamily: FONT,
+      fontSize: size,
+      fontWeight: weight,
+      fill: color,
+      align: 'center',
+      // Les textes qui flottent sur le décor gardent un contour sombre : lisibles sur toutes les formes.
+      ...(outlined ? { stroke: { color: COLOR.textOutline, width: OUTLINE_WIDTH, join: 'round' as const } } : {}),
+    },
   });
 }
 
-/** Nombre à la française : virgule décimale, deux décimales au plus, sans zéros inutiles. */
-function formatDecimal(value: number): string {
-  return String(Number(value.toFixed(2))).replace('.', ',');
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 /** Hauteur de l'encoche en pixels CSS, exposée par index.html dans `--safe-top`. */
@@ -90,19 +167,25 @@ export class Renderer {
   // Couches, du fond vers l'avant. L'ordre d'ajout à la scène dans le constructeur fait foi.
   private readonly altitudeLines = new Graphics();
   private readonly altitudeLabelLayer = new Container();
+  private readonly obstacles = new Graphics();
+  private readonly pickups = new Graphics();
   private readonly roof = new Graphics();
   private readonly anchors = new Graphics();
   private readonly targetRing = new Graphics();
   private readonly rope = new Graphics();
   private readonly fog = new Graphics();
+  private readonly shadow = new Graphics();
   private readonly hero = new Graphics();
+  private readonly floatLayer = new Container();
 
   private readonly altitudeLabels: Text[] = [];
+  private readonly floatLabels: Text[] = [];
 
   private readonly hud = new Container();
   private readonly heightText = makeText('', HEIGHT_FONT_SIZE, COLOR.text, 'bold');
   private readonly multiplierText = makeText('', 30, COLOR.text, 'bold');
   private readonly scoreText = makeText('', 20, COLOR.textDim);
+  private readonly bannerText = makeText('', BANNER_FONT_SIZE, COLOR.text, 'bold', true);
 
   private readonly shade = new Graphics();
   private readonly titleScreen = new Container();
@@ -112,9 +195,11 @@ export class Renderer {
   ];
   private readonly deadScreen = new Container();
   private readonly deadHeadline = makeText('', 38, COLOR.text, 'bold');
+  private readonly deadCause = makeText('', 22, COLOR.textDim);
   private readonly deadScore = makeText('', 26, COLOR.text);
   private readonly deadLines = [
     this.deadHeadline,
+    this.deadCause,
     this.deadScore,
     makeText('Toucher pour rejouer', 24, COLOR.textDim),
   ];
@@ -131,18 +216,24 @@ export class Renderer {
     this.multiplierText.anchor.set(1, 0);
     this.heightText.anchor.set(0, 0);
     this.scoreText.anchor.set(0, 0);
+    this.bannerText.anchor.set(0.5, 0);
     this.titleScreen.addChild(...this.titleLines);
     this.deadScreen.addChild(...this.deadLines);
     app.stage.addChild(
       this.altitudeLines,
       this.altitudeLabelLayer,
+      this.obstacles,
+      this.pickups,
       this.roof,
       this.anchors,
       this.targetRing,
       this.rope,
       this.fog,
+      this.shadow,
       this.hero,
+      this.floatLayer,
       this.hud,
+      this.bannerText,
       this.shade,
       this.titleScreen,
       this.deadScreen,
@@ -184,21 +275,23 @@ export class Renderer {
     this.app.ticker.add((ticker) => callback(ticker.elapsedMS / 1000));
   }
 
-  /**
-   * Met la scène à jour pour l'état donné ; PixiJS la rend juste après.
-   * `ropeDrawn` est la part du trait du grappin déjà dessinée, de 0 à 1.
-   */
-  draw(state: SimState, camera: Camera, screen: GameScreen, ropeDrawn = 1): void {
+  /** Met la scène à jour pour l'état donné ; PixiJS la rend juste après. */
+  draw(state: SimState, camera: Camera, frame: GameFrame): void {
     if (this.width !== this.laidOutWidth || this.height !== this.laidOutHeight) this.layout();
     this.drawAltitude(camera);
+    this.drawObstacles(state, camera);
+    this.drawPickups(state, camera);
     this.drawRoof(camera);
     this.drawAnchors(state, camera);
     this.drawTargetRing(state, camera);
-    this.drawRope(state, camera, ropeDrawn);
+    this.drawRope(state, camera, frame.effects.ropeDrawn);
     this.drawFog(state, camera);
+    this.drawShadow(state, camera);
     this.drawHero(state, camera);
-    this.drawHud(state, screen);
-    this.drawOverlay(state, screen);
+    this.drawFloatingTexts(frame.effects);
+    this.drawHud(state, frame.screen);
+    this.drawBanner(frame.effects);
+    this.drawOverlay(state, frame);
   }
 
   /** Positions qui ne dépendent que de la taille de l'écran. */
@@ -211,6 +304,7 @@ export class Renderer {
     this.heightText.position.set(HUD_SIDE_MARGIN, top);
     this.multiplierText.position.set(width - HUD_SIDE_MARGIN, top + 8);
     this.scoreText.position.set(HUD_SIDE_MARGIN, top + HEIGHT_FONT_SIZE * 1.2);
+    this.bannerText.position.set(width / 2, top + BANNER_OFFSET);
 
     this.shade.clear().rect(0, 0, width, height).fill({ color: COLOR.shade, alpha: 0.62 });
     stackCentered(this.titleLines, width, height);
@@ -248,6 +342,33 @@ export class Renderer {
     return label;
   }
 
+  /** Obstacles : dalles gris moyen au liseré clair sur le dessus, sous les points et la corde. */
+  private drawObstacles(state: SimState, camera: Camera): void {
+    const g = this.obstacles.clear();
+    const scale = camera.scale;
+    const boxes = state.obstacles.map((box) => {
+      const topLeft = camera.worldToScreen({ x: box.x0, y: box.y1 });
+      return { x: topLeft.x, y: topLeft.y, width: (box.x1 - box.x0) * scale, height: (box.y1 - box.y0) * scale };
+    });
+    for (const box of boxes) g.rect(box.x, box.y, box.width, box.height);
+    g.fill(COLOR.obstacle);
+    for (const box of boxes) g.rect(box.x, box.y, box.width, Math.min(OBSTACLE_EDGE_WIDTH, box.height));
+    g.fill(COLOR.obstacleEdge);
+  }
+
+  /** Étoiles de la route haute : losange concave à quatre branches, absent une fois pris. */
+  private drawPickups(state: SimState, camera: Camera): void {
+    const g = this.pickups.clear();
+    const outer = Math.max(this.tuning.pickupRadius * camera.scale, STAR_MIN_RADIUS);
+    const inner = outer * STAR_PINCH;
+    for (const pickup of state.pickups) {
+      if (pickup.taken) continue;
+      const { x, y } = camera.worldToScreen(pickup.pos);
+      g.poly([x, y - outer, x + inner, y - inner, x + outer, y, x + inner, y + inner, x, y + outer, x - inner, y + inner, x - outer, y, x - inner, y - inner]);
+    }
+    g.fill(COLOR.star);
+  }
+
   /** Le toit de départ : dessus en y = 0, de -5 à +5 m. */
   private drawRoof(camera: Camera): void {
     const topLeft = camera.worldToScreen({ x: -ROOF_HALF_WIDTH, y: 0 });
@@ -258,14 +379,63 @@ export class Renderer {
       .fill(COLOR.roof);
   }
 
+  /**
+   * Les points d'accroche. Normal : disque gris. Fragile : disque clair, anneau
+   * en tirets et fissure, avec un anneau qui se vide pendant la tenue.
+   * Propulseur : disque gris dans un anneau plein surmonté de chevrons. Un point
+   * cassé n'est plus dessiné du tout.
+   */
   private drawAnchors(state: SimState, camera: Camera): void {
     const radius = ANCHOR_RADIUS * camera.scale;
+    const ring = radius + KIND_RING_GAP;
     const g = this.anchors.clear();
-    for (const anchor of state.anchors) {
-      const p = camera.worldToScreen(anchor.pos);
-      g.circle(p.x, p.y, radius);
-    }
+    const positions = (kind: AnchorKind): Vec2[] =>
+      state.anchors.filter((anchor) => anchor.kind === kind && !anchor.broken).map((anchor) => camera.worldToScreen(anchor.pos));
+    const fragile = positions('fragile');
+    const boosters = positions('booster');
+
+    for (const p of [...positions('normal'), ...boosters]) g.circle(p.x, p.y, radius);
     g.fill(COLOR.anchor);
+    for (const p of fragile) g.circle(p.x, p.y, radius);
+    g.fill(COLOR.anchorFragile);
+
+    for (const p of fragile) {
+      for (let dash = 0; dash < DASH_COUNT; dash += 1) {
+        const start = (dash / DASH_COUNT) * TAU;
+        const end = start + (DASH_FILL / DASH_COUNT) * TAU;
+        g.moveTo(p.x + ring * Math.cos(start), p.y + ring * Math.sin(start)).lineTo(p.x + ring * Math.cos(end), p.y + ring * Math.sin(end));
+      }
+    }
+    g.stroke({ width: KIND_MARK_WIDTH, color: COLOR.kindMark });
+    for (const p of fragile) {
+      CRACK.forEach(([dx, dy], i) => {
+        if (i === 0) g.moveTo(p.x + dx * radius, p.y + dy * radius);
+        else g.lineTo(p.x + dx * radius, p.y + dy * radius);
+      });
+    }
+    g.stroke({ width: Math.max(1, radius * 0.14), color: COLOR.crack });
+
+    const halfWidth = Math.max(CHEVRON_MIN_HALF_WIDTH, CHEVRON_HALF_WIDTH * camera.scale);
+    const rise = halfWidth * 0.75;
+    for (const p of boosters) {
+      g.circle(p.x, p.y, ring);
+      for (let k = 0; k < CHEVRON_COUNT; k += 1) {
+        const base = p.y - ring - CHEVRON_GAP - k * (rise + CHEVRON_GAP);
+        g.moveTo(p.x - halfWidth, base).lineTo(p.x, base - rise).lineTo(p.x + halfWidth, base);
+      }
+    }
+    g.stroke({ width: CHEVRON_WIDTH, color: COLOR.kindMark, cap: 'round', join: 'round' });
+
+    const gauge = fragileGauge(state, this.tuning);
+    if (gauge) {
+      const remaining = 1 - gauge.wear;
+      const p = camera.worldToScreen(gauge.pos);
+      if (remaining > 0) {
+        g.moveTo(p.x, p.y - ring)
+          .arc(p.x, p.y, ring, -Math.PI / 2, -Math.PI / 2 + remaining * TAU)
+          .stroke({ width: WEAR_RING_WIDTH, color: COLOR.wear });
+      }
+    }
   }
 
   /** Anneau autour du point visé : toujours plus large que le point, même très dézoomé. */
@@ -301,9 +471,55 @@ export class Renderer {
     if (top >= 0) g.moveTo(0, top).lineTo(this.width, top).stroke({ width: FOG_EDGE_WIDTH, color: COLOR.fogEdge });
   }
 
+  /** Ombre prédictive : quelques points discrets qui montrent où irait le personnage s'il lâchait maintenant. */
+  private drawShadow(state: SimState, camera: Camera): void {
+    const g = this.shadow.clear();
+    for (const point of shadowPoints(state, this.tuning)) {
+      const p = camera.worldToScreen(point);
+      g.circle(p.x, p.y, SHADOW_DOT_RADIUS);
+    }
+    g.fill({ color: COLOR.shadow, alpha: SHADOW_ALPHA });
+  }
+
   private drawHero(state: SimState, camera: Camera): void {
     const p = camera.worldToScreen(state.hero.pos);
     this.hero.clear().circle(p.x, p.y, this.tuning.heroRadius * camera.scale).fill(COLOR.hero);
+  }
+
+  /** Textes flottants près du personnage : ils montent un peu et s'effacent. Jamais coupés par le bord de l'écran. */
+  private drawFloatingTexts(effects: Effects): void {
+    const { texts } = effects;
+    for (let slot = 0; slot < Math.max(this.floatLabels.length, texts.length); slot += 1) {
+      const item = texts[slot];
+      const label = this.floatLabel(slot);
+      label.visible = item !== undefined;
+      if (!item) continue;
+      label.text = item.text;
+      label.alpha = floatAlpha(item.age);
+      const half = label.width / 2 + HUD_SIDE_MARGIN / 2;
+      label.position.set(clamp(item.x, half, this.width - half), item.y - floatRise(item.age));
+    }
+  }
+
+  /** Texte flottant numéro `slot` du réservoir ; il grandit seulement si plus d'effets sont à l'écran en même temps. */
+  private floatLabel(slot: number): Text {
+    let label = this.floatLabels[slot];
+    if (!label) {
+      label = makeText('', FLOAT_FONT_SIZE, COLOR.text, 'bold', true);
+      label.anchor.set(0.5, 1);
+      this.floatLabels[slot] = label;
+      this.floatLayer.addChild(label);
+    }
+    return label;
+  }
+
+  /** Bannière de palier : nom et hauteur, au centre-haut, qui apparaît puis s'efface. */
+  private drawBanner(effects: Effects): void {
+    const { banner } = effects;
+    this.bannerText.visible = banner !== null;
+    if (!banner) return;
+    this.bannerText.text = banner.text;
+    this.bannerText.alpha = bannerAlpha(banner.age);
   }
 
   /** Hauteur en grand à gauche, multiplicateur à droite, score dessous ; absents sur l'écran titre. */
@@ -316,17 +532,19 @@ export class Renderer {
   }
 
   /** Voile et texte centré de l'écran titre ou de l'écran de fin ; rien en cours de partie. */
-  private drawOverlay(state: SimState, screen: GameScreen): void {
-    this.shade.visible = screen !== 'playing';
-    this.titleScreen.visible = screen === 'title';
-    this.deadScreen.visible = screen === 'dead';
-    if (screen !== 'dead') return;
+  private drawOverlay(state: SimState, frame: GameFrame): void {
+    this.shade.visible = frame.screen !== 'playing';
+    this.titleScreen.visible = frame.screen === 'title';
+    this.deadScreen.visible = frame.screen === 'dead';
+    if (frame.screen !== 'dead') return;
 
     const headline = `Perdu à ${Math.floor(state.height)} m`;
+    const cause = frame.deathCause ? DEATH_MESSAGES[frame.deathCause] : '';
     const score = `Score ${Math.floor(state.score).toLocaleString('fr-FR')}`;
     // L'état est figé après la mort : on ne remet en page que si le texte a changé.
-    if (this.deadHeadline.text === headline && this.deadScore.text === score) return;
+    if (this.deadHeadline.text === headline && this.deadCause.text === cause && this.deadScore.text === score) return;
     this.deadHeadline.text = headline;
+    this.deadCause.text = cause;
     this.deadScore.text = score;
     stackCentered(this.deadLines, this.width, this.height);
   }

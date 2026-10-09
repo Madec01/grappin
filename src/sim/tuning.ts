@@ -35,6 +35,9 @@ export interface Tuning {
   readonly kickSpeed: number;
   /** Durée pendue sous `minSwingSpeed` qui déclenche une nouvelle impulsion. */
   readonly hangSeconds: number;
+  /** Pompage : accroché sous cette vitesse, le personnage accélère le long du cercle de `swingAssistAccel` m/s². 0 désactive. */
+  readonly swingAssistSpeed: number;
+  readonly swingAssistAccel: number;
   /** Horizon de la prédiction utilisée pour viser le point sur la trajectoire, en secondes. */
   readonly aimLookaheadSeconds: number;
   /** Un nouveau point remplace le point visé seulement si son score est sous ce ratio du score courant. */
@@ -49,6 +52,27 @@ export interface Tuning {
   /** Multiplicateur = 1 + comboStep × combo, plafonné. */
   readonly comboStep: number;
   readonly comboMaxMultiplier: number;
+  /** Accroche fragile : elle casse après ce temps de tenue, en secondes. */
+  readonly fragileSeconds: number;
+  /** Accroche propulseuse : la vitesse au lâcher est multipliée par ce facteur. */
+  readonly boostFactor: number;
+  /** Frôlé : distance maximale entre le bord du personnage et un obstacle pour compter le bonus. */
+  readonly grazeDistance: number;
+  /** Points d'un frôlé et d'une étoile, multipliés par le multiplicateur courant. */
+  readonly grazeScore: number;
+  readonly pickupScore: number;
+  /** Rayon de ramassage d'une étoile. */
+  readonly pickupRadius: number;
+  /** Ombre prédictive : durée de vol montrée au lâcher, en secondes. */
+  readonly shadowSeconds: number;
+  /** Hauteur d'un palier nommé, en mètres. */
+  readonly tierHeight: number;
+  /** Marge de génération du parcours au-dessus du personnage, en mètres. */
+  readonly courseAhead: number;
+  /** Vérificateur : tenue maximale simulée, durée de vol examinée, part de la portée exigée pour compter une accroche. */
+  readonly verifyHoldSeconds: number;
+  readonly verifyFlightSeconds: number;
+  readonly verifyCatchRatio: number;
   /** Brume : vitesse de départ, gain tous les `fogStepHeight` mètres, plafond, niveau initial. */
   readonly fogBaseSpeed: number;
   readonly fogSpeedGain: number;
@@ -72,6 +96,8 @@ export const DEFAULT_TUNING: Tuning = {
   minSwingSpeed: 2,
   kickSpeed: 3,
   hangSeconds: 0.5,
+  swingAssistSpeed: 4.5,
+  swingAssistAccel: 4,
   aimLookaheadSeconds: 0.35,
   aimHysteresis: 0.7,
   aimHeightBias: 0.25,
@@ -80,6 +106,18 @@ export const DEFAULT_TUNING: Tuning = {
   perfectMinSpeed: 3,
   comboStep: 0.25,
   comboMaxMultiplier: 5,
+  fragileSeconds: 1,
+  boostFactor: 1.35,
+  grazeDistance: 0.5,
+  grazeScore: 5,
+  pickupScore: 10,
+  pickupRadius: 0.35,
+  shadowSeconds: 0.25,
+  tierHeight: 50,
+  courseAhead: 40,
+  verifyHoldSeconds: 2.5,
+  verifyFlightSeconds: 1.5,
+  verifyCatchRatio: 0.8,
   fogBaseSpeed: 0.8,
   fogSpeedGain: 0.1,
   fogStepHeight: 50,

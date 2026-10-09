@@ -2,6 +2,17 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.2.0] — 2026-10-09 — Génération vérifiée et difficulté
+
+### Ajouté
+
+- Générateur de parcours par segments : chaîne de points, fourche entre une route basse sûre et une route haute étoilée qui se rejoignent, corniches et dalles flottantes, accroches fragiles et propulseuses, selon un profil par palier de 50 m qui ajoute une contrainte à la fois.
+- Robot vérificateur : chaque point d'un segment est joué avec la vraie physique au pire élan d'arrivée ; sans instant de lâcher qui mène plus haut, le segment est régénéré, puis remplacé par un segment de repli vérifié. Aucun segment n'est accepté sans preuve.
+- Obstacles fixes : les toucher termine la partie, les frôler rapporte « Frôlé » ; ligne de vue du grappin, qui ne traverse pas un obstacle. Étoiles de la route haute. Paliers nommés. Accroches fragiles qui cassent après une seconde, propulseurs qui boostent le lâcher.
+- Pompage : accroché et sans élan, le personnage se relance jusqu'à une vitesse plancher, pour qu'un balancement ne soit jamais mou. Proposé au propriétaire, à valider.
+- Robots joueurs en module : profils raisonnable et débutant, test qui exige qu'un débutant survive plus de dix secondes.
+- Ombre prédictive courte au lâcher, textes flottants, bannière de palier, cause de la défaite.
+
 ## [0.1.0] — 2026-10-09 — Socle technique et prototype gris
 
 ### Ajouté

@@ -169,8 +169,8 @@ describe('treuil en partie', () => {
     expect(sim.state.rope!.length).toBe(T.ropeMin);
   });
 
-  it('sans treuil, le pendule conserve son énergie', () => {
-    const sim = new Simulation(1, withTuning(T, { reelSpeed: 0 }));
+  it('sans treuil ni pompage, le pendule conserve son énergie', () => {
+    const sim = new Simulation(1, withTuning(T, { reelSpeed: 0, swingAssistAccel: 0 }));
     sim.press();
     const energy = (): number => {
       const { pos, vel } = sim.state.hero;
@@ -185,7 +185,7 @@ describe('treuil en partie', () => {
 describe('mémoire d\'appui', () => {
   it('un tap sans point visé reste en mémoire et accroche dès qu\'un point arrive à portée', () => {
     const sim = new Simulation(1);
-    sim.state.anchors = [{ id: 50, pos: { x: 0, y: 0.3 + T.ropeMax + 0.4 }, kind: 'normal' }];
+    sim.state.anchors = [{ id: 50, pos: { x: 0, y: 0.3 + T.ropeMax + 0.4 }, kind: 'normal', broken: false }];
     sim.state.targetId = null;
     sim.state.hero = { pos: { x: 0, y: 0.3 }, vel: { x: 0, y: 6 }, grounded: false };
     expect(sim.press()).toBe(false);
@@ -199,7 +199,7 @@ describe('mémoire d\'appui', () => {
 
   it('un tap trop vieux est oublié, et lever le doigt annule la mémoire', () => {
     const sim = new Simulation(1);
-    sim.state.anchors = [{ id: 50, pos: { x: 0, y: 0.3 + T.ropeMax + 2 }, kind: 'normal' }];
+    sim.state.anchors = [{ id: 50, pos: { x: 0, y: 0.3 + T.ropeMax + 2 }, kind: 'normal', broken: false }];
     sim.state.targetId = null;
     sim.state.hero = { pos: { x: 0, y: 0.3 }, vel: { x: 0, y: 6 }, grounded: false };
     sim.press();

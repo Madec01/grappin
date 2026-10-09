@@ -1,7 +1,7 @@
 import { chooseTarget } from './aim';
 import { createCourse, extendCourse, pruneCourse } from './course';
-import { integrate, reelIn } from './physics';
-import { applyBufferedPress, applyFog, applyGround, applyHang, applyScore, press, release } from './rules';
+import { integrate, swingStep } from './physics';
+import { applyBufferedPress, applyFog, applyFragile, applyGround, applyHang, applyObstacles, applyPickups, applyScore, applyTier, press, release } from './rules';
 import type { RuleEvent, SimState } from './state';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 
@@ -13,17 +13,17 @@ import { DEFAULT_TUNING, type Tuning } from './tuning';
  * rejeu des mêmes gestes sur la même graine donne exactement le même état.
  */
 
-/** Marge de génération au-dessus du personnage, en mètres. */
-const COURSE_AHEAD = 24;
-/** Les points passés sous la brume de plus de cette distance sont retirés. */
-const COURSE_BEHIND = 10;
-
 export function createState(seed: number, tuning: Tuning): SimState {
   const state: SimState = {
     step: 0,
     hero: { pos: { x: 0, y: tuning.heroRadius }, vel: { x: 0, y: 0 }, grounded: true },
     rope: null,
+    attachStep: 0,
     anchors: [],
+    obstacles: [],
+    pickups: [],
+    grazed: [],
+    tier: 0,
     targetId: null,
     targetValidStep: 0,
     pressStep: -1,
@@ -39,7 +39,7 @@ export function createState(seed: number, tuning: Tuning): SimState {
     status: 'alive',
     inputs: [],
   };
-  extendCourse(state, COURSE_AHEAD);
+  extendCourse(state, tuning.courseAhead, tuning);
   const aim = chooseTarget(state, tuning);
   state.targetId = aim.targetId;
   state.targetValidStep = aim.targetValidStep;
@@ -70,27 +70,35 @@ export class Simulation {
     return ok;
   }
 
-  /** Avance d'un pas. Ordre fixe : treuil, mouvement, sol, pendaison, score, brume, parcours, visée, appui en mémoire. */
+  /**
+   * Avance d'un pas. Ordre fixe : casse fragile, treuil et mouvement, sol,
+   * obstacles, étoiles, pendaison, score, palier, brume, parcours, visée, appui en mémoire.
+   */
   step(): void {
     const s = this.state;
     if (s.status !== 'alive') return;
+    applyFragile(s, this.tuning, this.events);
     const anchor = s.rope ? (s.anchors.find((a) => a.id === s.rope!.anchorId)?.pos ?? null) : null;
     if (s.rope && anchor) {
-      const shorter = Math.max(this.tuning.ropeMin, s.rope.length - this.tuning.reelSpeed * this.tuning.stepSeconds);
-      const pulled = reelIn(s.hero, anchor, s.rope.length, shorter, this.tuning.reelSpin, this.tuning.stepSeconds);
-      s.hero.vel = pulled.vel;
-      s.rope.length = shorter;
+      const swung = swingStep(s.hero, anchor, s.rope.length, this.tuning);
+      s.hero.pos = swung.body.pos;
+      s.hero.vel = swung.body.vel;
+      s.rope.length = swung.ropeLength;
+    } else {
+      const moved = integrate(s.hero, null, 0, this.tuning);
+      s.hero.pos = moved.pos;
+      s.hero.vel = moved.vel;
     }
-    const moved = integrate(s.hero, anchor, s.rope?.length ?? 0, this.tuning);
-    s.hero.pos = moved.pos;
-    s.hero.vel = moved.vel;
     s.step += 1;
     applyGround(s, this.tuning);
+    applyObstacles(s, this.tuning, this.events);
+    applyPickups(s, this.tuning, this.events);
     applyHang(s, this.tuning, this.events);
     applyScore(s, this.tuning);
+    applyTier(s, this.tuning, this.events);
     applyFog(s, this.tuning, this.events);
-    extendCourse(s, s.hero.pos.y + COURSE_AHEAD);
-    pruneCourse(s, s.fogY - COURSE_BEHIND);
+    extendCourse(s, s.hero.pos.y + this.tuning.courseAhead, this.tuning);
+    pruneCourse(s, s.fogY);
     const aim = s.rope ? { targetId: null, targetValidStep: s.step } : chooseTarget(s, this.tuning);
     s.targetId = aim.targetId;
     s.targetValidStep = aim.targetValidStep;

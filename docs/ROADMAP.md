@@ -15,9 +15,9 @@ Dernière mise à jour : 9 octobre 2026. Versionnage sémantique, versions 0.x p
 
 - Dépôt créé et relié. Concept analysé par le Lead et le sous-agent Game Designer, huit décisions tranchées par le propriétaire, GDD rédigé.
 
-## Phase 1 — Socle technique et prototype gris — v0.1
+## Phase 1 — Socle technique et prototype gris — v0.1 — terminée le 9 octobre 2026
 
-Objectif : régler le pendule avec le propriétaire, sur son téléphone, avant tout contenu.
+Résultat : prototype gris en ligne, 55 tests unitaires et 4 tests de fumée verts, treuil validé par le propriétaire sur son téléphone (« c'est cool »). Objectif atteint : régler le pendule avec le propriétaire avant tout contenu.
 
 **Livrables**
 
@@ -42,7 +42,9 @@ Objectif : régler le pendule avec le propriétaire, sur son téléphone, avant 
 
 Le balancement est agréable sur le téléphone du propriétaire, le lâcher conserve visiblement l'élan, le jeu tient 60 images par seconde, et le propriétaire valide le réglage du pendule.
 
-## Phase 2 — Génération vérifiée et difficulté — v0.2
+## Phase 2 — Génération vérifiée et difficulté — v0.2 — livrée le 9 octobre 2026
+
+Résultat : générateur par segments et robot vérificateur, zéro segment accepté sans preuve, zéro repli sur quarante graines, un robot débutant survit plus de dix secondes sur vingt graines. Le critère de sortie, aucune mort injuste en trois minutes, reste à constater par le propriétaire.
 
 - Génération par segments, routes haute et basse qui se rejoignent, paliers de hauteur nommés.
 - Robot vérificateur : chaque segment est joué avant d'être affiché, rejeté et régénéré si aucun lâcher n'atteint l'accroche suivante avec de la marge.

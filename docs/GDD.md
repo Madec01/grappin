@@ -1,6 +1,6 @@
 # GRAPPIN, document de conception
 
-Version 0.1, 9 octobre 2026. Le propriétaire du projet est le seul valideur du game design, du lore et de la direction artistique. Les points marqués [VALIDÉ] ont été tranchés par lui le 9 octobre 2026. Le Lead Game Architect a les pleins pouvoirs sur le code et l'architecture.
+Version 0.2, 9 octobre 2026. Le propriétaire du projet est le seul valideur du game design, du lore et de la direction artistique. Les points marqués [VALIDÉ] ont été tranchés par lui le 9 octobre 2026. Le Lead Game Architect a les pleins pouvoirs sur le code et l'architecture.
 
 ## 1. Vision [VALIDÉ]
 
@@ -38,7 +38,8 @@ Le héros, son nom, et le détail du décor restent à proposer au propriétaire
 - C'est le cœur du jeu, réglé et testé avant tout contenu.
 - Les balancements doivent être courts et nerveux : le vol ne doit jamais devenir une attente.
 - **Jamais immobile.** Si l'élan est trop faible à l'accroche, ou si le personnage pend immobile sous le point plus d'une demi-seconde, une petite impulsion automatique et invisible le pousse vers l'accroche suivante. Le joueur ne peut pas rester pendu, et la brume qui monte s'occupe du reste.
-- **Le treuil [PROPOSÉ LE 9 OCTOBRE 2026, À VALIDER].** Constat du Lead au premier prototype : un pendule pur conserve son énergie, le personnage ne monte jamais plus haut que son élan de départ, et un robot joueur plafonne à sept mètres avant de mourir dans la brume. Il faut une source d'énergie. Proposition : tant que le doigt reste posé, le grappin tire comme un treuil, la corde raccourcit à vitesse constante jusqu'à une longueur minimale, et le balancement s'accélère comme un patineur qui ramène les bras. Tenir plus longtemps rapproche du point et donne de la vitesse ; lâcher au bon moment transforme cette vitesse en vol. Le réglage est débrayable (`reelSpeed=0` redonne le pendule pur). Mesure du robot raisonnable sur cinq graines : deux mètres par seconde de montée, accroches tenues six dixièmes de seconde.
+- **Le treuil [VALIDÉ le 9 octobre 2026 sur le prototype 0.1].** Constat du Lead au premier prototype : un pendule pur conserve son énergie, le personnage ne monte jamais plus haut que son élan de départ, et un robot joueur plafonne à sept mètres avant de mourir dans la brume. Il faut une source d'énergie. Proposition : tant que le doigt reste posé, le grappin tire comme un treuil, la corde raccourcit à vitesse constante jusqu'à une longueur minimale, et le balancement s'accélère comme un patineur qui ramène les bras. Tenir plus longtemps rapproche du point et donne de la vitesse ; lâcher au bon moment transforme cette vitesse en vol. Le réglage est débrayable (`reelSpeed=0` redonne le pendule pur). Mesure du robot raisonnable sur cinq graines : deux mètres par seconde de montée, accroches tenues six dixièmes de seconde.
+- **Le pompage [PROPOSÉ LE 9 OCTOBRE 2026, À VALIDER].** Une fois la corde au plus court, le treuil n'apporte plus rien et un joueur qui tient trop longtemps finit avec un balancement mou. Dans l'esprit de « jamais immobile » : accroché et sans élan, le personnage se relance le long du cercle dans le sens où il va, jusqu'à une vitesse plancher de 4,5 m/s au point bas, bien sous ce qu'un lâcher donne. Un robot débutant, maladroit et lent à réagir, survit désormais plus de dix secondes sur vingt graines sur vingt. Débrayable (`swingAssistAccel=0`).
 
 ## 5. Cœur du jeu : l'élan [VALIDÉ]
 
@@ -49,23 +50,27 @@ Le héros, son nom, et le détail du décor restent à proposer au propriétaire
 ## 6. Points d'accroche [VALIDÉ]
 
 - Normaux : accroche classique.
-- Fragiles : cassent après une seconde.
-- Propulseurs : boostent le lâcher.
+- Fragiles : cassent après une seconde de tenue et lâchent le personnage avec sa vitesse ; une accroche cassée n'est plus visable.
+- Propulseurs : la vitesse au lâcher gagne un tiers, sans changer de direction.
 - Mobiles ou rotatifs : bougent ou tournent, introduits en dernier.
+- **Ligne de vue.** Le grappin ne traverse pas un obstacle : un point caché derrière une corniche n'est pas visable. Règle technique du Lead, qui rend les obstacles lisibles et le vérificateur honnête.
 
 ## 7. Dangers [VALIDÉ]
 
 - La brume qui monte.
-- Sol, plafonds, obstacles mobiles.
+- Obstacles fixes : corniches accrochées aux bords et dalles flottantes. Les toucher termine la partie ; passer à moins d'un demi-mètre sans toucher rapporte le bonus « Frôlé », une fois par obstacle et par corde.
+- Obstacles mobiles, introduits en phase 4.
 
 ## 8. Parcours [VALIDÉ]
 
 - Généré procéduralement par segments.
 - Génération vérifiée : avant d'afficher un segment, un robot le joue et vérifie qu'un instant de lâcher atteint l'accroche suivante avec de la marge. Aucun passage impossible.
 - Routes haute, risquée avec bonus, et basse, sûre, qui se rejoignent.
-- Difficulté croissante : espacement qui s'agrandit, puis accroches spéciales et obstacles mobiles. Une nouvelle contrainte à la fois.
+- Difficulté croissante, une nouvelle contrainte à la fois, par paliers de 50 m : palier 0, points normaux espacés de 3 m ; palier 1, un obstacle par segment et la fourche haute-basse ; palier 2, accroches fragiles ; palier 3, un propulseur par segment ; ensuite l'espacement grandit jusqu'à 5 m et jusqu'à trois obstacles par segment.
 - Les premiers obstacles enseignent par la pratique comment le lâcher influence la trajectoire.
-- Paliers de hauteur nommés pour donner un sentiment d'étape.
+- **Fourche.** À une fourche, la route basse est proche et sûre, la route haute plus lointaine, avec une étoile qui rapporte, puis les deux se rejoignent. Le joueur choisit par le moment du lâcher et par le moment du tap : le point visé change au fil du vol.
+- Paliers de hauteur nommés pour donner un sentiment d'étape. Noms proposés pour la ville de nuit, à valider : Les toits, Les gouttières, Les enseignes, Les clochers, Les antennes, Les grues, Les nuages.
+- **Garantie du vérificateur.** Avant d'afficher un segment, un robot joue chaque point avec la vraie physique, en supposant le pire élan d'arrivée, et exige qu'il existe toujours un instant de lâcher qui mène plus haut sans toucher d'obstacle ; pour une fourche, chaque branche doit être atteignable avec un élan ordinaire. Un segment refusé est régénéré ; un segment de repli serré, vérifié lui aussi, prend la place après six refus. Mesure : zéro repli sur quarante graines à tous les paliers, six millisecondes par segment.
 
 ## 9. Modes [VALIDÉ]
 
@@ -118,3 +123,10 @@ Valeurs de départ pour le prototype, à régler à la main sur téléphone. Ell
 | Fenêtre du lâcher parfait | vitesse orientée entre 30° et 60° au-dessus de l'horizontale, dans le sens du mouvement |
 | Multiplicateur | 1 + 0,25 × combo, plafonné à 5 |
 | Vitesse de la brume | 0,8 m/s au départ, +0,1 m/s tous les 50 m, plafonnée à 3 m/s |
+| Pompage | vitesse plancher 4,5 m/s au point bas, 4 m/s² |
+| Accroche fragile | casse après 1 s de tenue |
+| Propulseur | vitesse × 1,35 au lâcher |
+| Frôlé | sous 0,5 m du bord, 5 points × multiplicateur |
+| Étoile | rayon 0,35 m, 10 points × multiplicateur |
+| Ombre prédictive | 0,25 s de vol |
+| Palier | tous les 50 m |

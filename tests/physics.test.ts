@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { length } from '../src/core/math/vec2';
-import { constrainVelocity, freeFlightAt, integrate, reelIn } from '../src/sim/physics';
+import { constrainVelocity, freeFlightAt, integrate, reelIn, swingAssist, swingStep } from '../src/sim/physics';
 import { DEFAULT_TUNING } from '../src/sim/tuning';
 
 const T = DEFAULT_TUNING;
@@ -97,5 +97,34 @@ describe('treuil', () => {
     expect(reelIn(slack, anchor, 3, 2.9, 0.5, T.stepSeconds)).toEqual(slack);
     const taut = { pos: { x: 0, y: 2 }, vel: { x: 1, y: 0 } };
     expect(reelIn(taut, anchor, 3, 3, 0.5, T.stepSeconds)).toEqual(taut);
+  });
+});
+
+describe('pompage', () => {
+  const anchor = { x: 0, y: 5 };
+  it('relance un balancement lent dans son sens, et laisse un balancement rapide tranquille', () => {
+    const slow = { pos: { x: 0, y: 3.5 }, vel: { x: 2, y: 0 } };
+    const pushed = swingAssist(slow, anchor, 1.5, T);
+    expect(pushed.vel.x).toBeCloseTo(2 + T.swingAssistAccel * T.stepSeconds, 9);
+    const backwards = swingAssist({ pos: { x: 0, y: 3.5 }, vel: { x: -2, y: 0 } }, anchor, 1.5, T);
+    expect(backwards.vel.x).toBeCloseTo(-2 - T.swingAssistAccel * T.stepSeconds, 9);
+    const fast = { pos: { x: 0, y: 3.5 }, vel: { x: 9, y: 0 } };
+    expect(swingAssist(fast, anchor, 1.5, T)).toEqual(fast);
+    // Lent mais haut sur le cercle : l'élan au point bas est bon, pas de pompage.
+    const high = { pos: { x: 1.5, y: 5 }, vel: { x: 0, y: -0.5 } };
+    expect(swingAssist(high, anchor, 1.5, T)).toEqual(high);
+    const still = { pos: { x: 0, y: 3.5 }, vel: { x: 0, y: 0 } };
+    expect(swingAssist(still, anchor, 1.5, T)).toEqual(still);
+  });
+
+  it('au minimum de corde, le balancement atteint la vitesse plancher sans la dépasser de beaucoup', () => {
+    let swing = { body: { pos: { x: 0, y: 3.5 }, vel: { x: 1, y: 0 } }, ropeLength: T.ropeMin };
+    let maxSpeed = 0;
+    for (let i = 0; i < 6 * Math.round(1 / T.stepSeconds); i += 1) {
+      swing = swingStep(swing.body, anchor, swing.ropeLength, T);
+      maxSpeed = Math.max(maxSpeed, length(swing.body.vel));
+    }
+    expect(maxSpeed).toBeGreaterThanOrEqual(T.swingAssistSpeed * 0.95);
+    expect(maxSpeed).toBeLessThan(T.swingAssistSpeed + 1);
   });
 });

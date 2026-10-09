@@ -1,5 +1,6 @@
 import { Camera } from '../render/camera';
-import type { GameScreen, Renderer } from '../render/renderer';
+import { Effects } from '../render/effects';
+import type { DeathCause, GameScreen, Renderer } from '../render/renderer';
 import { Simulation } from '../sim/simulation';
 import { DEFAULT_TUNING, withTuning, type Tuning } from '../sim/tuning';
 
@@ -19,9 +20,6 @@ const MAX_FRAME_SECONDS = 0.1;
 
 /** Ce que le jeu demande au rendu : sa taille et un dessin. */
 export type GameView = Pick<Renderer, 'width' | 'height' | 'draw'>;
-
-/** Durée pendant laquelle le trait du grappin se dessine à l'écran, en secondes. L'œil seulement : la physique n'attend pas. */
-const ROPE_DRAW_SECONDS = 0.06;
 
 export interface GameSettings {
   /** Graine imposée par `?graine=`, ou null pour une graine aléatoire à chaque partie. */
@@ -44,6 +42,14 @@ export interface DebugState {
   readonly vel: { readonly x: number; readonly y: number };
   readonly fogY: number;
   readonly seed: number;
+  /** Ce qui a tué le personnage, ou null tant qu'il vit. */
+  readonly cause: DeathCause | null;
+  /** Palier nommé atteint. */
+  readonly tier: number;
+  /** Nombre d'obstacles chargés en ce moment. */
+  readonly obstacles: number;
+  /** Étoiles prises depuis le début de la partie. */
+  readonly pickups: number;
 }
 
 /**
@@ -73,17 +79,22 @@ export class Game {
   private readonly view: GameView;
   private readonly settings: GameSettings;
   private readonly camera: Camera;
+  /** Animations de temps réel : trait du grappin, textes flottants, bannière de palier. */
+  private readonly effects: Effects;
   private sim: Simulation;
   private screen: GameScreen = 'title';
+  /** Cause de la mort, connue à l'événement `death`, ou null tant que le personnage vit. */
+  private deathCause: DeathCause | null = null;
+  /** Étoiles prises : comptées ici, car la simulation retire de sa liste celles passées sous la brume. */
+  private pickupsTaken = 0;
   /** Temps réel reçu mais pas encore converti en pas de simulation, en secondes. */
   private accumulator = 0;
-  /** Temps réel écoulé depuis la dernière accroche, pour l'animation du trait. */
-  private ropeAge = ROPE_DRAW_SECONDS;
 
   constructor(view: GameView, settings: GameSettings) {
     this.view = view;
     this.settings = settings;
     this.camera = new Camera(settings.tuning.heroRadius, view.width, view.height);
+    this.effects = new Effects(settings.tuning);
     this.sim = this.newSimulation(settings.seed ?? randomSeed());
   }
 
@@ -105,20 +116,27 @@ export class Game {
     this.screen = 'title';
   }
 
-  /** Une image : convertit le temps réel en pas fixes, passe à l'écran de fin si besoin, puis dessine. */
+  /**
+   * Une image : convertit le temps réel en pas fixes, place la caméra, passe les
+   * événements de règles aux effets (et à l'écran de fin si besoin), puis dessine.
+   */
   frame(elapsedSeconds: number): void {
     const dt = Math.min(elapsedSeconds, MAX_FRAME_SECONDS);
     if (this.screen === 'playing') this.advance(dt);
-    this.ropeAge += dt;
-    for (const event of this.sim.drain()) {
-      // Les événements de lâcher et d'impulsion serviront au son et aux effets.
-      if (event.type === 'death') this.screen = 'dead';
-      if (event.type === 'attach') this.ropeAge = 0;
-    }
     const { hero } = this.sim.state;
     this.camera.resize(this.view.width, this.view.height);
     this.camera.update(dt, hero.pos, hero.vel);
-    this.view.draw(this.sim.state, this.camera, this.screen, Math.min(1, this.ropeAge / ROPE_DRAW_SECONDS));
+    this.effects.update(dt);
+    const heroOnScreen = this.camera.worldToScreen(hero.pos);
+    for (const event of this.sim.drain()) {
+      if (event.type === 'death') {
+        this.screen = 'dead';
+        this.deathCause = event.cause;
+      }
+      if (event.type === 'pickup') this.pickupsTaken += 1;
+      this.effects.handle(event, heroOnScreen);
+    }
+    this.view.draw(this.sim.state, this.camera, { screen: this.screen, deathCause: this.deathCause, effects: this.effects });
   }
 
   debugState(): DebugState {
@@ -136,6 +154,10 @@ export class Game {
       vel: { x: state.hero.vel.x, y: state.hero.vel.y },
       fogY: state.fogY,
       seed: state.course.seed,
+      cause: this.deathCause,
+      tier: state.tier,
+      obstacles: state.obstacles.length,
+      pickups: this.pickupsTaken,
     };
   }
 
@@ -143,6 +165,9 @@ export class Game {
   private newSimulation(seed: number): Simulation {
     const sim = new Simulation(seed, this.settings.tuning);
     this.accumulator = 0;
+    this.deathCause = null;
+    this.pickupsTaken = 0;
+    this.effects.clear();
     this.camera.snap(sim.state.hero.pos, sim.state.hero.vel);
     return sim;
   }

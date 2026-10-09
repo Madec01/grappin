@@ -9,8 +9,8 @@ const T = DEFAULT_TUNING;
 function twoAnchors(): Simulation {
   const sim = new Simulation(1);
   sim.state.anchors = [
-    { id: 10, pos: { x: -3, y: 6 }, kind: 'normal' },
-    { id: 11, pos: { x: 3, y: 6 }, kind: 'normal' },
+    { id: 10, pos: { x: -3, y: 6 }, kind: 'normal', broken: false },
+    { id: 11, pos: { x: 3, y: 6 }, kind: 'normal', broken: false },
   ];
   sim.state.hero = { pos: { x: 0, y: 3 }, vel: { x: 0, y: 0 }, grounded: false };
   sim.state.targetId = null;
@@ -40,13 +40,13 @@ describe('ciblage', () => {
 
   it('ignore les points hors de portée', () => {
     const sim = twoAnchors();
-    sim.state.anchors = [{ id: 20, pos: { x: 0, y: 3 + T.ropeMax + 0.1 }, kind: 'normal' }];
+    sim.state.anchors = [{ id: 20, pos: { x: 0, y: 3 + T.ropeMax + 0.1 }, kind: 'normal', broken: false }];
     expect(chooseTarget(sim.state, T).targetId).toBeNull();
   });
 
   it('coyote time : le point reste visé un court instant après être sorti de portée, puis le tap échoue', () => {
     const sim = twoAnchors();
-    sim.state.anchors = [{ id: 30, pos: { x: 0, y: 3 + T.ropeMax - 0.05 }, kind: 'normal' }];
+    sim.state.anchors = [{ id: 30, pos: { x: 0, y: 3 + T.ropeMax - 0.05 }, kind: 'normal', broken: false }];
     sim.state.targetId = null;
     expect(chooseTarget(sim.state, T).targetId).toBe(30);
     sim.state.targetId = 30;
@@ -57,7 +57,7 @@ describe('ciblage', () => {
     expect(sim.state.targetId).toBe(30);
     expect(sim.press()).toBe(true);
     const sim2 = twoAnchors();
-    sim2.state.anchors = [{ id: 30, pos: { x: 0, y: 3 + T.ropeMax - 0.05 }, kind: 'normal' }];
+    sim2.state.anchors = [{ id: 30, pos: { x: 0, y: 3 + T.ropeMax - 0.05 }, kind: 'normal', broken: false }];
     sim2.state.targetId = 30;
     sim2.state.targetValidStep = sim2.state.step;
     sim2.state.hero.vel = { x: 0, y: -10 };

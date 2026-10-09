@@ -2,7 +2,7 @@
 
 Jeu d'arcade de mouvement en portrait, sur téléphone. Le personnage monte en se balançant de point d'accroche en point d'accroche avec un grappin. Toute la maîtrise tient dans un seul geste : sentir le bon instant de lâcher pour conserver son élan.
 
-Version 0.1 : prototype en formes grises pour régler le pendule. Un seul geste, une brume qui monte, un parcours d'essai, le score et le combo de lâchers parfaits. Aucun habillage, aucun son : ils viennent après que la sensation est validée.
+Version 0.2 : prototype en formes grises. Un seul geste, une brume qui monte, un parcours engendré par segments et vérifié par un robot avant d'être affiché, des fourches entre une route basse sûre et une route haute étoilée, des obstacles à frôler, des accroches fragiles et propulseuses, des paliers nommés, le score et le combo de lâchers parfaits. Aucun habillage, aucun son : ils viennent après que la sensation est validée.
 
 **Jouer : [madec01.github.io/grappin](https://madec01.github.io/grappin/)**, une fois GitHub Pages réglé sur la source « GitHub Actions » dans les réglages du dépôt (Settings, Pages, Build and deployment, Source : GitHub Actions).
 
@@ -12,7 +12,9 @@ Version 0.1 : prototype en formes grises pour régler le pendule. Un seul geste,
 2. Gardez le doigt posé : le grappin est accroché, le personnage se balance.
 3. Relâchez au bon moment : le personnage part avec sa vitesse du moment. Lâcher au point bas donne de la vitesse, en haut de la hauteur.
 4. Un lâcher qui part vers le haut entre 30° et 60° est « parfait » et monte le multiplicateur. Un lâcher raté le remet à zéro.
-5. La brume monte. Passer dessous termine la partie ; touchez pour rejouer.
+5. La brume monte. Passer dessous termine la partie, toucher un obstacle aussi ; touchez pour rejouer. Frôler un obstacle sans le toucher rapporte un bonus.
+6. À partir de 50 m, les chemins se séparent parfois : la route basse est sûre, la route haute porte une étoile. Le grappin ne traverse pas les obstacles : un point caché n'est pas visable.
+7. Une accroche en pointillés casse après une seconde ; une accroche à chevron propulse le lâcher.
 
 Le jeu se joue aussi à la souris, avec le même geste : clic maintenu, puis relâché.
 
@@ -45,7 +47,7 @@ Vite affiche une adresse locale et une adresse réseau. Ouvrez l'adresse réseau
 | `npm run typecheck` | TypeScript strict |
 | `npm run check` | Lint, typage et tests |
 | `npm run captures -- <dossier> [graine]` | Captures d'écran et vidéo d'une partie jouée par un robot, après `npm run build` |
-| `npm run robot -- [clé=valeur ...]` | Robot joueur en Node qui mesure hauteur, rythme et vitesses d'un réglage, par exemple `reelSpeed=4` |
+| `npm run robot -- [clé=valeur ...] [profil=débutant]` | Robots joueurs en Node qui mesurent hauteur, rythme, vitesses et cause de la fin pour un réglage, par exemple `reelSpeed=4` |
 
 Pour Playwright avec un Chromium déjà installé : `PW_CHROMIUM_PATH=/chemin/vers/chrome npm run test:e2e`. Pour le GIF des captures : `FFMPEG_PATH=/chemin/vers/ffmpeg`.
 
