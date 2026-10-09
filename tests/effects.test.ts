@@ -105,10 +105,10 @@ describe('textes flottants', () => {
     effects.handle(perfect(1), HERO);
     const [first, second] = effects.texts;
     expect(second!.y).toBeLessThan(first!.y);
-    expect(first!.y - second!.y).toBeGreaterThan(18);
+    expect(first!.y - second!.y).toBeGreaterThan(20);
 
-    // Une fois le premier assez vieux, la place est libre : le suivant repart de la même hauteur.
-    effects.update(0.4);
+    // Une fois le premier presque fini de monter, la place est libre : le suivant repart de la même hauteur.
+    effects.update(0.5);
     effects.handle({ type: 'break', anchorId: 1 }, HERO);
     expect(effects.texts.at(-1)!.y).toBe(first!.y);
   });

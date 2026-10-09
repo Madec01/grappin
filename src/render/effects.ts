@@ -27,9 +27,9 @@ const BANNER_FADE_OUT_SECONDS = 0.6;
 /** Un texte naît au-dessus du personnage et monte encore de quelques pixels. */
 const FLOAT_START_LIFT = 34;
 const FLOAT_RISE = 26;
-/** Deux textes nés à moins de 0,3 s l'un de l'autre s'empilent au lieu de se recouvrir. */
-const STACK_WINDOW_SECONDS = 0.3;
-const STACK_LINE_HEIGHT = 24;
+/** Un texte a presque fini de monter après ce temps : un texte né plus tôt s'empile au lieu de se recouvrir. */
+const STACK_WINDOW_SECONDS = 0.45;
+const STACK_LINE_HEIGHT = 26;
 
 export interface FloatingText {
   readonly text: string;

@@ -72,7 +72,7 @@ const ROPE_WIDTH = 2;
 const TARGET_RING_WIDTH = 3;
 const FOG_EDGE_WIDTH = 2;
 const OBSTACLE_EDGE_WIDTH = 3;
-const KIND_MARK_WIDTH = 1.5;
+const KIND_MARK_WIDTH = 2;
 const WEAR_RING_WIDTH = 3;
 const CHEVRON_WIDTH = 2;
 
@@ -82,6 +82,10 @@ const CHEVRON_WIDTH = 2;
  * de visée, même très dézoomé.
  */
 const KIND_RING_GAP = 4;
+/** Accroche fragile tenue : l'anneau qui se vide entoure l'anneau de marque, de cet écart en pixels. */
+const WEAR_RING_GAP = 5;
+/** Opacité du rail de l'anneau qui se vide : la part déjà usée reste devinée. */
+const WEAR_TRACK_ALPHA = 0.2;
 /** Accroche fragile : anneau en huit tirets, chacun couvrant cette part de son huitième. */
 const DASH_COUNT = 8;
 const DASH_FILL = 0.55;
@@ -113,9 +117,9 @@ const HUD_SAFE_GAP = 16;
 const HEIGHT_FONT_SIZE = 44;
 const OVERLAY_GAP = 18;
 /** La bannière de palier, centrée, sous l'interface : distance sous le haut de l'interface. */
-const BANNER_OFFSET = 100;
+const BANNER_OFFSET = 88;
 const FLOAT_FONT_SIZE = 20;
-const BANNER_FONT_SIZE = 26;
+const BANNER_FONT_SIZE = 24;
 const OUTLINE_WIDTH = 4;
 
 const DEATH_MESSAGES: Record<DeathCause, string> = {
@@ -428,11 +432,13 @@ export class Renderer {
 
     const gauge = fragileGauge(state, this.tuning);
     if (gauge) {
-      const remaining = 1 - gauge.wear;
       const p = camera.worldToScreen(gauge.pos);
+      const wearRing = ring + WEAR_RING_GAP;
+      const remaining = 1 - gauge.wear;
+      g.circle(p.x, p.y, wearRing).stroke({ width: WEAR_RING_WIDTH, color: COLOR.wear, alpha: WEAR_TRACK_ALPHA });
       if (remaining > 0) {
-        g.moveTo(p.x, p.y - ring)
-          .arc(p.x, p.y, ring, -Math.PI / 2, -Math.PI / 2 + remaining * TAU)
+        g.moveTo(p.x, p.y - wearRing)
+          .arc(p.x, p.y, wearRing, -Math.PI / 2, -Math.PI / 2 + remaining * TAU)
           .stroke({ width: WEAR_RING_WIDTH, color: COLOR.wear });
       }
     }

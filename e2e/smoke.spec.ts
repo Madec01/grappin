@@ -127,7 +127,9 @@ function autopilot(targetHeight: number, limitMs: number): string {
 
 test('un pilote automatique grimpe au-delà de 10 m sans erreur de console', async ({ page }) => {
   const errors = watchErrors(page);
-  await open(page, '/?graine=3');
+  // Brume ralentie : sur les machines lentes de l'intégration continue, le pilote réagit à la cadence
+  // des images, donc mal ; ce test vérifie que le jeu tourne sans erreur, pas l'adresse du pilote.
+  await open(page, '/?graine=3&fogBaseSpeed=0.15');
   await page.evaluate(autopilot(12, 30_000));
 
   const climbed = await state(page);
