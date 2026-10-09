@@ -134,7 +134,8 @@ export interface RunOutcome {
 /** Fin de partie : expérience, missions, records, déblocages. */
 export function endRun(profile: Profile, run: RunStats, score: number): RunOutcome {
   const settled = settleMissions(profile.missions, profile.completedMissions, run);
-  const xpGained = Math.floor(score) + settled.xp;
+  // Une partie compte toujours, même quittée sur le toit : au moins un point.
+  const xpGained = Math.max(1, Math.floor(score)) + settled.xp;
   const levelBefore = levelFor(profile.xp);
   const xp = profile.xp + xpGained;
   const levelAfter = levelFor(xp);

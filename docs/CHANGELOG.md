@@ -2,6 +2,18 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.3.0] — 2026-10-09 — Progression
+
+Décision du propriétaire : missions et niveaux à talismans, avant l'habillage.
+
+### Ajouté
+
+- Profil du joueur sauvegardé sur l'appareil : expérience, records, talismans équipés, missions ; relecture tolérante d'une sauvegarde absente, corrompue ou d'une autre version.
+- Niveaux de grimpeur : l'expérience additionne les scores et les récompenses de missions ; le niveau 2 à 120 points, puis de plus en plus.
+- Dix-huit missions, trois actives à la fois, du facile au difficile ; les missions de comptage s'accumulent, celles de record gardent le meilleur d'une partie.
+- Six talismans débloqués par niveau, un puis deux emplacements : Treuil renforcé, Corde longue, Élan de départ, Seconde chance, Aimant à étoiles, Frôleur. Dans la simulation : élan de la première accroche et rebond de secours depuis la brume.
+- Écrans titre, fin et talismans avec boutons tactiles ; indice de départ jusqu'à 30 m ; suiveur de partie ; l'événement de lâcher porte la durée de tenue, le genre du point et la casse.
+
 ## [0.2.1] — 2026-10-09 — Vitesse plus facile à prendre
 
 Retour du propriétaire sur la 0.2.0 : difficile de prendre de la vitesse.

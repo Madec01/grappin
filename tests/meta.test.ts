@@ -113,6 +113,10 @@ describe('profil', () => {
     expect(outcome.profile.missions).toHaveLength(3);
   });
 
+  it('une partie quittée sur le toit rapporte quand même un point', () => {
+    expect(endRun(createProfile(), quietRun, 0.02).xpGained).toBe(1);
+  });
+
   it('équipe dans la limite des déblocages et des emplacements', () => {
     let profile = createProfile();
     profile = toggleTalisman(profile, 'treuil');

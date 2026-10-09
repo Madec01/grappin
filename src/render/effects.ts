@@ -87,6 +87,8 @@ export function floatingTextFor(event: RuleEvent, tuning: Tuning): string | null
       return 'Boost';
     case 'break':
       return 'Crac';
+    case 'rescue':
+      return 'Seconde chance !';
     default:
       return null;
   }
@@ -144,12 +146,5 @@ export class Effects {
       y = clash.y - floatRise(clash.age) - STACK_LINE_HEIGHT;
     }
     return y;
-  }
-
-  /** Efface tout : nouvelle partie. */
-  clear(): void {
-    this.floating = [];
-    this.current = null;
-    this.ropeAge = ROPE_DRAW_SECONDS;
   }
 }

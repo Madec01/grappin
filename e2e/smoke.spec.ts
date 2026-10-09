@@ -3,8 +3,9 @@ import { expect, test, type Page } from '@playwright/test';
 /**
  * Test de fumée sur écran de téléphone (390 × 844, tactile) : la page charge,
  * un doigt posé accroche le grappin, le relâcher libère le personnage, la
- * graine d'URL est respectée, et un pilote automatique grimpe sans erreur.
- * Tout passe par `window.__grappin`.
+ * graine d'URL est respectée, un pilote automatique grimpe sans erreur, et la
+ * progression (expérience, sauvegarde, talismans, boutons) tient d'une partie
+ * et d'un rechargement à l'autre. Tout passe par `window.__grappin`.
  */
 
 const CENTER = { x: 195, y: 422 };
@@ -25,6 +26,15 @@ async function open(page: Page, path: string): Promise<void> {
 }
 
 const state = (page: Page) => page.evaluate(() => window.__grappin!.state());
+const profile = (page: Page) => page.evaluate(() => window.__grappin!.profile());
+const buttons = (page: Page) => page.evaluate(() => window.__grappin!.buttons());
+
+/** Touche le centre du bouton `id` de l'écran affiché, après avoir attendu que la dernière image l'ait dessiné. */
+async function tapButton(page: Page, id: string): Promise<void> {
+  await expect.poll(async () => (await buttons(page)).some((button) => button.id === id), { timeout: 2000 }).toBe(true);
+  const button = (await buttons(page)).find((b) => b.id === id)!;
+  await page.touchscreen.tap(button.x + button.width / 2, button.y + button.height / 2);
+}
 
 /** Les deux façons de poser le doigt : au toucher, comme sur téléphone, et à la souris. */
 const gestures = [
@@ -136,5 +146,57 @@ test('un pilote automatique grimpe au-delà de 10 m sans erreur de console', asy
   expect(climbed.screen).toBe('playing');
   expect(climbed.height).toBeGreaterThan(10);
   expect(climbed.cause).toBeNull();
+  expect(errors).toEqual([]);
+});
+
+test('progression : une partie rapporte de l\'expérience, le profil survit au rechargement, un talisman s\'équipe', async ({ page }) => {
+  const errors = watchErrors(page);
+  // Brume rapide : sans personne pour jouer, elle finit la partie en quelques secondes.
+  await open(page, '/?graine=3&fogBaseSpeed=4');
+  await page.evaluate(() => window.__grappin!.resetProfile());
+  expect((await state(page)).level).toBe(1);
+
+  // Un doigt posé un instant, puis levé : de quoi gagner quelques mètres, donc au moins 1 XP (un tap sans durée n'en rapporte aucun).
+  const lift = await gestures[0]!.down(page);
+  await page.waitForTimeout(150);
+  await lift();
+  await expect.poll(async () => (await state(page)).screen, { timeout: 20_000 }).toBe('dead');
+  const dead = await state(page);
+  expect(dead.xp).toBeGreaterThan(0);
+  expect(dead.xpGained).toBe(dead.xp);
+  expect((await profile(page)).runs).toBe(1);
+
+  await page.reload();
+  await page.waitForFunction(() => window.__grappin !== undefined);
+  expect((await profile(page)).runs).toBe(1);
+  expect((await state(page)).xp).toBe(dead.xp);
+
+  await page.evaluate(() => window.__grappin!.equip('treuil'));
+  expect((await profile(page)).equipped).toContain('treuil');
+  expect(errors).toEqual([]);
+});
+
+test('les boutons répondent au toucher : Talismans, une ligne, Retour, puis un appui ailleurs lance la partie', async ({ page }) => {
+  const errors = watchErrors(page);
+  await open(page, '/?graine=3');
+  await page.evaluate(() => window.__grappin!.resetProfile());
+
+  await tapButton(page, 'talismans');
+  await expect.poll(async () => (await state(page)).screen).toBe('talismans');
+  // Niveau 1 : seul le premier talisman est débloqué, les autres lignes ne sont pas des boutons.
+  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual(['treuil', 'back']);
+
+  await tapButton(page, 'treuil');
+  await expect.poll(async () => (await profile(page)).equipped).toEqual(['treuil']);
+  // Un appui ailleurs ne fait rien sur cet écran.
+  await page.touchscreen.tap(CENTER.x, 20);
+  expect((await state(page)).screen).toBe('talismans');
+
+  await tapButton(page, 'back');
+  await expect.poll(async () => (await state(page)).screen).toBe('title');
+  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual(['talismans']);
+
+  await page.touchscreen.tap(CENTER.x, CENTER.y);
+  await expect.poll(async () => (await state(page)).screen).toBe('playing');
   expect(errors).toEqual([]);
 });

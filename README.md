@@ -24,6 +24,7 @@ Le jeu se joue aussi à la souris, avec le même geste : clic maintenu, puis rel
 Des paramètres d'adresse permettent de régler le jeu sans toucher au code :
 
 - `?graine=12` rejoue toujours le même parcours.
+- Dans la console du navigateur, `__grappin.resetProfile()` efface la progression, `__grappin.profile()` l'affiche.
 - Tout réglage de `src/sim/tuning.ts` se surcharge par son nom, par exemple `?gravity=9&ropeMax=6&kickSpeed=4`.
 
 ## Lancer en local

@@ -33,6 +33,10 @@ describe('texte d\'un événement', () => {
     expect(floatingTextFor({ type: 'break', anchorId: 1 }, DEFAULT_TUNING)).toBe('Crac');
   });
 
+  it('dit « Seconde chance ! » quand la brume renvoie le personnage vers le haut', () => {
+    expect(floatingTextFor({ type: 'rescue', chancesLeft: 0 }, DEFAULT_TUNING)).toBe('Seconde chance !');
+  });
+
   it('annonce une étoile par son réglage de score, pas par une valeur codée', () => {
     expect(floatingTextFor({ type: 'pickup', pickupId: 1 }, DEFAULT_TUNING)).toBe('+10');
     expect(floatingTextFor({ type: 'pickup', pickupId: 1 }, { ...DEFAULT_TUNING, pickupScore: 25 })).toBe('+25');
@@ -131,6 +135,13 @@ describe('textes flottants', () => {
     expect(effects.texts[0]!.y).toBe(effects.texts[1]!.y);
   });
 
+  it('un sauvetage de la brume fait flotter « Seconde chance ! » près du personnage', () => {
+    const effects = new Effects(DEFAULT_TUNING);
+    effects.handle({ type: 'rescue', chancesLeft: 0 }, HERO);
+    expect(effects.texts).toHaveLength(1);
+    expect(effects.texts[0]).toMatchObject({ text: 'Seconde chance !', x: HERO.x });
+  });
+
   it('ne naissent que des événements qui en ont un', () => {
     const effects = new Effects(DEFAULT_TUNING);
     for (const event of [{ type: 'kick' }, { type: 'attach', anchorId: 1 }, { type: 'release', perfect: false, combo: 0, held: 1, kind: 'normal', forced: false }] as const) {
@@ -179,19 +190,6 @@ describe('trait du grappin', () => {
     effects.update(0.03);
     expect(effects.ropeDrawn).toBeCloseTo(0.5, 9);
     effects.update(0.1);
-    expect(effects.ropeDrawn).toBe(1);
-  });
-});
-
-describe('remise à zéro', () => {
-  it('efface textes, bannière et animation du trait', () => {
-    const effects = new Effects(DEFAULT_TUNING);
-    effects.handle(tier(1, 'Les gouttières'), HERO);
-    effects.handle({ type: 'boost' }, HERO);
-    effects.handle({ type: 'attach', anchorId: 1 }, HERO);
-    effects.clear();
-    expect(effects.texts).toHaveLength(0);
-    expect(effects.banner).toBeNull();
     expect(effects.ropeDrawn).toBe(1);
   });
 });

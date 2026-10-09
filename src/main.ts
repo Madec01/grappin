@@ -1,6 +1,9 @@
 import { Game, readSettings, type DebugState } from './app/game';
 import { trackPointer } from './input/pointer';
+import { browserStorage, type Profile } from './meta/profile';
+import type { TalismanId } from './meta/talismans';
 import { Renderer } from './render/renderer';
+import type { ButtonRect } from './render/screens';
 
 /**
  * Point d'entrée : démarre PixiJS et le jeu, branche le doigt sur le canvas.
@@ -13,27 +16,40 @@ declare global {
     __grappin?: {
       readonly version: string;
       state: () => DebugState;
-      press: () => void;
+      /** Le doigt se pose, à la position donnée en pixels CSS si on la connaît : sans position, aucun bouton n'est touché. */
+      press: (x?: number, y?: number) => void;
       release: () => void;
       restart: (seed?: number) => void;
+      /** Le profil du joueur tel que le jeu le tient. */
+      profile: () => Profile;
+      /** Équipe ou retire un talisman, sauvegarde, et renvoie le profil. */
+      equip: (id: TalismanId) => Profile;
+      /** Efface la progression et revient à l'écran titre. */
+      resetProfile: () => void;
+      /** Boutons de l'écran affiché, tels que la dernière image les a dessinés. */
+      buttons: () => readonly ButtonRect[];
     };
   }
 }
 
 async function start(): Promise<void> {
   const settings = readSettings(window.location.search);
-  const renderer = await Renderer.create(settings.tuning);
-  const game = new Game(renderer, settings);
+  const renderer = await Renderer.create();
+  const game = new Game(renderer, settings, browserStorage());
 
   renderer.onFrame((elapsedSeconds) => game.frame(elapsedSeconds));
-  trackPointer(renderer.canvas, { onPress: () => game.press(), onRelease: () => game.release() });
+  trackPointer(renderer.canvas, { onPress: (x, y) => game.press(x, y), onRelease: () => game.release() });
 
   window.__grappin = {
     version: __APP_VERSION__,
     state: () => game.debugState(),
-    press: () => game.press(),
+    press: (x?: number, y?: number) => game.press(x, y),
     release: () => game.release(),
     restart: (seed?: number) => game.restart(seed),
+    profile: () => game.currentProfile(),
+    equip: (id: TalismanId) => game.equip(id),
+    resetProfile: () => game.resetProfile(),
+    buttons: () => renderer.buttons(),
   };
 }
 
