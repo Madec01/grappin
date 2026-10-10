@@ -16,7 +16,7 @@ import { formatDecimal } from './format';
 import { neonCircle, neonDiscs, neonFill, neonLine, neonRects, neonStroke, type NeonStrokeStyle } from './neon';
 import { Screens, type OverlayView } from './screens';
 import { bandWidth, cupRadius, cupTips, mixColor, pullRatio, traceCup } from './sling';
-import { COLOR, makeText, readSafeInset, starPoints } from './style';
+import { COLOR, GlowText, PALETTES, makeText, readSafeInset, starPoints, type Palette } from './style';
 
 /**
  * Rendu PixiJS en néon minimaliste : formes et textes, aucun asset.
@@ -29,6 +29,13 @@ import { COLOR, makeText, readSafeInset, starPoints } from './style';
  * de dessin reste de l'ordre de la centaine par image. Règle de lisibilité :
  * rien de ce qui est dessiné ici ne masque jamais une accroche ni un danger ;
  * le décor de ville est le plus discret des tracés, dessous tout le reste.
+ *
+ * Deux sortes de couleurs : le langage du jeu (espèces de prises, étoiles,
+ * obstacles, bords de la ville), fixe dans `COLOR`, et l'ambiance, que la
+ * palette de l'image donne et qui change avec la musique (voir palette.ts).
+ * Rien d'ambiant n'est figé à la construction : les dessins relisent la palette
+ * à chaque image, et les textes que la palette teinte n'ont qu'une teinte à
+ * changer, jamais un nouveau tracé.
  *
  * Tout le décor vit dans un conteneur, `world`, que la bascule fait tourner
  * autour du centre de l'écran : on y dessine donc en coordonnées de la caméra,
@@ -63,6 +70,8 @@ export interface GameFrame {
   readonly testMode: boolean;
   /** Page de la liste des niveaux montrée (dix niveaux par page), à partir de 0. */
   readonly levelsPage: number;
+  /** L'ambiance du moment : la palette de la famille de musique, ou son fondu quand la famille change. */
+  readonly palette: Palette;
 }
 
 const TAU = Math.PI * 2;
@@ -242,16 +251,25 @@ const DEATH_MESSAGES: Record<DeathCause, string> = {
   fall: 'Tombé hors de la ville',
 };
 
-/** Couleur du cœur et du halo de chaque espèce d'accroche. */
-const KIND_TUBE: Record<AnchorKind, { readonly color: number; readonly halo: number }> = {
-  normal: { color: COLOR.tube, halo: COLOR.tubeHalo },
+/** Couleur du cœur et du halo d'une espèce d'accroche. */
+interface Tube {
+  readonly color: number;
+  readonly halo: number;
+}
+
+/**
+ * Couleur du cœur et du halo de chaque espèce d'accroche qui a un sens : elles
+ * ne changent jamais d'une musique à l'autre. Le point normal, lui, prend le
+ * tube de la palette (voir `Renderer.tubeOf`).
+ */
+const SPECIES_TUBE: Record<Exclude<AnchorKind, 'normal'>, Tube> = {
   fragile: { color: COLOR.fragile, halo: COLOR.fragile },
   booster: { color: COLOR.booster, halo: COLOR.booster },
   electrique: { color: COLOR.electric, halo: COLOR.electric },
   eclipse: { color: COLOR.eclipse, halo: COLOR.eclipse },
   lanceur: { color: COLOR.launcher, halo: COLOR.launcher },
 };
-const CHARGED_TUBE = { color: COLOR.electricCharged, halo: COLOR.electricCharged };
+const CHARGED_TUBE: Tube = { color: COLOR.electricCharged, halo: COLOR.electricCharged };
 /** Dans quel groupe tombe une prise électrique selon son cycle. */
 const ELECTRIC_GROUP: Record<ElectricState, 'calm' | 'warning' | 'charged'> = { calme: 'calm', avertit: 'warning', chargee: 'charged' };
 const KINDS: readonly AnchorKind[] = ['normal', 'fragile', 'booster', 'electrique', 'eclipse', 'lanceur'];
@@ -358,15 +376,21 @@ export class Renderer {
   private readonly hud = new Container();
   private readonly heightText = makeText('', HEIGHT_FONT_SIZE, COLOR.text, { bold: true });
   private readonly goalText = makeText('', GOAL_FONT_SIZE, COLOR.textDim, { bold: true });
-  private readonly multiplierText = makeText('', 30, COLOR.accent, { bold: true });
+  /** Le multiplicateur : un texte blanc que l'accent de la palette teinte. */
+  private readonly multiplierText = makeText('', 30, COLOR.white, { bold: true });
   private readonly scoreText = makeText('', 20, COLOR.textDim);
   private readonly testTag = makeText('MODE TEST', 13, COLOR.textDim, { bold: true });
-  /** La bannière : texte blanc au léger halo cyan, qui change rarement (un palier, un événement), si bien que le flou ne coûte presque rien. */
-  private readonly bannerText = makeText('', BANNER_FONT_SIZE, COLOR.text, { bold: true, outlined: true, glow: COLOR.tubeHalo });
+  /** La bannière : texte blanc au léger halo de l'accent, qui change rarement (un palier, un événement), si bien que le flou ne coûte presque rien. */
+  private readonly bannerText = new GlowText('', BANNER_FONT_SIZE, COLOR.text, PALETTES.menu.accent, { bold: true, outlined: true });
   /** Seconde ligne de la bannière : sa largeur de retour à la ligne est fixée par `layout()`. */
-  private readonly bannerDetail = makeText('', BANNER_DETAIL_FONT_SIZE, COLOR.text, { outlined: true, wrap: 0, glow: COLOR.tubeHalo });
-  /** « Arrivée », petit, à droite de la ligne d'arrivée. */
-  private readonly finishLabel = makeText('Arrivée', FINISH_FONT_SIZE, COLOR.finish, { bold: true, glow: COLOR.tubeHalo });
+  private readonly bannerDetail = new GlowText('', BANNER_DETAIL_FONT_SIZE, COLOR.text, PALETTES.menu.accent, { outlined: true, wrap: 0 });
+  /** « Arrivée », petit, à droite de la ligne d'arrivée, au halo du tube. */
+  private readonly finishLabel = new GlowText('Arrivée', FINISH_FONT_SIZE, COLOR.hot, PALETTES.menu.halo, { bold: true });
+
+  /** L'ambiance de la dernière image. Les tubes et les teintes qui en dépendent sont rafraîchis quand elle change. */
+  private palette: Palette = PALETTES.menu;
+  /** Tube du point normal : cœur et halo de la palette. */
+  private normalTube: Tube = { color: PALETTES.menu.tube, halo: PALETTES.menu.halo };
 
   /** Titre, niveaux, fin de partie, victoire et talismans, par-dessus tout le reste. */
   private readonly screens = new Screens();
@@ -382,15 +406,16 @@ export class Renderer {
   private constructor(app: Application) {
     this.app = app;
 
+    this.tintTexts();
     this.hud.addChild(this.heightText, this.goalText, this.multiplierText, this.scoreText, this.testTag);
     this.multiplierText.anchor.set(1, 0);
     this.testTag.anchor.set(0.5, 0);
     this.heightText.anchor.set(0, 0);
     this.goalText.anchor.set(0, 1);
     this.scoreText.anchor.set(0, 0);
-    this.bannerText.anchor.set(0.5, 0);
-    this.bannerDetail.anchor.set(0.5, 0);
-    this.finishLabel.anchor.set(1, 1);
+    this.bannerText.anchorAt(0.5, 0);
+    this.bannerDetail.anchorAt(0.5, 0);
+    this.finishLabel.anchorAt(1, 1);
     this.world.addChild(
       this.city,
       this.cityEdges,
@@ -424,7 +449,7 @@ export class Renderer {
   static async create(): Promise<Renderer> {
     const app = new Application();
     await app.init({
-      background: COLOR.background,
+      background: PALETTES.menu.background,
       resizeTo: window,
       resolution: window.devicePixelRatio,
       autoDensity: true,
@@ -468,6 +493,7 @@ export class Renderer {
   /** Met la scène à jour pour l'état donné ; PixiJS la rend juste après. */
   draw(state: SimState, camera: Camera, frame: GameFrame): void {
     if (this.width !== this.laidOutWidth || this.height !== this.laidOutHeight) this.layout();
+    this.applyPalette(frame.palette);
     const { tuning, effects } = frame;
     const view = camera.viewBounds();
     this.world.rotation = camera.angle;
@@ -492,6 +518,35 @@ export class Renderer {
     this.drawOverlay(state, frame);
   }
 
+  /**
+   * Prend l'ambiance de l'image. Les dessins la relisent d'eux-mêmes à chaque
+   * image ; ici, seulement ce qui vit d'une image à l'autre : le fond de la scène
+   * et les teintes des textes. Une teinte se change sans retracer le texte, même
+   * à chaque image d'un fondu. Une palette identique à la précédente ne coûte rien.
+   */
+  private applyPalette(palette: Palette): void {
+    if (palette === this.palette) return;
+    this.palette = palette;
+    this.app.renderer.background.color = palette.background;
+    this.normalTube = { color: palette.tube, halo: palette.halo };
+    this.tintTexts();
+  }
+
+  /** Teintes des textes qui suivent la palette. */
+  private tintTexts(): void {
+    const { accent, halo, altitudeLabel } = this.palette;
+    this.multiplierText.tint = accent;
+    this.bannerText.glow = accent;
+    this.bannerDetail.glow = accent;
+    this.finishLabel.glow = halo;
+    for (const label of this.altitudeLabels) label.tint = altitudeLabel;
+  }
+
+  /** Cœur et halo de l'espèce `kind` : fixes, sauf le point normal qui prend le tube de la palette. */
+  private tubeOf(kind: AnchorKind): Tube {
+    return kind === 'normal' ? this.normalTube : SPECIES_TUBE[kind];
+  }
+
   /** Positions qui ne dépendent que de la taille de l'écran. */
   private layout(): void {
     const { width, height } = this;
@@ -507,7 +562,7 @@ export class Renderer {
     this.testTag.position.set(width / 2, top);
     this.bannerText.position.set(width / 2, top + BANNER_OFFSET);
     this.bannerDetail.position.x = width / 2;
-    this.bannerDetail.style.wordWrapWidth = width - 2 * BANNER_SIDE_MARGIN;
+    this.bannerDetail.wrapWidth = width - 2 * BANNER_SIDE_MARGIN;
   }
 
   /**
@@ -537,7 +592,7 @@ export class Renderer {
       for (const line of lines) {
         line.forEach((point, index) => (index === 0 ? g.moveTo(point.x, point.y) : g.lineTo(point.x, point.y)));
       }
-      g.stroke({ width: CITY_WIDTH, color: COLOR.city, alpha: CITY_ROW_ALPHA[row] ?? 1, join: 'round' });
+      g.stroke({ width: CITY_WIDTH, color: this.palette.city, alpha: CITY_ROW_ALPHA[row] ?? 1, join: 'round' });
     });
   }
 
@@ -579,11 +634,11 @@ export class Renderer {
       label.text = `${level * ALTITUDE_STEP} m`;
       label.position.set(view.left + HUD_SIDE_MARGIN / 2, y - 2);
     }
-    lines.stroke({ width: 1, color: COLOR.altitudeLine });
+    lines.stroke({ width: 1, color: this.palette.altitudeLine });
   }
 
   /**
-   * Ligne d'arrivée d'un niveau : un tube pointillé blanc froid sur toute la
+   * Ligne d'arrivée d'un niveau : un tube pointillé de la palette (cœur pâle, halo de l'ambiance) sur toute la
    * largeur et « Arrivée » à droite. Elle est dessinée sous les accroches et les
    * dangers, qu'elle ne masque jamais. Rien en course libre.
    */
@@ -592,12 +647,12 @@ export class Renderer {
     const y = state.finishY === null ? null : camera.worldToScreen({ x: 0, y: state.finishY }).y;
     this.finishLabel.visible = y !== null && y >= view.top && y <= view.bottom;
     if (y === null || !this.finishLabel.visible) return;
-    neonStroke(g, (target) => dashedLine(target, { x: view.left, y }, { x: view.right, y }, FINISH_DASH, FINISH_GAP), { color: COLOR.finish, halo: COLOR.tubeHalo, width: FINISH_WIDTH });
+    neonStroke(g, (target) => dashedLine(target, { x: view.left, y }, { x: view.right, y }, FINISH_DASH, FINISH_GAP), { color: this.palette.tube, halo: this.palette.halo, width: FINISH_WIDTH });
     this.finishLabel.position.set(view.right - HUD_SIDE_MARGIN / 2, y - FINISH_WIDTH - 2);
   }
 
   /**
-   * Coup de vent : des traînées fines, cyan pâle, qui filent dans le sens du
+   * Coup de vent : des traînées fines, d'une teinte pâle de la palette, qui filent dans le sens du
    * vent sur toute la vue, sous les points pour n'en masquer aucun. Rien sans vent.
    */
   private drawWind(effects: Effects, windX: number, view: ViewBounds): void {
@@ -615,7 +670,7 @@ export class Renderer {
           target.moveTo(x - half, y).lineTo(x + half, y);
         }
       },
-      { color: COLOR.wind, halo: COLOR.wind, width: WIND_WIDTH, alpha: WIND_ALPHA, strength: 0.6, spread: 0.7, cap: 'round' },
+      { color: this.palette.pale, halo: this.palette.pale, width: WIND_WIDTH, alpha: WIND_ALPHA, strength: 0.6, spread: 0.7, cap: 'round' },
     );
   }
 
@@ -623,7 +678,8 @@ export class Renderer {
   private altitudeLabel(slot: number): Text {
     let label = this.altitudeLabels[slot];
     if (!label) {
-      label = makeText('', 12, COLOR.altitudeLabel);
+      label = makeText('', 12, COLOR.white);
+      label.tint = this.palette.altitudeLabel;
       label.anchor.set(0, 1);
       this.altitudeLabels[slot] = label;
       this.altitudeLabelLayer.addChild(label);
@@ -692,17 +748,17 @@ export class Renderer {
     }
   }
 
-  /** Le toit de départ : une dalle sombre à la hauteur du sol de la partie, de -5 à +5 m, dont l'arête haute est un tube cyan. */
+  /** Le toit de départ : une dalle sombre à la hauteur du sol de la partie, de -5 à +5 m, dont l'arête haute est un tube de la palette. */
   private drawRoof(state: SimState, camera: Camera): void {
     const topLeft = camera.worldToScreen({ x: -ROOF_HALF_WIDTH, y: state.groundY });
     const scale = camera.scale;
     const width = 2 * ROOF_HALF_WIDTH * scale;
-    const g = this.roof.clear().rect(topLeft.x, topLeft.y, width, ROOF_THICKNESS * scale).fill(COLOR.roofFill);
-    neonLine(g, topLeft, { x: topLeft.x + width, y: topLeft.y }, { color: COLOR.tube, halo: COLOR.tubeHalo, width: ROOF_EDGE_WIDTH, alpha: 0.85, strength: 0.7 });
+    const g = this.roof.clear().rect(topLeft.x, topLeft.y, width, ROOF_THICKNESS * scale).fill(this.palette.roofFill);
+    neonLine(g, topLeft, { x: topLeft.x + width, y: topLeft.y }, { ...this.normalTube, width: ROOF_EDGE_WIDTH, alpha: 0.85, strength: 0.7 });
   }
 
   /**
-   * Câbles : un rail cyan tireté discret sous chaque point qui glisse, de l'un
+   * Câbles : un rail tireté discret, au halo de la palette, sous chaque point qui glisse, de l'un
    * à l'autre de ses bouts, sur une lueur continue très pâle. Le point, lui, se
    * dessine à sa position du moment.
    */
@@ -711,14 +767,14 @@ export class Renderer {
     const ends = state.anchors.flatMap((anchor) => (anchor.cable && !anchor.broken ? [{ from: camera.worldToScreen(anchor.cable.from), to: camera.worldToScreen(anchor.cable.to) }] : []));
     if (ends.length === 0) return;
     for (const rail of ends) g.moveTo(rail.from.x, rail.from.y).lineTo(rail.to.x, rail.to.y);
-    g.stroke({ width: CABLE_GLOW_WIDTH, color: COLOR.cable, alpha: CABLE_GLOW_ALPHA });
+    g.stroke({ width: CABLE_GLOW_WIDTH, color: this.palette.halo, alpha: CABLE_GLOW_ALPHA });
     for (const rail of ends) dashedLine(g, rail.from, rail.to, CABLE_DASH, CABLE_GAP);
-    g.stroke({ width: CABLE_WIDTH, color: COLOR.cable, alpha: CABLE_ALPHA });
+    g.stroke({ width: CABLE_WIDTH, color: this.palette.halo, alpha: CABLE_ALPHA });
   }
 
   /**
-   * Les points d'accroche, chacun un tube de néon. Normal : disque blanc froid,
-   * halo cyan. Fragile : disque magenta, fêlure sombre, anneau en tirets, qui
+   * Les points d'accroche, chacun un tube de néon. Normal : disque pâle,
+   * au halo de la palette. Fragile : disque magenta, fêlure sombre, anneau en tirets, qui
    * grésille ; un anneau qui se vide pendant la tenue. Propulseur : disque cyan
    * vif dans un anneau, surmonté de chevrons qui scintillent. Prise électrique :
    * orange au calme, anneau qui grésille quand elle avertit, rouge à halo fort
@@ -758,10 +814,10 @@ export class Renderer {
       const beat = pulse(paint.clock, HELD_PULSE_HZ, 0.3);
       if (held.kind === 'lanceur') {
         // La coupe elle-même respire, un peu plus large : un anneau de plus la brouillerait.
-        const tube = { ...KIND_TUBE.lanceur, width: 1.5, alpha: 0.4 + 0.6 * beat, strength: beat, spread: 1.2, cap: 'round' as const, join: 'round' as const };
+        const tube = { ...SPECIES_TUBE.lanceur, width: 1.5, alpha: 0.4 + 0.6 * beat, strength: beat, spread: 1.2, cap: 'round' as const, join: 'round' as const };
         neonStroke(g, (target) => traceCup(target, p.x, p.y, cupRadius(paint.radius) + HELD_RING_GAP), tube);
       } else {
-        neonCircle(g, p.x, p.y, paint.ring + HELD_RING_GAP, { color: COLOR.tube, halo: COLOR.tubeHalo, width: 1.5, alpha: 0.4 + 0.6 * beat, strength: beat, spread: 1.2 });
+        neonCircle(g, p.x, p.y, paint.ring + HELD_RING_GAP, { ...this.normalTube, width: 1.5, alpha: 0.4 + 0.6 * beat, strength: beat, spread: 1.2 });
       }
     }
 
@@ -781,7 +837,7 @@ export class Renderer {
   private paintOff(g: Graphics, camera: Camera, off: readonly Anchor[], paint: AnchorPaint): void {
     for (const kind of KINDS) {
       const spots = off.filter((anchor) => anchor.kind === kind).map((anchor) => ({ id: anchor.id, ...camera.worldToScreen(anchor.pos) }));
-      const tube = { ...KIND_TUBE[kind], alpha: DARK_ALPHA, strength: 0 };
+      const tube = { ...this.tubeOf(kind), alpha: DARK_ALPHA, strength: 0 };
       // Même empreinte que le tube allumé : un disque, ou l'anneau de l'éclipse.
       if (kind === 'eclipse') neonRings(g, spots, () => paint.ring - 1, { ...tube, width: KIND_MARK_WIDTH + 0.5 });
       else neonDiscs(g, spots, paint.radius, tube);
@@ -793,25 +849,25 @@ export class Renderer {
     const { radius, ring, clock, scale } = paint;
     const core = pass === 'core';
 
-    neonDiscs(g, groups.normal, radius, { ...KIND_TUBE.normal, pass });
+    neonDiscs(g, groups.normal, radius, { ...this.normalTube, pass });
 
     // Lanceur : un disque vert d'eau au creux d'une coupe en « Y » ouverte vers le haut, sur un court pied : une fronde. Rien d'un propulseur, qui est un anneau fermé à chevrons.
     if (groups.lanceur.length > 0) {
       const cup = cupRadius(radius);
-      neonDiscs(g, groups.lanceur, radius, { ...KIND_TUBE.lanceur, pass });
+      neonDiscs(g, groups.lanceur, radius, { ...SPECIES_TUBE.lanceur, pass });
       neonStroke(
         g,
         (target) => {
           for (const spot of groups.lanceur) traceCup(target, spot.x, spot.y, cup);
         },
-        { ...KIND_TUBE.lanceur, width: CUP_WIDTH, spread: MARK_SPREAD, cap: 'round', join: 'round', pass },
+        { ...SPECIES_TUBE.lanceur, width: CUP_WIDTH, spread: MARK_SPREAD, cap: 'round', join: 'round', pass },
       );
     }
 
     // Fragile : le disque grésille, chacun à son rythme ; anneau en huit tirets ; fêlure sombre au cœur.
     if (groups.fragile.length > 0) {
-      if (core) neonDiscs(g, groups.fragile, radius, { ...KIND_TUBE.fragile, pass });
-      else for (const spot of groups.fragile) neonDiscs(g, [spot], radius, { ...KIND_TUBE.fragile, strength: flicker(clock, spot.id, 0.4) * 1.2, pass });
+      if (core) neonDiscs(g, groups.fragile, radius, { ...SPECIES_TUBE.fragile, pass });
+      else for (const spot of groups.fragile) neonDiscs(g, [spot], radius, { ...SPECIES_TUBE.fragile, strength: flicker(clock, spot.id, 0.4) * 1.2, pass });
       neonStroke(
         g,
         (target) => {
@@ -823,7 +879,7 @@ export class Renderer {
             }
           }
         },
-        { ...KIND_TUBE.fragile, width: KIND_MARK_WIDTH, spread: MARK_SPREAD, pass },
+        { ...SPECIES_TUBE.fragile, width: KIND_MARK_WIDTH, spread: MARK_SPREAD, pass },
       );
       if (core) {
         glyph(g, groups.fragile, CRACK, radius);
@@ -833,8 +889,8 @@ export class Renderer {
 
     // Propulseur : disque cyan vif, anneau plein, chevrons qui scintillent l'un après l'autre.
     if (groups.booster.length > 0) {
-      neonDiscs(g, groups.booster, radius, { ...KIND_TUBE.booster, pass });
-      neonRings(g, groups.booster, () => ring, { ...KIND_TUBE.booster, width: KIND_MARK_WIDTH, spread: MARK_SPREAD, pass });
+      neonDiscs(g, groups.booster, radius, { ...SPECIES_TUBE.booster, pass });
+      neonRings(g, groups.booster, () => ring, { ...SPECIES_TUBE.booster, width: KIND_MARK_WIDTH, spread: MARK_SPREAD, pass });
       const halfWidth = Math.max(CHEVRON_MIN_HALF_WIDTH, CHEVRON_HALF_WIDTH * scale);
       const rise = halfWidth * 0.75;
       for (let k = 0; k < CHEVRON_COUNT; k += 1) {
@@ -846,7 +902,7 @@ export class Renderer {
               target.moveTo(spot.x - halfWidth, base).lineTo(spot.x, base - rise).lineTo(spot.x + halfWidth, base);
             }
           },
-          { ...KIND_TUBE.booster, width: CHEVRON_WIDTH, alpha: 0.35 + 0.65 * pulse(clock - k * CHEVRON_LAG, CHEVRON_HZ, 0), spread: MARK_SPREAD, cap: 'round', join: 'round', pass },
+          { ...SPECIES_TUBE.booster, width: CHEVRON_WIDTH, alpha: 0.35 + 0.65 * pulse(clock - k * CHEVRON_LAG, CHEVRON_HZ, 0), spread: MARK_SPREAD, cap: 'round', join: 'round', pass },
         );
       }
     }
@@ -854,7 +910,7 @@ export class Renderer {
     // Prise électrique : un disque orange à l'éclair sombre. Au calme, un anneau pâle ; elle avertit : l'anneau grésille et tremble ; chargée : rouge, halo fort, pointes qui tournent.
     const electric = [...groups.calm, ...groups.warning, ...groups.charged];
     if (electric.length > 0) {
-      const orange = KIND_TUBE.electrique;
+      const orange = SPECIES_TUBE.electrique;
       neonDiscs(g, groups.calm, radius, { ...orange, pass });
       neonDiscs(g, groups.warning, radius, { ...orange, strength: 1.3, pass });
       neonDiscs(g, groups.charged, radius, { ...CHARGED_TUBE, spread: 1.7, strength: 1.6 * pulse(clock, 6, 0.75), pass });
@@ -887,7 +943,7 @@ export class Renderer {
 
     // Prise à éclipse allumée : un anneau violet creux et son point, en pleine lueur. Le halo, court, laisse le creux de l'anneau sombre.
     if (groups.eclipse.length > 0) {
-      const tube = { ...KIND_TUBE.eclipse, spread: MARK_SPREAD, strength: 1.5, pass };
+      const tube = { ...SPECIES_TUBE.eclipse, spread: MARK_SPREAD, strength: 1.5, pass };
       neonRings(g, groups.eclipse, () => ring - 1, { ...tube, width: KIND_MARK_WIDTH + 0.5 });
       neonDiscs(g, groups.eclipse, radius * 0.35, tube);
     }
@@ -912,12 +968,12 @@ export class Renderer {
     const lit = clamp((effects.clock - this.litSince) / TARGET_IGNITE_SECONDS, 0, 1);
     const p = camera.worldToScreen(target.pos);
     const radius = Math.max(TARGET_RING_RADIUS * camera.scale, ANCHOR_RADIUS * camera.scale + 6) * (1 + TARGET_IGNITE_WIDEN * (1 - lit));
-    neonCircle(g, p.x, p.y, radius, { color: COLOR.tube, halo: COLOR.tubeHalo, width: TARGET_RING_WIDTH, alpha: 0.4 + 0.6 * lit, strength: lit * (0.8 + 0.2 * pulse(effects.clock, 3, 0)) });
+    neonCircle(g, p.x, p.y, radius, { ...this.normalTube, width: TARGET_RING_WIDTH, alpha: 0.4 + 0.6 * lit, strength: lit * (0.8 + 0.2 * pulse(effects.clock, 3, 0)) });
   }
 
   /**
    * Le trait part du personnage et se dessine vers le point pendant les
-   * premiers centièmes de seconde : un tube blanc froid. À un lanceur, il n'y a
+   * premiers centièmes de seconde : un tube de la palette. À un lanceur, il n'y a
    * pas de corde : l'élastique de la fronde prend sa place.
    */
   private drawRope(state: SimState, camera: Camera, tuning: Tuning, effects: Effects): void {
@@ -937,7 +993,7 @@ export class Renderer {
     // La vitesse se lit sur la corde : plus le treuil accélère le balancement, plus elle épaissit et brille, jusqu'au plafond du treuil.
     const speed = Math.hypot(state.hero.vel.x, state.hero.vel.y);
     const heat = Math.min(1, Math.max(0, (speed - ROPE_CALM_SPEED) / (tuning.reelMaxSpeed - ROPE_CALM_SPEED)));
-    neonLine(g, from, tip, { color: COLOR.tube, halo: COLOR.tubeHalo, width: ROPE_WIDTH + ROPE_HEAT_WIDTH * heat, strength: 1 + ROPE_HEAT_GLOW * heat, spread: 1 + ROPE_HEAT_SPREAD * heat, cap: 'round' });
+    neonLine(g, from, tip, { ...this.normalTube, width: ROPE_WIDTH + ROPE_HEAT_WIDTH * heat, strength: 1 + ROPE_HEAT_GLOW * heat, spread: 1 + ROPE_HEAT_SPREAD * heat, cap: 'round' });
   }
 
   /**
@@ -972,7 +1028,7 @@ export class Renderer {
         target.moveTo(tips.left.x, tips.left.y).lineTo(hero.x, hero.y);
         target.moveTo(tips.right.x, tips.right.y).lineTo(hero.x, hero.y);
       },
-      { color: mixColor(COLOR.launcher, COLOR.tube, ratio), halo: COLOR.launcher, width: bandWidth(ratio), strength: (0.7 + 0.9 * ratio) * beat, spread: 0.8 + 0.5 * ratio, cap: 'round', join: 'round' },
+      { color: mixColor(COLOR.launcher, COLOR.hot, ratio), halo: COLOR.launcher, width: bandWidth(ratio), strength: (0.7 + 0.9 * ratio) * beat, spread: 0.8 + 0.5 * ratio, cap: 'round', join: 'round' },
     );
 
     // La jauge : un anneau autour du personnage, qui se remplit depuis le haut avec la traction.
@@ -980,7 +1036,7 @@ export class Renderer {
     const gaugeRadius = tuning.heroRadius * scale + GAUGE_GAP;
     g.circle(hero.x, hero.y, gaugeRadius).stroke({ width: GAUGE_WIDTH, color: COLOR.launcher, alpha: GAUGE_TRACK_ALPHA });
     neonStroke(g, (target) => target.moveTo(hero.x, hero.y - gaugeRadius).arc(hero.x, hero.y, gaugeRadius, -Math.PI / 2, -Math.PI / 2 + ratio * TAU), {
-      color: mixColor(COLOR.launcher, COLOR.tube, ratio * ratio),
+      color: mixColor(COLOR.launcher, COLOR.hot, ratio * ratio),
       halo: COLOR.launcher,
       width: GAUGE_WIDTH + (full ? 1 : 0),
       strength: full ? 1.6 * beat : 1,
@@ -988,7 +1044,7 @@ export class Renderer {
   }
 
   /**
-   * La brume : une nappe bleu-violet du niveau `fogY` jusqu'au bas de la vue,
+   * La brume : une nappe de la teinte de la palette, du niveau `fogY` jusqu'au bas de la vue,
    * deux bandes plus claires sous la crête pour la faire monter en lumière, et
    * une ligne de crête lumineuse, qui clignote tant que l'alerte accélère la
    * brume.
@@ -999,15 +1055,15 @@ export class Renderer {
     if (top >= view.bottom) return;
     const visibleTop = Math.max(view.top, top);
     const width = view.right - view.left;
-    g.rect(view.left, visibleTop, width, view.bottom - visibleTop).fill({ color: COLOR.fog, alpha: FOG_ALPHA });
+    g.rect(view.left, visibleTop, width, view.bottom - visibleTop).fill({ color: this.palette.fog, alpha: FOG_ALPHA });
     if (top < view.top) return;
-    for (const band of FOG_BANDS) g.rect(view.left, top, width, Math.min(band.depth, view.bottom - top)).fill({ color: COLOR.fogEdge, alpha: band.alpha });
+    for (const band of FOG_BANDS) g.rect(view.left, top, width, Math.min(band.depth, view.bottom - top)).fill({ color: this.palette.fogEdge, alpha: band.alpha });
     const blink = state.fogFactor > 1 ? alertAlpha(effects.clock) : 1;
-    neonLine(g, { x: view.left, y: top }, { x: view.right, y: top }, { color: COLOR.fogEdge, halo: COLOR.fogEdge, width: FOG_EDGE_WIDTH, alpha: blink, spread: 1.6 });
+    neonLine(g, { x: view.left, y: top }, { x: view.right, y: top }, { color: this.palette.fogEdge, halo: this.palette.fogEdge, width: FOG_EDGE_WIDTH, alpha: blink, spread: 1.6 });
   }
 
   /**
-   * Ombre prédictive : quelques points cyan pâle, discrets, qui montrent où irait
+   * Ombre prédictive : quelques points pâles, discrets, qui montrent où irait
    * le personnage s'il lâchait maintenant. Tenu à un lanceur, elle est la visée :
    * plus longue, plus grosse, plus nette.
    */
@@ -1018,13 +1074,13 @@ export class Renderer {
       const p = camera.worldToScreen(point);
       g.circle(p.x, p.y, aiming ? LAUNCH_SHADOW_DOT_RADIUS : SHADOW_DOT_RADIUS);
     }
-    g.fill({ color: COLOR.shadow, alpha: aiming ? LAUNCH_SHADOW_ALPHA : SHADOW_ALPHA });
+    g.fill({ color: this.palette.pale, alpha: aiming ? LAUNCH_SHADOW_ALPHA : SHADOW_ALPHA });
   }
 
-  /** Le personnage : un disque blanc froid, le plus lumineux du jeu, au halo cyan plus large que celui des points. */
+  /** Le personnage : un disque pâle, le plus lumineux du jeu, au halo de la palette plus large que celui des points. */
   private drawHero(state: SimState, camera: Camera, tuning: Tuning): void {
     const p = camera.worldToScreen(state.hero.pos);
-    neonDiscs(this.hero.clear(), [p], tuning.heroRadius * camera.scale, { color: COLOR.tube, halo: COLOR.tubeHalo, spread: 1.4 });
+    neonDiscs(this.hero.clear(), [p], tuning.heroRadius * camera.scale, { ...this.normalTube, spread: 1.4 });
   }
 
   /** Textes flottants près du personnage : ils montent un peu et s'effacent. Jamais coupés par le bord de l'écran. */
@@ -1069,7 +1125,7 @@ export class Renderer {
     if (banner.detail === null) return;
     this.bannerDetail.text = banner.detail;
     this.bannerDetail.alpha = alpha;
-    this.bannerDetail.position.y = this.bannerText.y + this.bannerText.height + BANNER_DETAIL_GAP;
+    this.bannerDetail.position.y = this.bannerText.y + this.bannerText.textHeight + BANNER_DETAIL_GAP;
   }
 
   /**
@@ -1095,7 +1151,7 @@ export class Renderer {
 
   /** Ce que les écrans posés sur le jeu doivent montrer : rien en cours de partie. */
   private drawOverlay(state: SimState, frame: GameFrame): void {
-    this.screens.draw(this.overlayView(state, frame), this.width, this.height);
+    this.screens.draw(this.overlayView(state, frame), this.width, this.height, frame.palette);
   }
 
   private overlayView(state: SimState, frame: GameFrame): OverlayView {

@@ -1,7 +1,7 @@
 import type { Vec2 } from '../core/math/vec2';
 import { Music, silentAudio } from '../audio/music';
 import { LEVELS, levelById, type LevelDef } from '../data/levels';
-import { TITLE_TRACK, levelTrack, type TrackId } from '../data/musique';
+import { TITLE_TRACK, levelTrack, trackFamily, type MusicFamily, type TrackId } from '../data/musique';
 import { levelFor } from '../meta/levels';
 import { createProfile, endLevel, endRun, loadProfile, saveProfile, toggleTalisman, type LevelOutcome, type Profile, type ProfileStorage, type RunOutcome } from '../meta/profile';
 import { RunTracker } from '../meta/runTracker';
@@ -12,6 +12,7 @@ import { Camera } from '../render/camera';
 import { heldKind, windSide } from '../render/cues';
 import { Effects } from '../render/effects';
 import { eventAnnouncement, levelTitle } from '../render/labels';
+import { mixPalette, paletteFor, type Palette } from '../render/palette';
 import type { DeathCause, GameScreen, Renderer } from '../render/renderer';
 import type { CoursePlan } from '../sim/course';
 import type { EventKind } from '../sim/events';
@@ -30,6 +31,11 @@ import { DEFAULT_TUNING, withTuning, type Tuning } from '../sim/tuning';
  * ou la course libre, qui monte sans fin depuis la zone la plus haute franchie.
  * L'écran titre montre toujours une course libre toute neuve en arrière-plan : c'est
  * elle qui porte la graine annoncée.
+ *
+ * L'ambiance suit la musique voulue : la famille de la piste du titre, du niveau
+ * ou de la zone de course libre donne la palette, même quand la musique est
+ * coupée. Quand la famille change, la palette passée au rendu fond de l'ancienne
+ * à la nouvelle en `PALETTE_FADE_SECONDS` de temps réel.
  */
 
 /**
@@ -40,6 +46,10 @@ import { DEFAULT_TUNING, withTuning, type Tuning } from '../sim/tuning';
 const MAX_FRAME_SECONDS = 0.1;
 /** Après la mort ou la victoire, les appuis sont ignorés ce temps : l'écran de fin doit pouvoir être lu. */
 const END_LOCK_SECONDS = 0.6;
+/** Durée du fondu entre la palette d'une famille de musique et celle de la suivante, en secondes de temps réel. */
+export const PALETTE_FADE_SECONDS = 1;
+/** Tolérance de la comparaison du fondu à sa durée : dix images de 0,1 s font 0,9999999999999999 s, et le fondu est fini. */
+const FADE_EPSILON = 1e-9;
 
 /** Ce que le jeu demande au rendu : sa taille, un dessin, et quel bouton se trouve sous un point. */
 export type GameView = Pick<Renderer, 'width' | 'height' | 'draw' | 'hitTest'>;
@@ -106,6 +116,8 @@ export interface DebugState {
   /** Réglage « Musique » du profil, et piste en cours de lecture, ou null. */
   readonly musicOn: boolean;
   readonly track: TrackId | null;
+  /** Famille de la musique voulue en ce moment, donc l'ambiance visée : la palette y arrive en fondu si elle vient de changer. */
+  readonly palette: MusicFamily;
   /** Direction unitaire de la gravité : (0, -1) d'ordinaire, qui tourne vers (±1, 0) pendant une bascule. */
   readonly gravityX: number;
   readonly gravityY: number;
@@ -219,6 +231,16 @@ export class Game {
 
   /** La musique : muette par défaut, branchée sur le navigateur par `main.ts`. */
   private readonly music: Music;
+
+  /**
+   * L'ambiance : la famille visée, la palette montrée en ce moment (celle de la
+   * famille une fois le fondu fini), celle d'où le fondu est parti, et le temps
+   * écoulé de ce fondu. Au départ, le titre : le menu, sans fondu.
+   */
+  private paletteFamily: MusicFamily = trackFamily(TITLE_TRACK);
+  private palette: Palette = paletteFor(trackFamily(TITLE_TRACK));
+  private paletteFrom: Palette = this.palette;
+  private paletteSeconds = PALETTE_FADE_SECONDS;
 
   constructor(view: GameView, settings: GameSettings, storage: ProfileStorage, music: Music = new Music(silentAudio())) {
     this.view = view;
@@ -357,9 +379,12 @@ export class Game {
     const { hero, env } = sim.state;
     camera.update(dt, hero.pos, hero.vel, env, visibleExtent(sim.state));
     effects.update(dt, env.wind.x);
+    const track = this.wantedTrack();
     this.music.setEnabled(this.profile.music);
-    this.music.play(this.wantedTrack());
+    this.music.play(track);
     this.music.update(dt);
+    // L'ambiance suit la piste voulue, que la musique joue ou non.
+    this.fadePalette(trackFamily(track), elapsedSeconds);
     // Le monde tourné pendant une bascule : les textes flottent là où le personnage est affiché, pas là où il est dans le repère du monde.
     const heroOnScreen = camera.worldToDisplay(hero.pos);
     for (const event of sim.drain()) {
@@ -381,6 +406,7 @@ export class Game {
       result: this.run.result,
       testMode: this.settings.testMode,
       levelsPage: this.levelsPage,
+      palette: this.palette,
     });
   }
 
@@ -424,6 +450,7 @@ export class Game {
       testMode: this.settings.testMode,
       musicOn: this.profile.music,
       track: this.music.playing,
+      palette: trackFamily(this.wantedTrack()),
       gravityX: state.env.gravityDir.x,
       gravityY: state.env.gravityDir.y,
       windX: state.env.wind.x,
@@ -534,6 +561,28 @@ export class Game {
     const y = sim.state.hero.pos.y;
     const covering = LEVELS.find((candidate) => y >= candidate.startY && y < candidate.endY) ?? LEVELS[LEVELS.length - 1]!;
     return levelTrack(covering.id);
+  }
+
+  /**
+   * Mène le fondu de l'ambiance d'une image. Quand la famille change, il repart
+   * de la palette montrée à cet instant (un fondu interrompu ne saute pas) et
+   * dure `PALETTE_FADE_SECONDS`, l'image qui le lance comprise. Il compte le
+   * temps réel écoulé, sans le plafond des images de la simulation : ce n'est
+   * que du dessin, qui doit durer une seconde même sur un appareil lent. La
+   * palette est l'objet même de la famille une fois le fondu fini : le rendu
+   * reconnaît à son identité qu'elle n'a pas changé.
+   */
+  private fadePalette(family: MusicFamily, elapsedSeconds: number): void {
+    if (family !== this.paletteFamily) {
+      this.paletteFamily = family;
+      this.paletteFrom = this.palette;
+      this.paletteSeconds = 0;
+    }
+    const target = paletteFor(family);
+    if (this.palette === target) return;
+    this.paletteSeconds = Math.min(PALETTE_FADE_SECONDS, this.paletteSeconds + Math.max(0, elapsedSeconds));
+    const done = this.paletteSeconds >= PALETTE_FADE_SECONDS - FADE_EPSILON;
+    this.palette = done ? target : mixPalette(this.paletteFrom, target, this.paletteSeconds / PALETTE_FADE_SECONDS);
   }
 
   /**

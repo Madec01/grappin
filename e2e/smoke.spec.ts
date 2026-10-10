@@ -196,6 +196,29 @@ test('?test=1 : tous les niveaux se jouent, sur un profil à part', async ({ pag
   expect(await page.evaluate(() => window.__grappin!.playLevel(7))).toBe(false);
 });
 
+test('ambiances : chaque famille de musique a sa palette, et le fondu se joue sans erreur de console', async ({ page }) => {
+  const errors = watchErrors(page);
+  await open(page, '/?test=1');
+  expect((await state(page)).palette).toBe('menu');
+  // Un niveau par famille : le titre, puis les quatre biomes et les boss.
+  for (const [level, family] of [
+    [1, 'biome1'],
+    [3, 'biome2'],
+    [5, 'biome3'],
+    [7, 'biome4'],
+    [9, 'boss'],
+  ] as const) {
+    expect(await page.evaluate((id) => window.__grappin!.playLevel(id), level)).toBe(true);
+    expect((await state(page)).palette, `niveau ${level}`).toBe(family);
+    await page.waitForTimeout(400);
+  }
+  // Retour au titre : l'ambiance revient au menu, sans erreur ni écran qui se retrace de travers.
+  await page.evaluate(() => window.__grappin!.restart());
+  expect(await state(page)).toMatchObject({ screen: 'title', palette: 'menu' });
+  await page.waitForTimeout(400);
+  expect(errors).toEqual([]);
+});
+
 test('un pilote automatique grimpe au-delà de 10 m sans erreur de console', async ({ page }) => {
   const errors = watchErrors(page);
   // Brume ralentie : sur les machines lentes de l'intégration continue, le pilote réagit à la cadence

@@ -26,6 +26,9 @@ const GIF_SECONDS = 14;
 const GIF_FPS = 12;
 const GIF_WIDTH = 300;
 
+/** Les images des ambiances : une seconde et demie de jeu, en pas de simulation (cent vingt par seconde). */
+const PALETTE_STEPS = 180;
+
 const PORT = 4175;
 const VIEWPORT = { width: 390, height: 844 };
 const outDir = resolve(process.argv[2] ?? 'captures');
@@ -200,6 +203,9 @@ async function main(): Promise<void> {
     await page.screenshot({ path: join(outDir, '06-fragiles.png') });
     const final = await page.evaluate(() => window.__grappin!.state());
     console.log(`Course libre du robot : ${final.height.toFixed(1)} m, score ${Math.round(final.score)}, écran ${final.screen}`);
+    // Les pages du banc partagent le stockage du navigateur : cette partie, laissée à la brume, finirait un jour et sauvegarderait son
+    // profil par-dessus celui des autres pages (leurs niveaux ouverts), au beau milieu de la suite. On la ramène au titre, où rien ne s'écrit.
+    await page.evaluate(() => window.__grappin!.restart());
 
     // Un niveau : le premier, joué jusqu'à la ligne d'arrivée, puis l'écran de victoire et la liste des niveaux.
     const levelPage = await context.newPage();
@@ -346,6 +352,33 @@ async function main(): Promise<void> {
     await ending.waitForFunction(() => window.__grappin?.state().screen === 'dead', undefined, { timeout: 20_000 });
     await ending.waitForTimeout(200);
     await ending.screenshot({ path: join(outDir, '07-fin.png') });
+
+    // Les ambiances : une image par famille de musique (niveaux 1, 3, 5, 7 et 9), après une seconde et demie de jeu, soit le fondu fini.
+    // Le temps de jeu se compte en pas de simulation (cent vingt par seconde) et non à l'horloge : le rendu logiciel est lent, et le jeu
+    // plafonne le temps de chaque image, si bien qu'une seconde et demie d'horloge peut n'être qu'une seconde de jeu.
+    const palettePage = await context.newPage();
+    await palettePage.goto(`http://localhost:${PORT}/?test=1`);
+    await palettePage.waitForFunction(() => window.__grappin?.state().screen === 'title');
+    await palettePage.evaluate(() => window.__grappin!.unlockAll());
+    const families: Array<[number, string]> = [
+      [1, 'biome1'],
+      [3, 'biome2'],
+      [5, 'biome3'],
+      [7, 'biome4'],
+      [9, 'boss'],
+    ];
+    for (const [id, family] of families) {
+      await palettePage.evaluate((levelId) => window.__grappin!.playLevel(levelId), id);
+      await palettePage.waitForFunction(() => window.__grappin?.state().screen === 'playing');
+      await palettePage.waitForFunction((steps) => window.__grappin!.state().step >= steps, PALETTE_STEPS, { timeout: 30_000 });
+      await palettePage.screenshot({ path: join(outDir, `palette-${family}.png`) });
+      const st = await palettePage.evaluate(() => window.__grappin!.state());
+      console.log(`Ambiance ${family} : niveau ${id}, palette ${st.palette}, écran ${st.screen}`);
+      await palettePage.evaluate(() => window.__grappin!.restart());
+      await palettePage.waitForFunction(() => window.__grappin?.state().screen === 'title');
+    }
+    await palettePage.close();
+
     if (errors.length > 0) console.warn('Erreurs console :', errors);
 
     const videoPath = await page.video()?.path();

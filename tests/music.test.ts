@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FADE_SECONDS, MUSIC_VOLUME, Music, type AudioPlayer } from '../src/audio/music';
 import { LEVELS } from '../src/data/levels';
-import { TITLE_TRACK, levelTrack, trackFile } from '../src/data/musique';
+import { TITLE_TRACK, levelTrack, trackFamily, trackFile, type MusicFamily, type TrackId } from '../src/data/musique';
 
 /** Un faux lecteur qui note ce qu'on lui fait. */
 function fakeFactory(): { factory: (src: string) => AudioPlayer; players: (AudioPlayer & { src: string; played: number; released: boolean })[] } {
@@ -42,6 +42,40 @@ describe('musiques', () => {
     expect(TITLE_TRACK).toBe('menu');
     // Deux niveaux qui se suivent n'ont jamais la même piste.
     for (let id = 2; id <= LEVELS.length; id += 1) expect(levelTrack(id)).not.toBe(levelTrack(id - 1));
+  });
+
+  it('chaque piste a sa famille, et les niveaux vont par familles de biome : quatre biomes, les boss, le menu', () => {
+    const families: Record<TrackId, MusicFamily> = {
+      menu: 'menu',
+      'biome1-1': 'biome1',
+      'biome1-2': 'biome1',
+      'biome2-1': 'biome2',
+      'biome2-2': 'biome2',
+      'biome3-1': 'biome3',
+      'biome3-2': 'biome3',
+      'biome4-1': 'biome4',
+      'biome4-2': 'biome4',
+      boss1: 'boss',
+      boss2: 'boss',
+      boss3: 'boss',
+      boss4: 'boss',
+    };
+    for (const [track, family] of Object.entries(families)) expect(trackFamily(track as TrackId)).toBe(family);
+
+    const levelsOf: Record<MusicFamily, number[]> = {
+      biome1: [1, 2, 11, 12],
+      biome2: [3, 4, 13, 14],
+      biome3: [5, 6, 15, 16],
+      biome4: [7, 8, 17, 19],
+      boss: [9, 10, 18, 20],
+      menu: [],
+    };
+    for (const [family, ids] of Object.entries(levelsOf)) {
+      for (const id of ids) expect(trackFamily(levelTrack(id))).toBe(family);
+    }
+    // Tous les niveaux sont couverts, une fois chacun.
+    expect(Object.values(levelsOf).flat().sort((a, b) => a - b)).toEqual(LEVELS.map((level) => level.id));
+    expect(trackFamily(TITLE_TRACK)).toBe('menu');
   });
 
   it('rien ne joue avant le premier geste ; ensuite la piste voulue part en boucle, et un changement fond l\'ancienne', () => {

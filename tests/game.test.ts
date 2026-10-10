@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Game, readSettings } from '../src/app/game';
+import { Game, PALETTE_FADE_SECONDS, readSettings } from '../src/app/game';
 import { Music, type AudioPlayer } from '../src/audio/music';
 import { loadProfile as loadSavedProfile } from '../src/meta/profile';
 import { LEVELS, levelById } from '../src/data/levels';
@@ -8,6 +8,7 @@ import type { TalismanId } from '../src/meta/talismans';
 import { FIRST_CLEAR_XP, STAR_XP, freeRunStartY, unlockedLevel, type LevelResult } from '../src/meta/traversee';
 import type { ButtonId } from '../src/render/buttons';
 import type { Camera } from '../src/render/camera';
+import { PALETTES, mixPalette, type Palette } from '../src/render/palette';
 import type { DeathCause, GameFrame, GameScreen } from '../src/render/renderer';
 import { PULL_MAX } from '../src/sim/launcher';
 import type { SimState } from '../src/sim/state';
@@ -42,6 +43,8 @@ interface Seen {
   hit: (x: number, y: number) => ButtonId | null;
   /** Page de la liste des niveaux telle que la dernière image l'a reçue. */
   lastLevelsPage: number;
+  /** L'ambiance que la dernière image a reçue. */
+  lastPalette: Palette | null;
 }
 
 /** Profil d'un joueur déjà avancé : de l'expérience et des talismans équipés. */
@@ -70,6 +73,7 @@ function makeGame(search = '', saved?: Profile, music?: Music): { game: Game; se
     lastTextAt: [],
     hit: () => null,
     lastLevelsPage: 0,
+    lastPalette: null,
   };
   const view = {
     width: 390,
@@ -87,6 +91,7 @@ function makeGame(search = '', saved?: Profile, music?: Music): { game: Game; se
       seen.lastTuning = frame.tuning;
       seen.lastTestMode = frame.testMode;
       seen.lastLevelsPage = frame.levelsPage;
+      seen.lastPalette = frame.palette;
       seen.lastProfile = frame.profile;
       seen.lastOutcome = frame.outcome;
       seen.lastResult = frame.result;
@@ -319,6 +324,7 @@ describe('jeu', () => {
         'missions',
         'mode',
         'obstacles',
+        'palette',
         'pickups',
         'pos',
         'pullX',
@@ -1657,3 +1663,161 @@ describe('musique', () => {
     expect(loadSavedProfile(storage).music).toBe(true);
   });
 });
+
+describe('ambiance', () => {
+  /** Un faux lecteur : il suffit de savoir ce qui joue. */
+  function fakeAudio(): (src: string) => AudioPlayer {
+    return () => ({ loop: false, volume: 1, paused: true, play: () => undefined, pause: () => undefined, release: () => undefined });
+  }
+
+  /** Joue `seconds` de temps réel en images de 50 ms. */
+  function run(game: Game, seconds: number): void {
+    for (let elapsed = 0; elapsed < seconds - 1e-9; elapsed += 0.05) game.frame(0.05);
+  }
+
+  /** Le canal `shift` de la couleur est-il entre ceux de `a` et de `b` ? */
+  function between(value: number, a: number, b: number, shift: number): boolean {
+    const channel = (color: number): number => (color >> shift) & 0xff;
+    return channel(value) >= Math.min(channel(a), channel(b)) && channel(value) <= Math.max(channel(a), channel(b));
+  }
+
+  it('le titre est dans l\'ambiance du menu, sans fondu, et le rendu reçoit la palette de la famille', () => {
+    const { game, seen } = makeGame('?graine=3');
+    expect(game.debugState().palette).toBe('menu');
+    game.frame(0.016);
+    expect(seen.lastPalette).toBe(PALETTES.menu);
+    expect(seen.lastPalette).toBe(PALETTES.biome1);
+  });
+
+  it('une partie d\'une autre famille fond de l\'ancienne palette à la nouvelle en une seconde : à mi-chemin, entre les deux ; puis la nouvelle', () => {
+    const { game, seen } = makeGame('?graine=3', clearedProfile(2));
+    game.frame(0.016);
+    expect(game.playLevel(3)).toBe(true);
+    // La famille visée change tout de suite.
+    expect(game.debugState().palette).toBe('biome2');
+    game.frame(0.05);
+    const first = seen.lastPalette!;
+    expect(first).not.toBe(PALETTES.biome2);
+
+    run(game, PALETTE_FADE_SECONDS / 2 - 0.05);
+    const mid = seen.lastPalette!;
+    expect(mid).toEqual(mixPalette(PALETTES.menu, PALETTES.biome2, 0.5));
+    for (const field of Object.keys(mid) as (keyof Palette)[]) {
+      for (const shift of [16, 8, 0]) expect(between(mid[field], PALETTES.menu[field], PALETTES.biome2[field], shift), field).toBe(true);
+    }
+    expect(mid.background).not.toBe(PALETTES.menu.background);
+    expect(mid.background).not.toBe(PALETTES.biome2.background);
+
+    run(game, PALETTE_FADE_SECONDS / 2);
+    expect(seen.lastPalette).toBe(PALETTES.biome2);
+    // Le fondu est fini : la palette ne bouge plus, c'est le même objet à chaque image.
+    game.frame(0.05);
+    expect(seen.lastPalette).toBe(PALETTES.biome2);
+  });
+
+  it('des images de 0,1 s font aussi une seconde, flottants compris ; et le fondu compte le temps réel, sans le plafond des images de la simulation', () => {
+    const { game, seen } = makeGame('?graine=3&test=1');
+    game.playLevel(3);
+    for (let frames = 0; frames < 10; frames += 1) game.frame(0.1);
+    expect(seen.lastPalette).toBe(PALETTES.biome2);
+
+    // Une image longue (appareil lent, onglet endormi) : la simulation ne rattrape que 0,1 s, mais l'ambiance a bien vu passer sa demi-seconde.
+    game.playLevel(5);
+    game.frame(0.5);
+    expect(seen.lastPalette).toEqual(mixPalette(PALETTES.biome2, PALETTES.biome3, 0.5));
+    game.frame(0.5);
+    expect(seen.lastPalette).toBe(PALETTES.biome3);
+  });
+
+  it('un fondu interrompu repart de la palette montrée, sans saut ; et deux niveaux de la même famille n\'en lancent aucun', () => {
+    const { game, seen } = makeGame('?graine=3&test=1');
+    game.unlockAll();
+    game.playLevel(3);
+    run(game, 0.4);
+    const shown = seen.lastPalette!;
+    game.playLevel(9);
+    expect(game.debugState().palette).toBe('boss');
+    game.frame(0.0001);
+    // L'image qui change de cap part de ce qui était montré.
+    for (const field of Object.keys(shown) as (keyof Palette)[]) expect(between(seen.lastPalette![field], shown[field], PALETTES.boss[field], 16)).toBe(true);
+    expect(distanceOfBackground(seen.lastPalette!, shown)).toBeLessThan(2);
+    run(game, PALETTE_FADE_SECONDS + 0.1);
+    expect(seen.lastPalette).toBe(PALETTES.boss);
+
+    // Niveau 9 puis 10 : deux pistes de boss, une seule palette.
+    game.playLevel(10);
+    game.frame(0.05);
+    expect(seen.lastPalette).toBe(PALETTES.boss);
+  });
+
+  it('chaque famille arrive à sa palette : niveaux 1, 3, 5, 7 et 9', () => {
+    const expected = { 1: 'biome1', 3: 'biome2', 5: 'biome3', 7: 'biome4', 9: 'boss' } as const;
+    const { game, seen } = makeGame('?graine=3&test=1');
+    game.unlockAll();
+    for (const [id, family] of Object.entries(expected)) {
+      game.playLevel(Number(id));
+      run(game, PALETTE_FADE_SECONDS + 0.1);
+      expect(game.debugState().palette, `niveau ${id}`).toBe(family);
+      expect(seen.lastPalette, `niveau ${id}`).toBe(PALETTES[family]);
+    }
+  });
+
+  it('le retour au titre refond vers le menu, et la liste des niveaux est dans l\'ambiance du menu', () => {
+    const { game, seen } = makeGame('?graine=3&test=1');
+    game.unlockAll();
+    game.playLevel(9);
+    run(game, PALETTE_FADE_SECONDS + 0.1);
+    expect(seen.lastPalette).toBe(PALETTES.boss);
+    game.restart();
+    game.frame(0.05);
+    expect(game.debugState()).toMatchObject({ screen: 'title', palette: 'menu' });
+    expect(seen.lastPalette).not.toBe(PALETTES.boss);
+    expect(seen.lastPalette).not.toBe(PALETTES.menu);
+    run(game, PALETTE_FADE_SECONDS);
+    expect(seen.lastPalette).toBe(PALETTES.menu);
+  });
+
+  it('la palette suit la piste voulue même quand la musique est coupée', () => {
+    const music = new Music(fakeAudio());
+    const { game, seen } = makeGame('', { ...clearedProfile(2), music: false }, music);
+    game.press(10, 10);
+    run(game, PALETTE_FADE_SECONDS + 0.1);
+    expect(game.debugState()).toMatchObject({ screen: 'playing', levelId: 3, musicOn: false, track: null, palette: 'biome2' });
+    expect(music.playing).toBeNull();
+    expect(seen.lastPalette).toBe(PALETTES.biome2);
+  });
+
+  it('en course libre, franchir la zone d\'un autre biome lance le fondu', () => {
+    const { game, seen } = makeGame('?graine=3');
+    game.playFree();
+    game.frame(0.016);
+    expect(game.debugState().palette).toBe('biome1');
+    expect(seen.lastPalette).toBe(PALETTES.biome1);
+    // Le niveau 3 couvre de 200 à 320 m : on y entre.
+    seen.state!.hero = { pos: { x: 0, y: levelOf(3).startY + 5 }, vel: { x: 0, y: 0 }, grounded: false };
+    game.frame(0.05);
+    expect(game.debugState().palette).toBe('biome2');
+    expect(seen.lastPalette).not.toBe(PALETTES.biome1);
+    expect(seen.lastPalette).not.toBe(PALETTES.biome2);
+    run(game, PALETTE_FADE_SECONDS);
+    expect(seen.lastPalette).toBe(PALETTES.biome2);
+  });
+
+  it('un écran de fin garde l\'ambiance de la partie qui vient de finir', () => {
+    const { game, seen } = makeGame('?graine=3&test=1');
+    game.unlockAll();
+    game.playLevel(5);
+    run(game, PALETTE_FADE_SECONDS + 0.1);
+    expect(game.debugState().palette).toBe('biome3');
+    winByTeleport(game, seen);
+    settle(game);
+    expect(game.debugState().screen).toBe('won');
+    expect(game.debugState().palette).toBe('biome3');
+    expect(seen.lastPalette).toBe(PALETTES.biome3);
+  });
+});
+
+/** Écart du fond entre deux palettes, en niveaux de couleur sur le canal le plus éloigné. */
+function distanceOfBackground(a: Palette, b: Palette): number {
+  return Math.max(...[16, 8, 0].map((shift) => Math.abs(((a.background >> shift) & 0xff) - ((b.background >> shift) & 0xff))));
+}

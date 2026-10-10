@@ -8,7 +8,7 @@ import { starsOf, unlockedLevel, type LevelResult } from '../meta/traversee';
 import { levelButton, levelPageCount, levelsOfPage, type ButtonId, type ButtonRect } from './buttons';
 import { type StarLine, equippedLine, levelEvents, levelPageLabel, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, slotsLine, starLines } from './labels';
 import { neonBar, neonPoly, neonPolyline, neonRoundRect } from './neon';
-import { COLOR, makeText, readSafeInset, starPoints } from './style';
+import { COLOR, GlowText, makeText, readSafeInset, starPoints, type Palette } from './style';
 
 /**
  * Les écrans posés sur le jeu : titre, liste des niveaux, fin de partie,
@@ -16,6 +16,11 @@ import { COLOR, makeText, readSafeInset, starPoints } from './style';
  * néon fin : boutons, lignes équipées, étoiles, barre d'expérience. Un écran
  * n'est dessiné qu'une fois par vue et par taille d'écran : ses halos ne
  * coûtent rien à l'image.
+ *
+ * L'accent de la palette (contour des boutons, lignes allumées, barre d'expérience,
+ * halo des titres) et le voile, qui prend la couleur du fond, ne sont pas figés
+ * au tracé : ces formes sont dessinées en blanc et teintées, si bien qu'une
+ * palette qui change, même en plein fondu, ne retrace rien. Voir `Column.skins`.
  *
  * Chaque écran est fait de deux blocs empilés : celui du haut (l'information)
  * et celui du bas (le bouton et l'invite), collé au bas de l'écran pour rester
@@ -111,20 +116,29 @@ const UI_SPREAD = 0.6;
 /** Force du halo des boutons et des lignes allumées : un cran sous celle du jeu, pour que le texte reste le plus lumineux. */
 const UI_STRENGTH = 0.8;
 
+/** Le halo d'un titre : l'accent de la palette, ou une couleur fixe (la mort est rouge, quelle que soit la musique). */
+type Glow = number | 'accent';
+
 /** Une étoile du jeu : un tube jaune à halo chaud si elle est gagnée, un contour éteint sinon. */
 function drawStar(g: Graphics, x: number, y: number, radius: number, filled: boolean): void {
   if (filled) neonPoly(g, (grow) => starPoints(x, y, radius + grow), { color: COLOR.star, halo: COLOR.starHalo, spread: UI_SPREAD });
   else g.poly(starPoints(x, y, radius)).fill(COLOR.barTrack).stroke({ width: STAR_EMPTY_EDGE_WIDTH, color: COLOR.textLocked });
 }
 
-/** Une coche de la largeur `size`, dont le coin haut gauche est en (`x`, `y`) : un trait de tube cyan. */
-function drawCheck(g: Graphics, x: number, y: number, size: number): void {
+/**
+ * Une coche de la largeur `size`, dont le coin haut gauche est en (`x`, `y`) :
+ * un trait de tube au cœur blanc froid. Son halo est tracé à part, dans `halo`
+ * (en blanc, que l'accent teinte), sous `core`.
+ */
+function drawCheck(halo: Graphics, core: Graphics, x: number, y: number, size: number): void {
   const points = [
     { x, y: y + size * 0.55 },
     { x: x + size * 0.38, y: y + size * 0.9 },
     { x: x + size, y },
   ];
-  neonPolyline(g, points, { color: COLOR.tube, halo: COLOR.tubeHalo, width: 3, cap: 'round', join: 'round', spread: UI_SPREAD });
+  const tube = { color: COLOR.hot, halo: COLOR.white, width: 3, cap: 'round' as const, join: 'round' as const, spread: UI_SPREAD };
+  neonPolyline(halo, points, { ...tube, pass: 'halo' });
+  neonPolyline(core, points, { ...tube, pass: 'core' });
 }
 
 /** Un cadenas, dont le coin haut gauche est en (`x`, `y`). */
@@ -143,6 +157,11 @@ class Column {
   readonly root = new Container();
   /** Boutons du bloc, dans son propre repère. */
   readonly buttons: ButtonRect[] = [];
+  /**
+   * Ce que l'accent de la palette colore dans ce bloc : une fonction par forme
+   * ou par halo, qui en change la teinte. L'écran les appelle avec l'accent du moment.
+   */
+  readonly skins: ((accent: number) => void)[] = [];
   private readonly width: number;
   private cursor = 0;
 
@@ -158,22 +177,50 @@ class Column {
     this.cursor += pixels;
   }
 
-  /** Texte centré, qui passe à la ligne s'il dépasse la largeur du bloc. `glow` : la couleur d'un halo de néon autour des lettres, pour les titres. */
-  line(text: string, size: number, color: number, bold = false, glow?: number): void {
-    const label = makeText(text, size, color, { bold, wrap: this.width, ...(glow === undefined ? {} : { glow }) });
-    label.anchor.set(0.5, 0);
-    label.position.set(this.width / 2, this.cursor);
-    this.root.addChild(label);
-    this.cursor += label.height;
+  /** Une forme que l'accent de la palette teinte : à tracer en blanc, la teinte lui donne sa couleur. */
+  private accented(g: Graphics): Graphics {
+    this.skins.push((accent) => {
+      g.tint = accent;
+    });
+    return g;
   }
 
-  /** Barre d'expérience : un rail sombre, et un tube cyan sur la part `ratio`. */
+  /**
+   * Texte centré, qui passe à la ligne s'il dépasse la largeur du bloc. `glow` :
+   * le halo de néon autour des lettres, pour les titres. 'accent' le fait suivre
+   * la palette ; un nombre est une couleur fixe.
+   */
+  line(text: string, size: number, color: number, bold = false, glow?: Glow): void {
+    if (glow === undefined) {
+      const label = makeText(text, size, color, { bold, wrap: this.width });
+      label.anchor.set(0.5, 0);
+      label.position.set(this.width / 2, this.cursor);
+      this.root.addChild(label);
+      this.cursor += label.height;
+      return;
+    }
+    const label = new GlowText(text, size, color, glow === 'accent' ? COLOR.white : glow, { bold, wrap: this.width });
+    if (glow === 'accent') {
+      this.skins.push((accent) => {
+        label.glow = accent;
+      });
+    }
+    label.anchorAt(0.5, 0);
+    label.position.set(this.width / 2, this.cursor);
+    this.root.addChild(label);
+    this.cursor += label.textHeight;
+  }
+
+  /** Barre d'expérience : un rail sombre, et un tube de l'accent sur la part `ratio`. */
   bar(ratio: number): void {
     const x = (this.width - BAR_WIDTH) / 2;
-    const g = new Graphics().roundRect(x, this.cursor, BAR_WIDTH, BAR_HEIGHT, BAR_HEIGHT / 2).fill(COLOR.barTrack);
+    this.root.addChild(new Graphics().roundRect(x, this.cursor, BAR_WIDTH, BAR_HEIGHT, BAR_HEIGHT / 2).fill(COLOR.barTrack));
     const filled = BAR_WIDTH * Math.min(1, Math.max(0, ratio));
-    if (filled > 0) neonBar(g, x, this.cursor, filled, BAR_HEIGHT, { color: COLOR.barFill, halo: COLOR.tubeHalo, spread: UI_SPREAD });
-    this.root.addChild(g);
+    if (filled > 0) {
+      const fill = this.accented(new Graphics());
+      neonBar(fill, x, this.cursor, filled, BAR_HEIGHT, { color: COLOR.white, halo: COLOR.white, spread: UI_SPREAD });
+      this.root.addChild(fill);
+    }
     this.cursor += BAR_HEIGHT;
   }
 
@@ -188,15 +235,22 @@ class Column {
     this.cursor += Math.max(label.height, done.height);
   }
 
+  /** Le fond sombre d'un bouton de `width` pixels, de gauche `x`, au curseur, et son contour de néon fin, qui prend l'accent. */
+  private buttonFrame(x: number, width: number): void {
+    const panel = new Graphics().roundRect(x, this.cursor, width, BUTTON_HEIGHT, BUTTON_RADIUS).fill({ color: COLOR.panel, alpha: 0.9 });
+    const edge = this.accented(new Graphics());
+    neonRoundRect(edge, x, this.cursor, width, BUTTON_HEIGHT, BUTTON_RADIUS, { color: COLOR.white, halo: COLOR.white, width: BUTTON_EDGE_WIDTH, spread: UI_SPREAD, strength: UI_STRENGTH });
+    this.root.addChild(panel, edge);
+  }
+
   /** Bouton centré, sur fond nuit, au contour de néon fin. */
   button(id: ButtonId, label: string): void {
     const x = (this.width - BUTTON_WIDTH) / 2;
-    const g = new Graphics().roundRect(x, this.cursor, BUTTON_WIDTH, BUTTON_HEIGHT, BUTTON_RADIUS).fill({ color: COLOR.panel, alpha: 0.9 });
-    neonRoundRect(g, x, this.cursor, BUTTON_WIDTH, BUTTON_HEIGHT, BUTTON_RADIUS, { color: COLOR.buttonEdge, halo: COLOR.tubeHalo, width: BUTTON_EDGE_WIDTH, spread: UI_SPREAD, strength: UI_STRENGTH });
+    this.buttonFrame(x, BUTTON_WIDTH);
     const text = makeText(label, BUTTON_FONT_SIZE, COLOR.text, { bold: true });
     text.anchor.set(0.5);
     text.position.set(this.width / 2, this.cursor + BUTTON_HEIGHT / 2);
-    this.root.addChild(g, text);
+    this.root.addChild(text);
     this.buttons.push({ id, x, y: this.cursor, width: BUTTON_WIDTH, height: BUTTON_HEIGHT });
     this.cursor += BUTTON_HEIGHT;
   }
@@ -212,12 +266,11 @@ class Column {
     let x = 0;
     for (const item of items) {
       const width = (room * item.weight) / total;
-      const g = new Graphics().roundRect(x, this.cursor, width, BUTTON_HEIGHT, BUTTON_RADIUS).fill({ color: COLOR.panel, alpha: 0.9 });
-      neonRoundRect(g, x, this.cursor, width, BUTTON_HEIGHT, BUTTON_RADIUS, { color: COLOR.buttonEdge, halo: COLOR.tubeHalo, width: BUTTON_EDGE_WIDTH, spread: UI_SPREAD, strength: UI_STRENGTH });
+      this.buttonFrame(x, width);
       const text = makeText(item.label, BUTTON_FONT_SIZE, COLOR.text, { bold: true });
       text.anchor.set(0.5);
       text.position.set(x + width / 2, this.cursor + BUTTON_HEIGHT / 2);
-      this.root.addChild(g, text);
+      this.root.addChild(text);
       this.buttons.push({ id: item.id, x, y: this.cursor, width, height: BUTTON_HEIGHT });
       x += width + BUTTON_GAP;
     }
@@ -225,19 +278,21 @@ class Column {
   }
 
   /**
-   * Fond d'une ligne : verrouillée, un voile à peine visible ; au repos, un
-   * contour bleu sombre ; allumée (talisman équipé, niveau à jouer), un contour
-   * de néon cyan. `g` porte déjà le rectangle arrondi de la ligne, posée au
-   * curseur.
+   * Fond d'une ligne, ajouté au bloc : verrouillée, un voile à peine visible ;
+   * au repos, un contour bleu sombre ; allumée (talisman équipé, niveau à jouer),
+   * un contour de néon de l'accent. `g` porte déjà le rectangle arrondi de la
+   * ligne, posée au curseur.
    */
   private paintRow(g: Graphics, height: number, look: 'locked' | 'idle' | 'lit'): void {
     const top = this.cursor;
     if (look === 'locked') g.fill({ color: COLOR.panel, alpha: 0.3 });
     else if (look === 'idle') g.fill({ color: COLOR.panel, alpha: 0.6 }).stroke({ width: ROW_EDGE_WIDTH, color: COLOR.panelEdge });
-    else {
-      g.fill({ color: COLOR.panelEquipped, alpha: 0.95 });
-      neonRoundRect(g, 0, top, this.width, height, ROW_RADIUS, { color: COLOR.panelEdgeEquipped, halo: COLOR.tubeHalo, width: ROW_EDGE_WIDTH, spread: UI_SPREAD, strength: UI_STRENGTH });
-    }
+    else g.fill({ color: COLOR.panelEquipped, alpha: 0.95 });
+    this.root.addChild(g);
+    if (look !== 'lit') return;
+    const edge = this.accented(new Graphics());
+    neonRoundRect(edge, 0, top, this.width, height, ROW_RADIUS, { color: COLOR.white, halo: COLOR.white, width: ROW_EDGE_WIDTH, spread: UI_SPREAD, strength: UI_STRENGTH });
+    this.root.addChild(edge);
   }
 
   /**
@@ -259,7 +314,7 @@ class Column {
     const background = new Graphics().roundRect(0, this.cursor, this.width, height, ROW_RADIUS);
     this.paintRow(background, height, locked ? 'locked' : equipped ? 'lit' : 'idle');
 
-    this.root.addChild(background, name, description);
+    this.root.addChild(name, description);
     if (tag) this.root.addChild(tag);
     if (!locked) this.buttons.push({ id: talisman.id, x: 0, y: this.cursor, width: this.width, height });
     this.cursor += height;
@@ -315,7 +370,7 @@ class Column {
       }
       this.buttons.push({ id: levelButton(level.id), x: 0, y: this.cursor, width: this.width, height: LEVEL_ROW_HEIGHT });
     }
-    this.root.addChild(background, name, range, shapes);
+    this.root.addChild(name, range, shapes);
     this.cursor += LEVEL_ROW_HEIGHT;
   }
 
@@ -326,10 +381,14 @@ class Column {
     drawStar(shapes, WIN_STAR_RADIUS, middle, WIN_STAR_RADIUS, line.done);
     const label = makeText(line.label, 19, line.done ? COLOR.text : COLOR.textDim, { bold: line.done, align: 'left' });
     label.position.set(2 * WIN_STAR_RADIUS + WIN_STAR_GAP, middle - label.height / 2);
-    this.root.addChild(shapes, label);
     if (line.done) {
-      drawCheck(shapes, this.width - 18, middle - 7, 14);
-    } else if (line.progress !== null) {
+      // Le halo de la coche (teinté par l'accent) sous son cœur, qui est avec les étoiles.
+      const checkHalo = this.accented(new Graphics());
+      drawCheck(checkHalo, shapes, this.width - 18, middle - 7, 14);
+      this.root.addChild(checkHalo);
+    }
+    this.root.addChild(shapes, label);
+    if (!line.done && line.progress !== null) {
       const progress = makeText(line.progress, 17, COLOR.textDim, { bold: true });
       progress.anchor.set(1, 0.5);
       progress.position.set(this.width, middle);
@@ -349,7 +408,7 @@ interface Layout {
 function buildTitle(profile: Profile, width: number, testMode: boolean): Layout {
   const upper = new Column(width);
   const progress = levelProgress(profile.xp);
-  upper.line('GRAPPIN', 56, COLOR.text, true, COLOR.tubeHalo);
+  upper.line('GRAPPIN', 56, COLOR.text, true, 'accent');
   if (testMode) {
     upper.gap(6);
     upper.line(TEST_MODE_LINE, 15, COLOR.textDim);
@@ -413,7 +472,7 @@ function buildLevels(profile: Profile, width: number, testMode: boolean, page: n
   const pages = levelPageCount();
   const shown = Math.min(Math.max(0, page), pages - 1);
   const upper = new Column(width);
-  upper.line('Niveaux', 34, COLOR.text, true, COLOR.tubeHalo);
+  upper.line('Niveaux', 34, COLOR.text, true, 'accent');
   if (testMode) {
     upper.gap(4);
     upper.line(TEST_MODE_LINE, 15, COLOR.textDim);
@@ -457,7 +516,7 @@ function describeOutcome(upper: Column, score: number, outcome: RunOutcome, news
   }
   if (outcome.levelAfter > outcome.levelBefore) {
     upper.gap(18);
-    upper.line(`Niveau ${outcome.levelAfter} !`, 30, COLOR.text, true, COLOR.tubeHalo);
+    upper.line(`Niveau ${outcome.levelAfter} !`, 30, COLOR.text, true, 'accent');
     for (const talisman of outcome.unlocked) {
       upper.gap(6);
       upper.line(`Débloqué : ${talisman.name}`, 20, COLOR.text);
@@ -489,7 +548,7 @@ function buildDead(height: number, goal: number | null, score: number, cause: st
 function buildWon(score: number, outcome: LevelOutcome, result: LevelResult, width: number): Layout {
   const next = levelById(outcome.level.id + 1);
   const upper = new Column(width);
-  upper.line('Niveau terminé !', 38, COLOR.text, true, COLOR.tubeHalo);
+  upper.line('Niveau terminé !', 38, COLOR.text, true, 'accent');
   upper.gap(6);
   upper.line(levelTitle(outcome.level), 22, COLOR.textDim);
   upper.gap(18);
@@ -514,7 +573,7 @@ function buildWon(score: number, outcome: LevelOutcome, result: LevelResult, wid
 function buildTalismans(profile: Profile, width: number): Layout {
   const level = levelFor(profile.xp);
   const upper = new Column(width);
-  upper.line('Talismans', 34, COLOR.text, true, COLOR.tubeHalo);
+  upper.line('Talismans', 34, COLOR.text, true, 'accent');
   upper.gap(6);
   upper.line(slotsLine(slotsFor(level), profile.equipped.length), 16, COLOR.textDim);
   upper.gap(20);
@@ -561,25 +620,42 @@ export class Screens {
   private shown: OverlayView | null = null;
   private shownWidth = 0;
   private shownHeight = 0;
+  /** Ce que l'accent colore dans l'écran affiché, et l'accent qui lui a été donné : null tant qu'aucun ne l'a été. */
+  private skins: ((accent: number) => void)[] = [];
+  private accent: number | null = null;
 
   constructor() {
     this.root.addChild(this.shade, this.content);
   }
 
-  /** Montre la vue donnée, et ne remet en page que si elle ou la taille de l'écran a changé. */
-  draw(view: OverlayView, width: number, height: number): void {
+  /**
+   * Montre la vue donnée, et ne remet en page que si elle ou la taille de l'écran
+   * a changé. L'ambiance, elle, se rafraîchit à chaque image sans rien retracer :
+   * le voile prend la couleur du fond, et l'accent colore ses formes et ses halos.
+   */
+  draw(view: OverlayView, width: number, height: number, palette: Palette): void {
     this.root.visible = view.kind !== 'none';
     if (view.kind === 'none') {
       if (this.shown) this.clear();
       return;
     }
-    if (sameView(this.shown, view) && width === this.shownWidth && height === this.shownHeight) return;
+    if (!sameView(this.shown, view) || width !== this.shownWidth || height !== this.shownHeight) this.layout(view, width, height);
+    this.shade.tint = palette.background;
+    if (palette.accent !== this.accent) {
+      this.accent = palette.accent;
+      for (const skin of this.skins) skin(palette.accent);
+    }
+  }
+
+  /** Dessine la vue donnée, pour cette taille d'écran. */
+  private layout(view: Exclude<OverlayView, { kind: 'none' }>, width: number, height: number): void {
     this.clear();
     this.shown = view;
     this.shownWidth = width;
     this.shownHeight = height;
 
-    this.shade.rect(0, 0, width, height).fill({ color: COLOR.shade, alpha: DENSE_VIEWS.has(view.kind) ? SHADE_ALPHA_DENSE : SHADE_ALPHA });
+    // Le voile est blanc : sa teinte, celle du fond, se pose à chaque image.
+    this.shade.rect(0, 0, width, height).fill({ color: COLOR.white, alpha: DENSE_VIEWS.has(view.kind) ? SHADE_ALPHA_DENSE : SHADE_ALPHA });
 
     const contentWidth = Math.min(width - 2 * SIDE_MARGIN, MAX_WIDTH);
     const { upper, lower, align } = buildLayout(view, contentWidth);
@@ -593,6 +669,7 @@ export class Screens {
     upper.root.y = align === 'center' ? free / 2 : 0;
     lower.root.y = upper.height + BLOCK_GAP + free;
     this.content.addChild(upper.root, lower.root);
+    this.skins = [...upper.skins, ...lower.skins];
     this.content.scale.set(scale);
     this.content.position.set((width - contentWidth * scale) / 2, top);
 
@@ -623,6 +700,8 @@ export class Screens {
     this.shade.clear();
     for (const child of this.content.removeChildren()) child.destroy({ children: true });
     this.rects = [];
+    this.skins = [];
+    this.accent = null;
     this.shown = null;
   }
 }
