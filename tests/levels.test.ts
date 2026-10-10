@@ -37,6 +37,9 @@ describe('les vingt niveaux', () => {
       expect(state.anchors[0]!.pos.y).toBeCloseTo(level.startY + 4, 9);
       // Aucun obstacle dans les premiers mètres : on prend son élan tranquille.
       expect(state.obstacles.every((o) => o.y0 >= level.startY + 6)).toBe(true);
+      // Aucune étoile au-dessus de la ligne d'arrivée, et le total à prendre ne compte que celles d'en dessous.
+      expect(state.pickups.every((p) => p.pos.y < level.endY), level.name).toBe(true);
+      expect(state.course.pickupsTotal, level.name).toBe(state.pickups.length);
       if (level.id >= 3) expect(state.course.pickupsTotal).toBeGreaterThan(0);
     }
   });

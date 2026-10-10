@@ -2,6 +2,12 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.6.3] — 2026-10-10 — Plus d'étoile au-dessus de l'arrivée
+
+### Corrigé
+
+- B-006, signalé par le propriétaire : les quelques mètres engendrés au-dessus de la ligne d'arrivée, nécessaires au dernier balancement, portaient des étoiles qui comptaient dans le total du niveau ; franchir la ligne gagnant aussitôt, l'étoile « toutes les étoiles » devenait impossible. Plus aucune étoile n'est posée au-dessus de l'arrivée.
+
 ## [0.6.2] — 2026-10-10 — Les obstacles ne tuent plus
 
 Retour du propriétaire : « les obstacles qui tuent d'un coup, c'est aussi trop fort ».
