@@ -107,11 +107,12 @@ describe('annonce d\'un événement de niveau', () => {
     for (const kind of ['bascule', 'vent', 'alerte'] as const) {
       expect(eventAnnouncement(kind, 'end', 1)).toEqual({ title: 'Retour au calme', detail: null });
     }
-    for (const kind of ['panne', 'pluie', 'cable'] as const) expect(eventAnnouncement(kind, 'end', 1)).toBeNull();
+    for (const kind of ['panne', 'pluie', 'cable', 'traversiere'] as const) expect(eventAnnouncement(kind, 'end', 1)).toBeNull();
+    expect(eventAnnouncement('traversiere', 'start', 1)).toEqual({ title: 'Traversières !', detail: 'Les prises balaient la ville' });
   });
 
   it('annonce chaque événement du jeu au départ', () => {
-    const kinds: EventKind[] = ['bascule', 'vent', 'panne', 'pluie', 'alerte', 'cable'];
+    const kinds: EventKind[] = ['bascule', 'vent', 'panne', 'pluie', 'alerte', 'cable', 'traversiere'];
     for (const kind of kinds) expect(eventAnnouncement(kind, 'start', 1)?.title).toBeTruthy();
   });
 });

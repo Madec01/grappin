@@ -114,6 +114,7 @@ Demande du propriétaire : des événements qui influencent le jeu pendant un ni
 - **La pluie d'étoiles.** Une étoile tous les six dixièmes de seconde tombe au-dessus du personnage, à cueillir au vol.
 - **L'alerte.** La brume double de vitesse le temps d'une section.
 - **Le câble.** Deux points du segment glissent de côté sur un câble de 3,2 m, aller-retour en trois secondes ; le vérificateur les prouve aux deux bouts et au milieu.
+- **Les traversières.** Idée du propriétaire, livrée en 0.5.0 : trois points du segment balaient toute la largeur de la ville, aller-retour en cinq secondes à l'écartement 1, plus lentement quand la ville est plus large. On peut attendre la prise en pendant au point d'avant : le vérificateur accepte le segment dès qu'une des trois positions le fait passer. En course libre seulement pour l'instant.
 
 Répartition dans les niveaux : pluie au 3, panne au 4, bascule au 5, vent au 6, alerte puis câbles au 7, bascule et panne au 8, vent, pluie et câbles au 9, bascule, alerte et panne au 10.
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Anchor } from '../src/sim/state';
 import { createRng } from '../src/core/math/rng';
 import { environmentOf, eventsAt } from '../src/sim/events';
-import { HALF_WIDTH, buildSegment, tierProfile } from '../src/sim/generator';
+import { HALF_WIDTH, MAX_SPREAD, buildSegment, playableHalfWidth, tierProfile } from '../src/sim/generator';
 import { Simulation } from '../src/sim/simulation';
 import { DEFAULT_TUNING } from '../src/sim/tuning';
 import { canExit, verifySegment } from '../src/sim/verifier';
@@ -27,7 +27,7 @@ describe('parcours engendré', () => {
     for (let i = 1; i < anchors.length; i += 1) {
       const prev = anchors[i - 1]!;
       const cur = anchors[i]!;
-      expect(Math.abs(cur.pos.x)).toBeLessThanOrEqual(HALF_WIDTH);
+      expect(Math.abs(cur.pos.x)).toBeLessThanOrEqual(playableHalfWidth(MAX_SPREAD));
       expect(cur.pos.y).toBeGreaterThan(sim.state.fogY - 11);
       // Chaque point reste proche du précédent ; seul le grand saut, lancé par un propulseur, dépasse un peu la portée.
       expect(Math.hypot(cur.pos.x - prev.pos.x, cur.pos.y - prev.pos.y)).toBeLessThan(8);
@@ -52,8 +52,37 @@ describe('parcours engendré', () => {
     expect(JSON.stringify(a.state.schedule)).toBe(JSON.stringify(b.state.schedule));
   });
 
+  it('les prises s\'écartent avec la hauteur : largeur jouable ± 4 m au palier 0, ± 6 m au plus, pas jamais trop longs', () => {
+    expect(playableHalfWidth(tierProfile(0).spread)).toBe(HALF_WIDTH);
+    expect(tierProfile(3).spread).toBeCloseTo(1.24, 6);
+    expect(tierProfile(20).spread).toBe(MAX_SPREAD);
+    expect(playableHalfWidth(MAX_SPREAD)).toBe(6);
+    const low = climbed(21, 60);
+    expect(low.state.anchors.filter((a) => a.pos.y < 50).every((a) => Math.abs(a.pos.x) <= HALF_WIDTH)).toBe(true);
+    const high = climbed(21, 500);
+    const wide = high.state.anchors.filter((a) => a.pos.y > 350 && !a.cable);
+    expect(wide.every((a) => Math.abs(a.pos.x) <= playableHalfWidth(MAX_SPREAD))).toBe(true);
+    // Haut dans la ville, d'un point au suivant, on va bien plus loin de côté qu'au départ : la corde limite le pas, pas la largeur.
+    const meanGap = (anchors: readonly Anchor[]): number => anchors.slice(1).reduce((sum, a, i) => sum + Math.abs(a.pos.x - anchors[i]!.pos.x), 0) / Math.max(1, anchors.length - 1);
+    const lowGap = meanGap(low.state.anchors.filter((a) => a.pos.y < 50));
+    expect(meanGap(wide)).toBeGreaterThan(lowGap * 1.5);
+  });
+
+  it('aucun obstacle au-dessus du sommet d\'un segment, même court : le segment suivant commence sur un ciel dégagé', () => {
+    // Un événement qui commence à 8 m coupe le premier segment à 7 m : trop court pour porter un obstacle.
+    const profile = { spacing: 4.5, obstacles: 3, split: true, fragileChance: 0, boosters: 0, archetypes: ['dalles' as const], spread: 1.5 };
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const sim = new Simulation(seed, DEFAULT_TUNING, { kind: 'level', levelId: 96, startY: 0, endY: 60, profile, events: [{ kind: 'traversiere', at: 8, length: 40 }] });
+      const firstTop = sim.state.anchors.find((a) => a.pos.y > 5 && a.pos.y <= 7.5);
+      expect(firstTop, `graine ${seed}`).toBeDefined();
+      // Rien entre le sommet du premier segment et deux mètres au-dessus, là où le deuxième commence.
+      expect(sim.state.obstacles.every((o) => o.y0 >= firstTop!.pos.y + 2 - 1e-9), `graine ${seed}`).toBe(true);
+      expect(sim.state.course.unverified, `graine ${seed}`).toBe(0);
+    }
+  });
+
   it('introduit les contraintes une à la fois selon le palier', () => {
-    expect(tierProfile(0)).toEqual({ spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine', 'couloir'] });
+    expect(tierProfile(0)).toEqual({ spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine', 'couloir'], spread: 1 });
     expect(tierProfile(1).obstacles).toBe(1);
     expect(tierProfile(1).split).toBe(true);
     expect(tierProfile(1).fragileChance).toBe(0);

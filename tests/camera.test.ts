@@ -267,3 +267,25 @@ describe('bascule : le monde tourne pour garder la gravité vers le bas de l\'é
   });
 });
 
+describe('prises écartées : la caméra dézoome pour les montrer', () => {
+  it('ne change rien tant que tout tient dans 10 m, dézoome à 5 / demi-largeur au-delà, sans passer sous 0,6', () => {
+    const camera = new Camera(R, 390, 844);
+    camera.snap({ x: 0, y: 10 }, { x: 0, y: 0 }, undefined, 4.5);
+    expect(camera.zoom).toBe(1);
+    camera.snap({ x: 0, y: 10 }, { x: 0, y: 0 }, undefined, 7.2);
+    expect(camera.zoom).toBeCloseTo(5 / 7.2, 6);
+    camera.snap({ x: 0, y: 10 }, { x: 0, y: 0 }, undefined, 20);
+    expect(camera.zoom).toBe(0.6);
+    camera.snap({ x: 0, y: 10 }, { x: 0, y: 0 });
+    expect(camera.zoom).toBe(1);
+  });
+
+  it('se lisse comme le zoom de vitesse, et le plus petit des deux zooms gagne', () => {
+    const camera = new Camera(R, 390, 844);
+    camera.update(0.016, { x: 0, y: 10 }, { x: 0, y: 0 }, undefined, 7.2);
+    expect(camera.zoom).toBeGreaterThan(5 / 7.2);
+    expect(camera.zoom).toBeLessThan(1);
+    camera.snap({ x: 0, y: 10 }, { x: 0, y: 40 }, undefined, 7.2);
+    expect(camera.zoom).toBe(0.6);
+  });
+});

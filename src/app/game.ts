@@ -13,6 +13,7 @@ import type { DeathCause, GameScreen, Renderer } from '../render/renderer';
 import type { CoursePlan } from '../sim/course';
 import type { EventKind } from '../sim/events';
 import { Simulation } from '../sim/simulation';
+import type { SimState } from '../sim/state';
 import { DEFAULT_TUNING, withTuning, type Tuning } from '../sim/tuning';
 
 /**
@@ -130,6 +131,21 @@ export function readSettings(search: string): GameSettings {
   const seed = seedText ? Number(seedText) : Number.NaN;
   const test = params.get('test')?.trim();
   return { seed: Number.isInteger(seed) ? seed : null, tuning: withTuning(DEFAULT_TUNING, overrides), testMode: test !== undefined && test !== '0' && test !== 'non' };
+}
+
+/** Hauteur autour du personnage, en mètres, dont les points comptent pour la largeur à montrer. */
+const EXTENT_REACH = 12;
+/** Marge au-delà du point le plus écarté, pour son anneau et un peu d'air. */
+const EXTENT_MARGIN = 1.2;
+
+/** Demi-largeur que l'écran doit montrer : jusqu'au point le plus écarté près du personnage. */
+function visibleExtent(state: SimState): number {
+  let extent = 0;
+  for (const anchor of state.anchors) {
+    if (Math.abs(anchor.pos.y - state.hero.pos.y) > EXTENT_REACH) continue;
+    extent = Math.max(extent, Math.abs(anchor.pos.x));
+  }
+  return extent === 0 ? 0 : extent + EXTENT_MARGIN;
 }
 
 /** Graine 32 bits tirée au hasard : le seul aléa hors simulation, qui ne le relit jamais. */
@@ -287,7 +303,7 @@ export class Game {
     if (this.screen === 'playing') this.advance(dt);
     const { hero, env } = sim.state;
     camera.resize(this.view.width, this.view.height);
-    camera.update(dt, hero.pos, hero.vel, env);
+    camera.update(dt, hero.pos, hero.vel, env, visibleExtent(sim.state));
     effects.update(dt, env.wind.x);
     // Le monde tourné pendant une bascule : les textes flottent là où le personnage est affiché, pas là où il est dans le repère du monde.
     const heroOnScreen = camera.worldToDisplay(hero.pos);
@@ -375,7 +391,7 @@ export class Game {
   private buildRun(level: LevelDef | null, seed: number, tuning: Tuning, plan: CoursePlan): Run {
     const sim = new Simulation(seed, tuning, plan);
     const camera = new Camera(tuning.heroRadius, this.view.width, this.view.height);
-    camera.snap(sim.state.hero.pos, sim.state.hero.vel, sim.state.env);
+    camera.snap(sim.state.hero.pos, sim.state.hero.vel, sim.state.env, visibleExtent(sim.state));
     return { sim, level, tuning, camera, effects: new Effects(tuning), tracker: new RunTracker(), accumulator: 0, deathCause: null, outcome: null, result: null, pickupsTaken: 0 };
   }
 

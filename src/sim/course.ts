@@ -1,6 +1,5 @@
 import { createRng, type Rng } from '../core/math/rng';
 import type { Vec2 } from '../core/math/vec2';
-import type { Environment } from './environment';
 import { environmentOf, eventsAt, type EventKind, type ScheduledEvent } from './events';
 import { buildPlainSegment, buildSegment, tierProfile, type IdCounters, type Segment, type SegmentContext, type TierProfile } from './generator';
 import type { Anchor, Obstacle, SimState } from './state';
@@ -65,7 +64,7 @@ const BEYOND_FINISH = 6;
  * du palier 0 est passée, pour que la grimpe sans fin ait toutes les nouveautés.
  */
 const FREE_EVENT_CHANCE = 0.5;
-const FREE_EVENT_KINDS: readonly EventKind[] = ['bascule', 'vent', 'panne', 'pluie', 'alerte', 'cable'];
+const FREE_EVENT_KINDS: readonly EventKind[] = ['bascule', 'vent', 'panne', 'pluie', 'alerte', 'cable', 'traversiere'];
 function freeEventsFor(tier: number): readonly EventKind[] {
   return tier >= 1 ? FREE_EVENT_KINDS : [];
 }
@@ -103,22 +102,27 @@ function segmentContext(state: SimState, segmentY: number): SegmentContext {
   return {
     env: environmentOf(active),
     entryEnv: environmentOf(eventsAt(state.schedule, state.groundY, segmentY)),
-    cable: active.some((e) => e.kind === 'cable'),
+    cable: active.some((e) => e.kind === 'traversiere') ? 'traversiere' : active.some((e) => e.kind === 'cable') ? 'cable' : 'none',
     maxY: boundaries.length > 0 ? Math.min(...boundaries) - 1 : Infinity,
   };
 }
 
 /**
- * Vérifie un segment ; s'il porte des points sur câble, les prouve à chaque bout
- * du câble et au milieu, car ils glissent sans cesse pendant la partie.
+ * Vérifie un segment ; s'il porte des points qui glissent, les prouve à chaque
+ * bout de leur course et au milieu. Un câble court doit passer dans les trois
+ * positions : on l'attrape où il est. Une traversière balaie toute la largeur,
+ * on peut l'attendre en pendant au point d'avant : il suffit qu'une des trois
+ * positions fasse passer le segment.
  */
-function verifyWithCables(context: readonly Anchor[], contextObstacles: readonly Obstacle[], segment: Segment, tuning: Tuning, env: Environment, entryEnv: Environment): boolean {
+function verifyWithCables(context: readonly Anchor[], contextObstacles: readonly Obstacle[], segment: Segment, tuning: Tuning, conditions: SegmentContext): boolean {
+  const { env, entryEnv } = conditions;
   if (!segment.anchors.some((a) => a.cable)) return verifySegment(context, contextObstacles, segment, tuning, env, entryEnv);
   const placements: ((a: Anchor) => Vec2)[] = [(a) => a.cable!.from, (a) => a.pos, (a) => a.cable!.to];
-  return placements.every((place) => {
+  const passes = (place: (a: Anchor) => Vec2): boolean => {
     const anchors = segment.anchors.map((a) => (a.cable ? { ...a, pos: place(a) } : a));
     return verifySegment(context, contextObstacles, { ...segment, anchors }, tuning, env, entryEnv);
-  });
+  };
+  return conditions.cable === 'traversiere' ? placements.some(passes) : placements.every(passes);
 }
 
 export function createCourse(seed: number, plan: CoursePlan): CourseState {
@@ -155,7 +159,7 @@ export function extendCourse(state: SimState, untilY: number, tuning: Tuning): v
     let accepted: Segment | null = null;
     for (let attempt = 0; attempt < MAX_ATTEMPTS && !accepted; attempt += 1) {
       const candidate = buildSegment(rng, course.ids, from, origin, profile, rng.pick(profile.archetypes), conditions);
-      if (verifyWithCables(context, contextObstacles, candidate, tuning, conditions.env, conditions.entryEnv)) accepted = candidate;
+      if (verifyWithCables(context, contextObstacles, candidate, tuning, conditions)) accepted = candidate;
     }
     if (!accepted) {
       // Repli : une chaîne serrée sans rien d'autre, vérifiée elle aussi. Si même cela échoue, on

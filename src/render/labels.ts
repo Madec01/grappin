@@ -55,6 +55,7 @@ const EVENT_NAMES: Record<EventKind, string> = {
   pluie: 'pluie',
   alerte: 'alerte',
   cable: 'câbles',
+  traversiere: 'traversières',
 };
 
 /** « bascule 25 m · panne 55 m » : les événements du niveau et la hauteur où ils commencent, ou une chaîne vide sans événement. */
@@ -93,6 +94,7 @@ const STARTS: Record<Exclude<EventKind, 'vent'>, Announcement> = {
   pluie: { title: 'Pluie d\'étoiles', detail: 'Cueille-les au vol' },
   alerte: { title: 'Alerte !', detail: 'La brume accélère' },
   cable: { title: 'Câbles', detail: 'Les accroches glissent' },
+  traversiere: { title: 'Traversières !', detail: 'Les prises balaient la ville' },
 };
 
 /** Les événements dont la fin se remarque : ceux qui ont changé la façon de jouer. */

@@ -159,14 +159,19 @@ export class Camera {
     return { left: this.width / 2 - half.x, right: this.width / 2 + half.x, top: this.height / 2 - half.y, bottom: this.height / 2 + half.y };
   }
 
-  /** Avance la caméra de `dtSeconds` de temps réel vers le personnage, dans les conditions `env` du moment. */
-  update(dtSeconds: number, heroPos: Vec2, heroVel: Vec2, env: Environment = STILL): void {
-    this.follow(1 - Math.exp(-dtSeconds / SMOOTHING_SECONDS), heroPos, heroVel, env);
+  /**
+   * Avance la caméra de `dtSeconds` de temps réel vers le personnage, dans les
+   * conditions `env` du moment. `extent` : demi-largeur du monde, en mètres
+   * autour de l'axe, que l'écran doit montrer, pour que des prises écartées
+   * restent visibles ; 0 pour ne rien demander.
+   */
+  update(dtSeconds: number, heroPos: Vec2, heroVel: Vec2, env: Environment = STILL, extent = 0): void {
+    this.follow(1 - Math.exp(-dtSeconds / SMOOTHING_SECONDS), heroPos, heroVel, env, extent);
   }
 
   /** Place la caméra d'un coup, sans lissage : début de partie. */
-  snap(heroPos: Vec2, heroVel: Vec2, env: Environment = STILL): void {
-    this.follow(1, heroPos, heroVel, env);
+  snap(heroPos: Vec2, heroVel: Vec2, env: Environment = STILL, extent = 0): void {
+    this.follow(1, heroPos, heroVel, env, extent);
   }
 
   /**
@@ -181,11 +186,13 @@ export class Camera {
   }
 
   /** Rapproche zoom et centre de leur cible d'une fraction `blend`, puis impose les bornes dures. */
-  private follow(blend: number, heroPos: Vec2, heroVel: Vec2, env: Environment): void {
+  private follow(blend: number, heroPos: Vec2, heroVel: Vec2, env: Environment, extent: number): void {
     this.angle = worldAngle(env.gravityDir);
     const speed = Math.hypot(heroVel.x, heroVel.y);
     const speedZoom = clamp(1 / (1 + speed / ZOOM_SPEED_SCALE), ZOOM_MIN, 1);
-    const targetZoom = isUpright(env) ? speedZoom : Math.min(speedZoom, ZOOM_TILTED);
+    // Des prises écartées demandent de voir plus large : le zoom descend jusqu'à les montrer, borné comme les autres.
+    const widthZoom = extent > 0 ? clamp(VISIBLE_WIDTH / 2 / extent, ZOOM_MIN, 1) : 1;
+    const targetZoom = Math.min(isUpright(env) ? speedZoom : Math.min(speedZoom, ZOOM_TILTED), widthZoom);
     this.zoom = clamp(this.zoom + (targetZoom - this.zoom) * blend, this.minZoom, 1);
 
     // Le monde tourné d'un quart de tour, la progression (le long de y) court dans la largeur de l'écran : la bande et la portée en suivent la mesure.

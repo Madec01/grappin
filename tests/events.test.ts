@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { LEVELS } from '../src/data/levels';
 import { levelPlan, levelTuning } from '../src/meta/traversee';
 import { STILL, isUpright, turnedGravity } from '../src/sim/environment';
-import { ALERT_FOG_FACTOR, CABLE_PERIOD_SECONDS, TURN_SECONDS, cablePosition, environmentOf, eventsAt, lightIsOff } from '../src/sim/events';
+import { ALERT_FOG_FACTOR, CABLE_PERIOD_SECONDS, TRAVERSIERE_PERIOD_SECONDS, TURN_SECONDS, cablePosition, environmentOf, eventsAt, lightIsOff } from '../src/sim/events';
 import { freeFlightAt } from '../src/sim/physics';
 import { isPerfectRelease } from '../src/sim/rules';
+import { HALF_WIDTH } from '../src/sim/generator';
 import { Simulation } from '../src/sim/simulation';
 import type { ScheduledEvent } from '../src/sim/events';
 import type { Anchor } from '../src/sim/state';
@@ -16,7 +17,7 @@ const SECOND = Math.round(1 / T.stepSeconds);
 
 /** Niveau d'essai de 400 m sans brume, avec les événements donnés. */
 function level(events: readonly ScheduledEvent[]): Simulation {
-  const plan = { kind: 'level' as const, levelId: 99, startY: 0, endY: 400, profile: { spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine' as const] }, events };
+  const plan = { kind: 'level' as const, levelId: 99, startY: 0, endY: 400, profile: { spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine' as const], spread: 1 }, events };
   return new Simulation(7, withTuning(T, { fogBaseSpeed: 0, fogStart: -1000 }), plan);
 }
 
@@ -108,7 +109,7 @@ describe('calendrier des événements', () => {
     expect(windy.state.env.wind.x).toBeCloseTo(-3, 9);
     expect(windy.state.hero.vel.x).toBeLessThan(-2);
 
-    const alert = new Simulation(3, T, { kind: 'level', levelId: 98, startY: 0, endY: 400, profile: { spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine'] }, events: [{ kind: 'alerte', at: 20, length: 30 }] });
+    const alert = new Simulation(3, T, { kind: 'level', levelId: 98, startY: 0, endY: 400, profile: { spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine'], spread: 1 }, events: [{ kind: 'alerte', at: 20, length: 30 }] });
     climbTo(alert, 21);
     expect(alert.state.fogFactor).toBe(ALERT_FOG_FACTOR);
     const before = alert.state.fogY;
@@ -141,7 +142,7 @@ describe('calendrier des événements', () => {
   });
 
   it('un point sur câble va et vient entre ses deux bouts', () => {
-    const anchor: Anchor = { id: 1, pos: { x: 0, y: 10 }, kind: 'normal', broken: false, cable: { from: { x: -1.6, y: 10 }, to: { x: 1.6, y: 10 } } };
+    const anchor: Anchor = { id: 1, pos: { x: 0, y: 10 }, kind: 'normal', broken: false, cable: { from: { x: -1.6, y: 10 }, to: { x: 1.6, y: 10 }, period: CABLE_PERIOD_SECONDS } };
     expect(cablePosition(anchor, 0, T)).toEqual({ x: -1.6, y: 10 });
     expect(cablePosition(anchor, Math.round((CABLE_PERIOD_SECONDS / 2) * SECOND), T).x).toBeCloseTo(1.6, 6);
     expect(cablePosition(anchor, Math.round(CABLE_PERIOD_SECONDS * SECOND), T).x).toBeCloseTo(-1.6, 6);
@@ -152,6 +153,21 @@ describe('calendrier des événements', () => {
     const x0 = first.pos.x;
     sim.run(Math.round(0.75 * SECOND));
     expect(sim.state.anchors.find((a) => a.id === first.id)!.pos.x).not.toBe(x0);
+  });
+
+  it('une traversière balaie toute la largeur jouable, trois points par segment, plus lentement que le câble', () => {
+    const sim = level([{ kind: 'traversiere', at: 10, length: 60 }]);
+    const sliding = sim.state.anchors.filter((a) => a.cable);
+    expect(sliding.length).toBeGreaterThanOrEqual(3);
+    for (const anchor of sliding) {
+      expect(anchor.cable!.to.x - anchor.cable!.from.x).toBeCloseTo(2 * (HALF_WIDTH - 0.3), 6);
+      expect(anchor.cable!.period).toBe(TRAVERSIERE_PERIOD_SECONDS);
+    }
+    expect(sim.state.course.unverified).toBe(0);
+    const first = sliding[0]!;
+    sim.run(Math.round((TRAVERSIERE_PERIOD_SECONDS / 2) * SECOND));
+    // Un demi-aller-retour plus tard, le point est au bout droit, à un pas de simulation près.
+    expect(sim.state.anchors.find((a) => a.id === first.id)!.pos.x).toBeCloseTo(HALF_WIDTH - 0.3, 1);
   });
 });
 
@@ -180,7 +196,7 @@ describe('vérification sous un événement', () => {
     expect(free.state.course.unverified).toBe(0);
   });
 
-  it('la course libre tire les six événements au hasard dès le palier 1, jamais dans la zone d\'apprentissage, jamais deux fois le même de suite', () => {
+  it('la course libre tire les sept événements au hasard dès le palier 1, jamais dans la zone d\'apprentissage, jamais deux fois le même de suite', () => {
     const seen = new Set<string>();
     let scheduled = 0;
     for (let seed = 1; seed <= 24; seed += 1) {
@@ -200,7 +216,7 @@ describe('vérification sous un événement', () => {
       }
       expect(free.state.course.unverified, `graine ${seed}`).toBe(0);
     }
-    expect([...seen].sort()).toEqual(['alerte', 'bascule', 'cable', 'panne', 'pluie', 'vent']);
+    expect([...seen].sort()).toEqual(['alerte', 'bascule', 'cable', 'panne', 'pluie', 'traversiere', 'vent']);
     // Sur 400 m à une chance sur deux par segment d'une vingtaine de mètres, au moins une poignée d'événements par partie.
     expect(scheduled / 24).toBeGreaterThan(5);
   });

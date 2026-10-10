@@ -22,7 +22,7 @@ export interface Anchor {
   /** Vrai une fois cassée : ni visée, ni dessinée. */
   broken: boolean;
   /** Point sur câble : il va et vient entre ces deux positions. */
-  readonly cable?: { readonly from: Vec2; readonly to: Vec2 };
+  readonly cable?: { readonly from: Vec2; readonly to: Vec2; /** Durée d'un aller-retour, en secondes. */ readonly period: number };
 }
 
 /** Obstacle fixe : boîte alignée sur les axes, en mètres, Y vers le haut. Le toucher tue, le frôler rapporte. */

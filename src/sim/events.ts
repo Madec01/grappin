@@ -15,7 +15,7 @@ import type { Tuning } from './tuning';
  * part, le câble glisse selon le temps simulé.
  */
 
-export type EventKind = 'bascule' | 'vent' | 'panne' | 'pluie' | 'alerte' | 'cable';
+export type EventKind = 'bascule' | 'vent' | 'panne' | 'pluie' | 'alerte' | 'cable' | 'traversiere';
 
 export interface ScheduledEvent {
   readonly kind: EventKind;
@@ -51,6 +51,12 @@ const RAIN_ABOVE_HERO = 12;
 /** Câble : demi-longueur et période d'un aller-retour. */
 export const CABLE_HALF_LENGTH = 1.6;
 export const CABLE_PERIOD_SECONDS = 3;
+/**
+ * Traversière : une prise qui balaie toute la largeur jouable, aller-retour en
+ * ce temps à l'écartement 1, plus lentement quand la ville est plus large.
+ * Idée du propriétaire, validée le 10 octobre 2026.
+ */
+export const TRAVERSIERE_PERIOD_SECONDS = 5;
 
 /** Événements du calendrier dont la phase principale couvre la hauteur `y` (hauteur absolue). */
 export function eventsAt(schedule: readonly ScheduledEvent[], startY: number, y: number): ScheduledEvent[] {
@@ -78,8 +84,9 @@ export function lightIsOff(anchorId: number, step: number, tuning: Tuning): bool
 /** Position d'un point sur câble à un pas donné : aller-retour en triangle, sans trigonométrie. */
 export function cablePosition(anchor: Anchor, step: number, tuning: Tuning): { x: number; y: number } {
   if (!anchor.cable) return anchor.pos;
+  const period = anchor.cable.period;
   const t = step * tuning.stepSeconds;
-  const phase = (t - Math.floor(t / CABLE_PERIOD_SECONDS) * CABLE_PERIOD_SECONDS) / CABLE_PERIOD_SECONDS;
+  const phase = (t - Math.floor(t / period) * period) / period;
   const k = phase < 0.5 ? phase * 2 : 2 - phase * 2;
   return { x: anchor.cable.from.x + (anchor.cable.to.x - anchor.cable.from.x) * k, y: anchor.cable.from.y + (anchor.cable.to.y - anchor.cable.from.y) * k };
 }
@@ -136,6 +143,7 @@ export function applyEvents(state: SimState, tuning: Tuning, events: RuleEvent[]
         if (sinceEnd === null) raining = true;
         break;
       case 'cable':
+      case 'traversiere':
         break;
     }
   }

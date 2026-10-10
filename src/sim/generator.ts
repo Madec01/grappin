@@ -1,7 +1,7 @@
 import type { Rng } from '../core/math/rng';
 import type { Vec2 } from '../core/math/vec2';
 import { STILL, type Environment } from './environment';
-import { CABLE_HALF_LENGTH } from './events';
+import { CABLE_HALF_LENGTH, CABLE_PERIOD_SECONDS, TRAVERSIERE_PERIOD_SECONDS } from './events';
 import { circleBoxGap } from './geometry';
 import type { Anchor, Obstacle, Pickup } from './state';
 
@@ -45,12 +45,27 @@ export interface TierProfile {
   readonly boosters: number;
   /** Motifs de segments permis ; le générateur en tire un au sort. */
   readonly archetypes: readonly Archetype[];
+  /**
+   * Écartement : multiplie le déport de côté des pas et la largeur jouable
+   * (1 : ± 4 m, 1,5 : ± 6 m). Décision du propriétaire : les prises
+   * s'écartent de plus en plus avec la hauteur.
+   */
+  readonly spread: number;
 }
 
-/** Largeur jouable : les points restent entre -limit et +limit, les obstacles s'y appuient. */
+/** Largeur jouable à l'écartement 1 : les points restent entre -limit et +limit, les obstacles s'y appuient. */
 export const HALF_WIDTH = 4;
-/** Bord du monde où s'accrochent les corniches. */
-export const WALL_X = 5;
+/** Écartement le plus fort : ± 6 m, ce que la caméra sait encore montrer en dézoomant. */
+export const MAX_SPREAD = 1.5;
+/** Les corniches s'accrochent un mètre au-delà de la largeur jouable. */
+const WALL_MARGIN = 1;
+/** Un pas de chaîne ne dépasse jamais cette longueur, quel que soit l'écartement : la corde doit pouvoir suivre. */
+const STEP_MAX = 6.8;
+
+/** Largeur jouable d'un profil : ± cette valeur. */
+export function playableHalfWidth(spread: number): number {
+  return HALF_WIDTH * spread;
+}
 /** Premier point, par rapport au toit de départ. */
 export const FIRST_ANCHOR_OFFSET: Vec2 = { x: 0.8, y: 4 };
 
@@ -99,21 +114,27 @@ export function tierProfile(tier: number): TierProfile {
     fragileChance: tier >= 2 ? 0.3 : 0,
     boosters: tier >= 3 ? 1 : 0,
     archetypes,
+    spread: Math.min(MAX_SPREAD, 1 + 0.08 * tier),
   };
 }
 
-function clampX(x: number): number {
-  return Math.max(-HALF_WIDTH, Math.min(HALF_WIDTH, x));
+function clampX(x: number, halfWidth: number): number {
+  return Math.max(-halfWidth, Math.min(halfWidth, x));
 }
 
-/** Pas d'une chaîne : montée et déport en multiples de l'espacement, côté alterné, borné à la largeur. */
-function chainStep(rng: Rng, from: Vec2, spacing: number, dyRange: readonly [number, number], dxRange: readonly [number, number]): Vec2 {
+/**
+ * Pas d'une chaîne : montée en multiples de l'espacement, déport en multiples
+ * de l'espacement et de l'écartement, côté alterné, borné à la largeur. Un
+ * pas trop long pour la corde est ramené à `STEP_MAX` en rognant le déport.
+ */
+function chainStep(rng: Rng, from: Vec2, spacing: number, dyRange: readonly [number, number], dxRange: readonly [number, number], spread: number, halfWidth: number): Vec2 {
   const dy = spacing * (dyRange[0] + (dyRange[1] - dyRange[0]) * rng.next());
   const side = from.x > 0 ? -1 : 1;
-  const dx = side * spacing * (dxRange[0] + (dxRange[1] - dxRange[0]) * rng.next());
+  let dx = side * spacing * spread * (dxRange[0] + (dxRange[1] - dxRange[0]) * rng.next());
+  if (dx * dx + dy * dy > STEP_MAX * STEP_MAX) dx = side * Math.sqrt(Math.max(0, STEP_MAX * STEP_MAX - dy * dy));
   let x = from.x + dx;
-  if (x > HALF_WIDTH || x < -HALF_WIDTH) x = from.x - dx;
-  return { x: clampX(x), y: from.y + dy };
+  if (x > halfWidth || x < -halfWidth) x = from.x - dx;
+  return { x: clampX(x, halfWidth), y: from.y + dy };
 }
 
 function makeAnchor(ids: IdCounters, pos: Vec2, kind: Anchor['kind'] = 'normal'): Anchor {
@@ -149,8 +170,8 @@ export interface SegmentContext {
   readonly env: Environment;
   /** Conditions dans lesquelles on arrive au point d'entrée, parfois autres : rien non plus là où l'on y pend. */
   readonly entryEnv: Environment;
-  /** Un câble couvre ce segment : deux points du milieu glissent. */
-  readonly cable: boolean;
+  /** Des points qui glissent : sur un câble court (deux points du milieu) ou en traversière sur toute la largeur (trois points). */
+  readonly cable: 'none' | 'cable' | 'traversiere';
   /**
    * Aucun point au-dessus de cette hauteur : un événement commence ou finit un
    * mètre plus haut. Le segment s'arrête alors entre un et trois mètres sous
@@ -160,7 +181,7 @@ export interface SegmentContext {
   readonly maxY: number;
 }
 
-export const PLAIN_CONTEXT: SegmentContext = { env: STILL, entryEnv: STILL, cable: false, maxY: Infinity };
+export const PLAIN_CONTEXT: SegmentContext = { env: STILL, entryEnv: STILL, cable: 'none', maxY: Infinity };
 
 /** Longueur visée d'un segment : de 16 à 24 m, ou jusqu'à la frontière proche d'un événement, à 28 m au plus. */
 function targetHeight(rng: Rng, startY: number, maxY: number): number {
@@ -175,6 +196,7 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
   let branchIds: number[] = [];
   const shape = SHAPES[archetype];
   const spacing = archetype === 'escalier' ? Math.max(2.6, profile.spacing * 0.85) : profile.spacing;
+  const halfWidth = playableHalfWidth(profile.spread);
   const startY = from?.y ?? origin.y;
   const targetY = targetHeight(rng, startY, context.maxY);
   let cur: Vec2 = from ?? { x: origin.x + FIRST_ANCHOR_OFFSET.x, y: origin.y + FIRST_ANCHOR_OFFSET.y };
@@ -190,9 +212,9 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
       const side = cur.x > 0 ? -1 : 1;
       const junction = anchors.at(-1) ?? makeAnchor(ids, cur);
       if (anchors.length === 0) anchors.push(junction);
-      const low = makeAnchor(ids, { x: clampX(cur.x + side * 0.75 * u), y: cur.y + 0.5 * u });
-      const high = makeAnchor(ids, { x: clampX(cur.x + side * 0.5 * u), y: cur.y + 1.1 * u });
-      const merge = makeAnchor(ids, { x: clampX(cur.x - side * 0.1 * u), y: cur.y + 1.6 * u });
+      const low = makeAnchor(ids, { x: clampX(cur.x + side * 0.75 * u, halfWidth), y: cur.y + 0.5 * u });
+      const high = makeAnchor(ids, { x: clampX(cur.x + side * 0.5 * u, halfWidth), y: cur.y + 1.1 * u });
+      const merge = makeAnchor(ids, { x: clampX(cur.x - side * 0.1 * u, halfWidth), y: cur.y + 1.6 * u });
       anchors.push(low, high, merge);
       pickups.push(makePickup(ids, { x: (high.pos.x + merge.pos.x) / 2, y: (high.pos.y + merge.pos.y) / 2 + 0.3 }));
       junctionId = junction.id;
@@ -206,19 +228,19 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
       const launcher = makeAnchor(ids, cur, 'booster');
       anchors[anchors.length - 1] = launcher;
       const side = cur.x > 0 ? -1 : 1;
-      cur = { x: clampX(cur.x + side * 0.6 * spacing), y: cur.y + 1.45 * spacing };
+      cur = { x: clampX(cur.x + side * 0.6 * spacing, halfWidth), y: cur.y + 1.45 * spacing };
       anchors.push(makeAnchor(ids, cur));
       jumpDone = true;
       continue;
     }
     const prev = cur;
-    cur = chainStep(rng, cur, spacing, shape.dy, shape.dx);
+    cur = chainStep(rng, cur, spacing, shape.dy, shape.dx, profile.spread, halfWidth);
     // Jamais au-dessus de la frontière : le dernier pas se raccourcit pour finir deux mètres sous elle.
     if (cur.y > context.maxY) cur = { x: cur.x, y: context.maxY - 1 };
     anchors.push(makeAnchor(ids, cur));
     // Couloir d'étoiles : une étoile entre deux points sur deux, légèrement décalée.
     if (archetype === 'couloir' && anchors.length % 2 === 0) {
-      pickups.push(makePickup(ids, { x: clampX((prev.x + cur.x) / 2 + (rng.next() - 0.5) * 1.2), y: (prev.y + cur.y) / 2 }));
+      pickups.push(makePickup(ids, { x: clampX((prev.x + cur.x) / 2 + (rng.next() - 0.5) * 1.2, halfWidth), y: (prev.y + cur.y) / 2 }));
     }
   }
 
@@ -228,30 +250,44 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
   if (pickups.length === 0 && !teaching && anchors.length >= 3) {
     const beside = anchors[Math.floor(anchors.length / 2)]!;
     const side = beside.pos.x > 0 ? -1 : 1;
-    pickups.push(makePickup(ids, { x: clampX(beside.pos.x + side * 1.3), y: beside.pos.y + 0.8 }));
+    pickups.push(makePickup(ids, { x: clampX(beside.pos.x + side * 1.3, halfWidth), y: beside.pos.y + 0.8 }));
   }
   assignKinds(rng, anchors, profile, archetype, junctionId, branchIds);
-  if (context.cable) hangCables(anchors, junctionId, branchIds);
+  if (context.cable !== 'none') hangCables(anchors, junctionId, branchIds, halfWidth, context.cable);
   const obstacleCount = archetype === 'dalles' ? Math.min(4, profile.obstacles + 2) : profile.obstacles;
-  const obstacles = placeObstacles(rng, ids, anchors, pickups, Math.max(startY, origin.y + GRACE_ABOVE_ORIGIN - 2), cur.y, obstacleCount, from, archetype === 'dalles', context);
+  const obstacles = placeObstacles(rng, ids, anchors, pickups, Math.max(startY, origin.y + GRACE_ABOVE_ORIGIN - 2), cur.y, obstacleCount, from, archetype === 'dalles', context, halfWidth);
   return { anchors, obstacles, pickups, junctionId, branchIds };
 }
 
-/** Deux points normaux du milieu du segment deviennent des points sur câble, qui vont et viennent de côté. */
-function hangCables(anchors: Anchor[], junctionId: number | null, branchIds: readonly number[]): void {
+/** Une traversière s'arrête à cette distance du bord jouable. */
+const TRAVERSIERE_INSET = 0.3;
+
+/**
+ * Des points normaux du milieu du segment deviennent des points qui glissent :
+ * sur un câble court, deux points vont et viennent de 1,6 m de chaque côté ;
+ * en traversière, trois points balaient toute la largeur jouable, d'autant
+ * plus lentement qu'elle est large.
+ */
+function hangCables(anchors: Anchor[], junctionId: number | null, branchIds: readonly number[], halfWidth: number, kind: 'cable' | 'traversiere'): void {
   const protectedIds = new Set<number>([...branchIds, junctionId ?? -1, anchors.at(-1)?.id ?? -1, anchors[0]?.id ?? -1]);
   const candidates = anchors.map((a, i) => ({ a, i })).filter(({ a }) => !protectedIds.has(a.id) && a.kind === 'normal');
-  const picks = [candidates[Math.floor(candidates.length / 3)], candidates[Math.floor((2 * candidates.length) / 3)]].filter((c): c is { a: Anchor; i: number } => c !== undefined);
-  for (const { a, i } of picks) {
-    const from = { x: clampX(a.pos.x - CABLE_HALF_LENGTH), y: a.pos.y };
-    const to = { x: clampX(a.pos.x + CABLE_HALF_LENGTH), y: a.pos.y };
-    anchors[i] = { ...a, pos: { x: (from.x + to.x) / 2, y: a.pos.y }, cable: { from, to } };
+  const slots = kind === 'cable' ? [1 / 3, 2 / 3] : [1 / 4, 1 / 2, 3 / 4];
+  const picked = new Set<number>();
+  for (const slot of slots) {
+    const pick = candidates[Math.floor(candidates.length * slot)];
+    if (!pick || picked.has(pick.a.id)) continue;
+    picked.add(pick.a.id);
+    const { a, i } = pick;
+    const from = kind === 'cable' ? { x: clampX(a.pos.x - CABLE_HALF_LENGTH, halfWidth), y: a.pos.y } : { x: -halfWidth + TRAVERSIERE_INSET, y: a.pos.y };
+    const to = kind === 'cable' ? { x: clampX(a.pos.x + CABLE_HALF_LENGTH, halfWidth), y: a.pos.y } : { x: halfWidth - TRAVERSIERE_INSET, y: a.pos.y };
+    const period = kind === 'cable' ? CABLE_PERIOD_SECONDS : (TRAVERSIERE_PERIOD_SECONDS * halfWidth) / HALF_WIDTH;
+    anchors[i] = { ...a, pos: { x: (from.x + to.x) / 2, y: a.pos.y }, cable: { from, to, period } };
   }
 }
 
 /** Segment de repli : une chaîne serrée, sans rien d'autre. Toujours franchissable. */
 export function buildPlainSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origin: Vec2, context: SegmentContext = PLAIN_CONTEXT): Segment {
-  return buildSegment(rng, ids, from, origin, { spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine'] }, 'chaine', { ...context, cable: false });
+  return buildSegment(rng, ids, from, origin, { spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine'], spread: 1 }, 'chaine', { ...context, cable: 'none' });
 }
 
 /**
@@ -295,31 +331,40 @@ function placeObstacles(
   from: Vec2 | null,
   slabsOnly: boolean,
   context: SegmentContext,
+  halfWidth: number,
 ): Obstacle[] {
+  const wallX = halfWidth + WALL_MARGIN;
   const obstacles: Obstacle[] = [];
   const { env, entryEnv } = context;
+  // Un point qui glisse est tenu à l'écart partout où il passe : à ses deux bouts et au milieu.
+  const clearOf = (pos: Vec2, box: Obstacle): boolean => circleBoxGap(pos, 0, box) >= OBSTACLE_CLEARANCE && !underAnchor(pos, box, env);
   const keepAway = (box: Obstacle): boolean =>
-    anchors.every((a) => circleBoxGap(a.pos, 0, box) >= OBSTACLE_CLEARANCE && !underAnchor(a.pos, box, env)) &&
+    anchors.every((a) => (a.cable ? [a.cable.from, a.pos, a.cable.to] : [a.pos]).every((pos) => clearOf(pos, box))) &&
     pickups.every((p) => circleBoxGap(p.pos, 0, box) >= PICKUP_CLEARANCE) &&
     (from === null || (circleBoxGap(from, 0, box) >= OBSTACLE_CLEARANCE && !underAnchor(from, box, env) && !underAnchor(from, box, entryEnv))) &&
     obstacles.every((o) => box.y1 < o.y0 - 1 || box.y0 > o.y1 + 1);
+  // Les obstacles vivent entre deux mètres au-dessus du départ et deux mètres sous le sommet du segment,
+  // jamais au-dessus : un segment trop court pour cela n'en reçoit aucun.
+  const bottom = startY + 2;
+  const top = endY - 2 - OBSTACLE_THICKNESS;
+  if (top - bottom < 1) return obstacles;
   for (let i = 0; i < count; i += 1) {
     for (let attempt = 0; attempt < 6; attempt += 1) {
-      const y0 = startY + 2 + rng.next() * Math.max(1, endY - startY - 4);
+      const y0 = bottom + rng.next() * (top - bottom);
       let x0: number;
       let x1: number;
       if (!slabsOnly && rng.next() < 0.5) {
         const width = 1.5 + 1.5 * rng.next();
         if (rng.next() < 0.5) {
-          x0 = -WALL_X;
-          x1 = -WALL_X + width;
+          x0 = -wallX;
+          x1 = -wallX + width;
         } else {
-          x0 = WALL_X - width;
-          x1 = WALL_X;
+          x0 = wallX - width;
+          x1 = wallX;
         }
       } else {
         const width = 1.5 + rng.next();
-        const center = -3 + 6 * rng.next();
+        const center = (-3 + 6 * rng.next()) * (halfWidth / HALF_WIDTH);
         x0 = center - width / 2;
         x1 = center + width / 2;
       }

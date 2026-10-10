@@ -2,6 +2,19 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.5.0] — 2026-10-10 — Prises écartées et traversières
+
+Décision du propriétaire : ses quatre idées de prises sont retenues, dans l'ordre proposé par le Lead. Ce lot livre les deux premières.
+
+### Ajouté
+
+- Écartement progressif des prises : le déport d'un point au suivant grandit avec la hauteur en course libre (jusqu'à une fois et demie) et selon le niveau dans les traversées (du 4 au 10) ; la largeur jouable s'ouvre de ± 4 m à ± 6 m, les corniches suivent. Un pas ne dépasse jamais 6,8 m, ce que la corde sait suivre. La caméra dézoome d'elle-même quand des prises sortent des dix mètres de l'écran.
+- Les traversières, septième événement : trois points du segment balaient toute la largeur de la ville, aller-retour en cinq secondes (plus lentement quand elle est large), sur un rail tireté. Le robot vérificateur accepte le segment dès qu'une des trois positions, un bout, le milieu, l'autre bout, le fait passer, puisqu'on peut attendre la prise en pendant au point d'avant. Tirées au sort en course libre avec les six autres.
+
+### Corrigé
+
+- Un segment trop court, coupé par un événement qui commence juste au-dessus du toit, pouvait poser un obstacle au-dessus de son propre sommet, pile sous le premier point du segment suivant : les obstacles restent désormais entre deux mètres au-dessus du départ et deux mètres sous le sommet.
+
 ## [0.4.3] — 2026-10-10 — Les six événements en course libre
 
 Retour du propriétaire après test des niveaux : « la bascule rajoute de la difficulté, on meurt souvent au début surtout si on prend beaucoup de vitesse, mais avec l'habitude ça passe ». Demande : que la course libre tire toutes ces nouveautés au hasard.

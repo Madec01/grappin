@@ -23,7 +23,7 @@ export interface LevelDef {
   readonly events: readonly ScheduledEvent[];
 }
 
-const plain = (spacing: number): TierProfile => ({ spacing, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine', 'couloir'] });
+const plain = (spacing: number): TierProfile => ({ spacing, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine', 'couloir'], spread: 1 });
 
 export const LEVELS: readonly LevelDef[] = [
   {
@@ -45,7 +45,7 @@ export const LEVELS: readonly LevelDef[] = [
     startY: 60,
     endY: 130,
     fogBaseSpeed: 0.7,
-    profile: { spacing: 3.2, obstacles: 1, split: true, fragileChance: 0, boosters: 0, archetypes: ['chaine', 'escalier', 'dalles'] },
+    profile: { spacing: 3.2, obstacles: 1, split: true, fragileChance: 0, boosters: 0, archetypes: ['chaine', 'escalier', 'dalles'], spread: 1 },
     events: [],
   },
   {
@@ -56,7 +56,7 @@ export const LEVELS: readonly LevelDef[] = [
     startY: 130,
     endY: 200,
     fogBaseSpeed: 0.8,
-    profile: { spacing: 3.4, obstacles: 1, split: true, fragileChance: 0, boosters: 0, archetypes: ['chaine', 'couloir', 'couloir', 'dalles'] },
+    profile: { spacing: 3.4, obstacles: 1, split: true, fragileChance: 0, boosters: 0, archetypes: ['chaine', 'couloir', 'couloir', 'dalles'], spread: 1 },
     events: [{ kind: 'pluie', at: 20, length: 30 }],
   },
   {
@@ -67,7 +67,7 @@ export const LEVELS: readonly LevelDef[] = [
     startY: 200,
     endY: 280,
     fogBaseSpeed: 0.9,
-    profile: { spacing: 3.6, obstacles: 1, split: true, fragileChance: 0.3, boosters: 0, archetypes: ['chaine', 'fragiles', 'escalier', 'dalles'] },
+    profile: { spacing: 3.6, obstacles: 1, split: true, fragileChance: 0.3, boosters: 0, archetypes: ['chaine', 'fragiles', 'escalier', 'dalles'], spread: 1.05 },
     events: [{ kind: 'panne', at: 25, length: 30 }],
   },
   {
@@ -78,7 +78,7 @@ export const LEVELS: readonly LevelDef[] = [
     startY: 280,
     endY: 360,
     fogBaseSpeed: 1,
-    profile: { spacing: 3.8, obstacles: 1, split: true, fragileChance: 0, boosters: 1, archetypes: ['chaine', 'rafale', 'saut', 'couloir'] },
+    profile: { spacing: 3.8, obstacles: 1, split: true, fragileChance: 0, boosters: 1, archetypes: ['chaine', 'rafale', 'saut', 'couloir'], spread: 1.1 },
     events: [{ kind: 'bascule', at: 25, length: 30, side: 1 }],
   },
   {
@@ -89,7 +89,7 @@ export const LEVELS: readonly LevelDef[] = [
     startY: 360,
     endY: 450,
     fogBaseSpeed: 1.1,
-    profile: { spacing: 4, obstacles: 2, split: true, fragileChance: 0.2, boosters: 0, archetypes: ['dalles', 'dalles', 'chaine', 'escalier'] },
+    profile: { spacing: 4, obstacles: 2, split: true, fragileChance: 0.2, boosters: 0, archetypes: ['dalles', 'dalles', 'chaine', 'escalier'], spread: 1.15 },
     events: [{ kind: 'vent', at: 20, length: 30, side: -1, strength: 3 }],
   },
   {
@@ -100,7 +100,7 @@ export const LEVELS: readonly LevelDef[] = [
     startY: 450,
     endY: 540,
     fogBaseSpeed: 1.2,
-    profile: { spacing: 4.2, obstacles: 2, split: true, fragileChance: 0.3, boosters: 1, archetypes: ['chaine', 'fragiles', 'rafale', 'couloir', 'saut'] },
+    profile: { spacing: 4.2, obstacles: 2, split: true, fragileChance: 0.3, boosters: 1, archetypes: ['chaine', 'fragiles', 'rafale', 'couloir', 'saut'], spread: 1.2 },
     events: [{ kind: 'alerte', at: 15, length: 25 }, { kind: 'cable', at: 45, length: 30 }],
   },
   {
@@ -111,7 +111,7 @@ export const LEVELS: readonly LevelDef[] = [
     startY: 540,
     endY: 630,
     fogBaseSpeed: 1.35,
-    profile: { spacing: 4.5, obstacles: 2, split: true, fragileChance: 0.3, boosters: 1, archetypes: ['chaine', 'escalier', 'dalles', 'fragiles', 'rafale'] },
+    profile: { spacing: 4.5, obstacles: 2, split: true, fragileChance: 0.3, boosters: 1, archetypes: ['chaine', 'escalier', 'dalles', 'fragiles', 'rafale'], spread: 1.3 },
     events: [{ kind: 'bascule', at: 20, length: 30, side: -1 }, { kind: 'panne', at: 55, length: 30 }],
   },
   {
@@ -122,7 +122,7 @@ export const LEVELS: readonly LevelDef[] = [
     startY: 630,
     endY: 720,
     fogBaseSpeed: 1.5,
-    profile: { spacing: 4.7, obstacles: 3, split: true, fragileChance: 0.35, boosters: 1, archetypes: ['dalles', 'chaine', 'fragiles', 'saut', 'couloir'] },
+    profile: { spacing: 4.7, obstacles: 3, split: true, fragileChance: 0.35, boosters: 1, archetypes: ['dalles', 'chaine', 'fragiles', 'saut', 'couloir'], spread: 1.4 },
     events: [{ kind: 'vent', at: 10, length: 25, side: 1, strength: 3.5 }, { kind: 'pluie', at: 40, length: 20 }, { kind: 'cable', at: 62, length: 25 }],
   },
   {
@@ -133,7 +133,7 @@ export const LEVELS: readonly LevelDef[] = [
     startY: 720,
     endY: 820,
     fogBaseSpeed: 1.65,
-    profile: { spacing: 5, obstacles: 3, split: true, fragileChance: 0.4, boosters: 1, archetypes: ['chaine', 'escalier', 'couloir', 'dalles', 'rafale', 'fragiles', 'saut'] },
+    profile: { spacing: 5, obstacles: 3, split: true, fragileChance: 0.4, boosters: 1, archetypes: ['chaine', 'escalier', 'couloir', 'dalles', 'rafale', 'fragiles', 'saut'], spread: 1.5 },
     events: [{ kind: 'bascule', at: 15, length: 28, side: 1 }, { kind: 'alerte', at: 48, length: 20 }, { kind: 'panne', at: 70, length: 25 }],
   },
 ];
