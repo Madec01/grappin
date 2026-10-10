@@ -57,6 +57,8 @@ Le héros, son nom, et le détail du décor restent à proposer au propriétaire
 - Mobiles ou rotatifs : bougent ou tournent, introduits en dernier.
 - **Ligne de vue.** Le grappin ne traverse pas un obstacle : un point caché derrière une corniche n'est pas visable. Règle technique du Lead, qui rend les obstacles lisibles et le vérificateur honnête.
 
+**Prises à cycles, idées du propriétaire livrées en 0.5.1.** La **prise électrique** est un piège : elle se charge 1,5 s toutes les 4 s, un avertissement de 0,6 s la précède ; l'attraper chargée, ou y pendre quand elle se charge, électrocute. Elle est posée à côté d'un point de la chaîne, là où la visée peut la préférer : on regarde avant d'appuyer, on lâche avant la charge. La **prise à éclipse** est un raccourci : allumée deux secondes, éteinte deux secondes ; éteinte, la visée l'ignore et le grappin ne l'attrape pas, et si l'on y pend quand elle s'éteint, la corde lâche sans casse. Elle est posée au-dessus du point qu'elle permet de sauter. Ni l'une ni l'autre ne compte pour le robot vérificateur : le parcours reste toujours faisable sans elles, et chacune garde un point normal à portée de corde. Les cycles sont décalés d'une prise à l'autre pour qu'elles ne battent pas ensemble.
+
 ## 7. Dangers [VALIDÉ]
 
 - La brume qui monte.

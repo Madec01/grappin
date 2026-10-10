@@ -213,6 +213,21 @@ async function main(): Promise<void> {
         await testPage.screenshot({ path: join(outDir, '19-mode-test-partie.png') });
       }
     }
+    // Les prises à cycles : la course libre du mode test part de la zone la plus haute, où elles abondent.
+    await testPage.evaluate(() => window.__grappin!.restart());
+    await testPage.waitForFunction(() => window.__grappin?.state().screen === 'title');
+    await testPage.evaluate(() => {
+      window.__grappin!.unlockAll();
+      window.__grappin!.playFree();
+    });
+    await testPage.waitForFunction(() => window.__grappin?.state().screen === 'playing');
+    const topStart = (await testPage.evaluate(() => window.__grappin!.state())).freeRunStartY;
+    await autoplay(testPage, 30, topStart + 6);
+    await testPage.waitForTimeout(400);
+    await testPage.screenshot({ path: join(outDir, '20-prises-a-cycles.png') });
+    await autoplay(testPage, 30, topStart + 16);
+    await testPage.waitForTimeout(400);
+    await testPage.screenshot({ path: join(outDir, '21-prises-a-cycles-suite.png') });
     await testPage.close();
 
     // Les événements : tous les niveaux ouverts, puis chaque événement attrapé à sa hauteur.
