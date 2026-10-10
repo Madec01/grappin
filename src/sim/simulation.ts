@@ -34,6 +34,7 @@ export function createState(seed: number, tuning: Tuning, plan: CoursePlan = FRE
     lastAnchorId: null,
     releaseStep: -1_000_000,
     hangSteps: 0,
+    stunUntilStep: 0,
     course: createCourse(seed, plan),
     fogY: plan.startY + tuning.fogStart,
     groundY: plan.startY,

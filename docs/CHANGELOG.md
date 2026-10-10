@@ -2,6 +2,19 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.5.3] — 2026-10-10 — La prise électrique ne tue plus
+
+Retour du propriétaire : « ça bug avec les prises électriques, sans que je m'accroche dessus, juste si le cercle de visée est dessus, ça me tue ; c'est un peu trop fort de tuer d'un coup ».
+
+### Modifié
+
+- La visée ne se pose plus jamais sur une prise électrique qui avertit ou qui est chargée : l'anneau va ailleurs, ou disparaît. Un appui, même gardé en mémoire, ne peut donc plus se poser dessus au mauvais moment.
+- Pendre à une prise électrique quand elle se charge ne tue plus : c'est une décharge. La corde lâche, le personnage est repoussé à 5 m/s à l'opposé de la prise, la série de parfaits retombe à zéro et, pendant 0,7 s, il ne vise ni n'attrape rien. « Décharge ! » flotte à l'écran.
+
+### Corrigé
+
+- B-004 : avec l'appui gardé en mémoire (un doigt posé un peu en avance), le grappin pouvait se poser tout seul sur une prise électrique chargée dès qu'elle devenait la cible, et tuer sans que le joueur ait rien fait.
+
 ## [0.5.2] — 2026-10-10 — Style néon
 
 Décision du propriétaire : « on va garder ce style minimaliste et en faire un style néon ». Les formes restent, la lumière change.

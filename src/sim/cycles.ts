@@ -3,9 +3,12 @@ import type { Tuning } from './tuning';
 
 /**
  * Cycles des prises à comportement, idées du propriétaire validées le
- * 10 octobre 2026. La prise électrique se charge par cycles : l'attraper
- * chargée, ou y pendre quand elle se charge, électrocute ; un court
- * avertissement précède chaque charge. La prise à éclipse s'allume deux
+ * 10 octobre 2026. La prise électrique se charge par cycles : on ne peut
+ * l'attraper que calme, et y pendre quand elle se charge donne une décharge
+ * qui lâche la corde, repousse et étourdit un court instant ; un court
+ * avertissement précède chaque charge. Retour du propriétaire : mourir d'un
+ * coup était trop dur, et la visée ne doit jamais se poser sur une prise
+ * dangereuse. La prise à éclipse s'allume deux
  * secondes et s'éteint deux secondes : éteinte, le grappin ne l'attrape pas,
  * et si l'on y pend quand elle s'éteint, la corde lâche. Tout se calcule du
  * numéro de pas et du numéro de point, décalé pour que les prises ne battent
@@ -45,10 +48,16 @@ export function isLit(anchorId: number, step: number, tuning: Tuning): boolean {
   return cycleTime(anchorId, step, tuning, ECLIPSE_PERIOD_SECONDS) < ECLIPSE_LIT_SECONDS;
 }
 
-/** Le grappin peut-il viser et attraper cette prise en ce moment ? Jamais une prise cassée ni une éclipse éteinte. */
+/**
+ * Le grappin peut-il viser et attraper cette prise en ce moment ? Jamais une
+ * prise cassée, une éclipse éteinte, ni une électrique qui avertit ou qui est
+ * chargée : l'anneau de visée ne se pose que sur ce qui se tient sans danger.
+ */
 export function grabbable(anchor: Anchor, step: number, tuning: Tuning): boolean {
   if (anchor.broken) return false;
-  return anchor.kind !== 'eclipse' || isLit(anchor.id, step, tuning);
+  if (anchor.kind === 'eclipse') return isLit(anchor.id, step, tuning);
+  if (anchor.kind === 'electrique') return electricState(anchor.id, step, tuning) === 'calme';
+  return true;
 }
 
 /** Les prises que le vérificateur n'exige jamais : un parcours se prouve sans elles, elles ne sont qu'un raccourci ou un piège. */

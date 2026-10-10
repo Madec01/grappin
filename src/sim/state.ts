@@ -81,7 +81,9 @@ export type RuleEvent =
   | { readonly type: 'graze'; readonly obstacleId: number }
   | { readonly type: 'pickup'; readonly pickupId: number }
   | { readonly type: 'tier'; readonly tier: number; readonly name: string }
-  | { readonly type: 'death'; readonly height: number; readonly cause: 'fog' | 'obstacle' | 'fall' | 'shock' };
+  | { readonly type: 'death'; readonly height: number; readonly cause: 'fog' | 'obstacle' | 'fall' }
+  /** Décharge d'une prise électrique tenue quand elle se charge : corde lâchée, personnage repoussé et étourdi. */
+  | { readonly type: 'shock'; readonly anchorId: number };
 
 export interface SimState {
   /** Numéro du pas courant. */
@@ -132,6 +134,8 @@ export interface SimState {
   height: number;
   score: number;
   combo: number;
+  /** Pas jusqu'auquel le personnage, secoué par une décharge, ne vise ni n'attrape rien. */
+  stunUntilStep: number;
   status: Status;
   /** Journal des gestes : pas et nature, pour rejouer une partie. */
   inputs: { readonly step: number; readonly kind: 'press' | 'release' }[];

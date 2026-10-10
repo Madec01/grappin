@@ -40,7 +40,7 @@ export interface RobotReport {
   readonly hold: number;
   readonly alive: boolean;
   readonly won: boolean;
-  readonly cause: 'fog' | 'obstacle' | 'fall' | 'shock' | null;
+  readonly cause: 'fog' | 'obstacle' | 'fall' | null;
 }
 
 export function playRobot(seed: number, tuning: Tuning, seconds: number, profile: RobotProfile = REASONABLE, plan: CoursePlan = FREE_RUN): RobotReport {

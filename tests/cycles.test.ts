@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ECLIPSE_LIT_SECONDS, ECLIPSE_PERIOD_SECONDS, ELECTRIC_CHARGED_SECONDS, ELECTRIC_PERIOD_SECONDS, ELECTRIC_WARNING_SECONDS, electricState, grabbable, isCharged, isLit, isOptional } from '../src/sim/cycles';
+import { SHOCK_STUN_SECONDS } from '../src/sim/rules';
 import { tierProfile } from '../src/sim/generator';
 import { Simulation } from '../src/sim/simulation';
 import type { Anchor } from '../src/sim/state';
@@ -17,6 +18,9 @@ function alone(anchors: Anchor[]): Simulation {
   sim.state.pickups = [];
   sim.state.hero = { pos: { x: 0, y: 20 }, vel: { x: 0, y: 0 }, grounded: false };
   sim.state.rope = null;
+  // Le niveau engendré visait déjà son premier point : on oublie cette cible, qui n'existe plus.
+  sim.state.targetId = null;
+  sim.state.targetValidStep = -1_000_000;
   return sim;
 }
 
@@ -56,6 +60,11 @@ describe('cycles des prises', () => {
     expect(grabbable(eclipse, litStep, T)).toBe(true);
     expect(grabbable(eclipse, offStep, T)).toBe(false);
     expect(grabbable({ ...eclipse, kind: 'normal', broken: true }, litStep, T)).toBe(false);
+    // Une électrique ne s'attrape que calme : ni quand elle avertit, ni quand elle est chargée.
+    const electric: Anchor = { id: 3, pos: { x: 0, y: 10 }, kind: 'electrique', broken: false };
+    expect(grabbable(electric, stepWhen(0, (step) => electricState(3, step, T) === 'calme'), T)).toBe(true);
+    expect(grabbable(electric, stepWhen(0, (step) => electricState(3, step, T) === 'avertit'), T)).toBe(false);
+    expect(grabbable(electric, stepWhen(0, (step) => electricState(3, step, T) === 'chargee'), T)).toBe(false);
     expect(isOptional(eclipse)).toBe(true);
     expect(isOptional({ ...eclipse, kind: 'electrique' })).toBe(true);
     expect(isOptional({ ...eclipse, kind: 'fragile' })).toBe(false);
@@ -65,7 +74,7 @@ describe('cycles des prises', () => {
 describe('règles des prises à cycles', () => {
   const electric: Anchor = { id: 3, pos: { x: 0.5, y: 23 }, kind: 'electrique', broken: false };
 
-  it('attraper une prise électrique calme accroche ; chargée, elle électrocute', () => {
+  it('attraper une prise électrique calme accroche ; chargée ou sur le point de l\'être, l\'anneau ne s\'y pose pas et l\'appui ne fait rien', () => {
     const calm = alone([{ ...electric }]);
     calm.state.step = stepWhen(0, (step) => electricState(3, step, T) === 'calme' && electricState(3, step + 2, T) === 'calme');
     calm.step();
@@ -74,25 +83,40 @@ describe('règles des prises à cycles', () => {
     expect(calm.state.rope?.anchorId).toBe(3);
     expect(calm.state.status).toBe('alive');
 
-    const hot = alone([{ ...electric }]);
-    hot.state.step = stepWhen(0, (step) => isCharged(3, step, T) && isCharged(3, step + 2, T));
-    hot.step();
-    expect(hot.state.targetId).toBe(3);
-    hot.press();
-    expect(hot.state.status).toBe('dead');
-    expect(hot.state.rope).toBeNull();
-    expect(hot.drain().find((e) => e.type === 'death')).toMatchObject({ type: 'death', cause: 'shock' });
+    for (const wanted of ['chargee', 'avertit'] as const) {
+      const hot = alone([{ ...electric }]);
+      hot.state.step = stepWhen(0, (step) => electricState(3, step, T) === wanted && electricState(3, step + 2, T) === wanted);
+      hot.step();
+      expect(hot.state.targetId, wanted).toBeNull();
+      hot.press();
+      expect(hot.state.rope, wanted).toBeNull();
+      expect(hot.state.status, wanted).toBe('alive');
+    }
   });
 
-  it('pendre à une prise électrique quand elle se charge électrocute', () => {
+  it('pendre à une prise électrique quand elle se charge donne une décharge : corde lâchée, repoussé, série à zéro, étourdi 0,7 s, puis tout redevient possible', () => {
     const sim = alone([{ ...electric }]);
     sim.state.step = stepWhen(0, (step) => electricState(3, step, T) === 'calme' && electricState(3, step + 2, T) === 'calme');
     sim.step();
     sim.press();
     expect(sim.state.rope?.anchorId).toBe(3);
-    sim.run(Math.round(ELECTRIC_PERIOD_SECONDS * SECOND));
-    expect(sim.state.status).toBe('dead');
-    expect(sim.drain().find((e) => e.type === 'death')).toMatchObject({ cause: 'shock' });
+    sim.state.combo = 4;
+    const chargedAt = stepWhen(sim.state.step, (step) => isCharged(3, step, T));
+    sim.run(chargedAt - sim.state.step + 1);
+    expect(sim.state.status).toBe('alive');
+    expect(sim.state.rope).toBeNull();
+    expect(sim.state.combo).toBe(0);
+    expect(Math.hypot(sim.state.hero.vel.x, sim.state.hero.vel.y)).toBeGreaterThan(3);
+    const events = sim.drain();
+    expect(events.some((e) => e.type === 'shock' && e.anchorId === 3)).toBe(true);
+    expect(events.some((e) => e.type === 'death')).toBe(false);
+    // Étourdi : aucune cible et aucun appui ne prend, puis la visée revient.
+    sim.run(2);
+    expect(sim.state.targetId).toBeNull();
+    sim.press();
+    expect(sim.state.rope).toBeNull();
+    sim.run(Math.round(SHOCK_STUN_SECONDS * SECOND) + 2);
+    expect(sim.state.step).toBeGreaterThanOrEqual(sim.state.stunUntilStep);
   });
 
   it('une éclipse éteinte n\'est pas visée ; allumée, elle s\'attrape, et la corde lâche quand elle s\'éteint, sans casse', () => {

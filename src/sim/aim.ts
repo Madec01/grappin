@@ -60,6 +60,8 @@ export function bestAnchor(
 
 export function chooseTarget(state: SimState, tuning: Tuning): AimResult {
   const { hero, step } = state;
+  // Étourdi par une décharge : aucune cible, l'anneau disparaît, le temps de reprendre ses esprits.
+  if (step < state.stunUntilStep) return { targetId: null, targetValidStep: step };
   const coyoteSteps = Math.round(tuning.coyoteSeconds / tuning.stepSeconds);
   const excludeSteps = Math.round(0.4 / tuning.stepSeconds);
   // Le point que l'on vient de lâcher n'est pas repris tout de suite : on monte.

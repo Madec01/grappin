@@ -65,16 +65,13 @@ export function tryAttach(state: SimState, tuning: Tuning, events: RuleEvent[]):
   if (state.status !== 'alive' || state.rope || state.targetId === null) return false;
   const coyoteSteps = Math.round(tuning.coyoteSeconds / tuning.stepSeconds);
   if (state.step - state.targetValidStep > coyoteSteps) return false;
+  // Étourdi par une décharge, on ne rattrape rien pendant un court instant.
+  if (state.step < state.stunUntilStep) return false;
   const anchor = findAnchor(state, state.targetId);
   if (!anchor || !grabbable(anchor, state.step, tuning)) return false;
   const reach = tuning.ropeMax * tuning.coyoteReach;
   const d = distance(anchor.pos, state.hero.pos);
   if (d > reach) return false;
-  // Le piège : attraper une prise électrique chargée électrocute. L'appui est consommé.
-  if (anchor.kind === 'electrique' && isCharged(anchor.id, state.step, tuning)) {
-    electrocute(state, events);
-    return true;
-  }
   const ropeLength = Math.max(tuning.ropeMin, Math.min(reach, d));
   state.rope = { anchorId: anchor.id, length: ropeLength };
   state.hero.grounded = false;
@@ -185,15 +182,29 @@ export function applyFragile(state: SimState, tuning: Tuning, events: RuleEvent[
   release(state, tuning, events, true);
 }
 
-/** Électrocuté par une prise piégée : mort immédiate, corde lâchée. */
-function electrocute(state: SimState, events: RuleEvent[]): void {
-  state.status = 'dead';
-  state.rope = null;
-  events.push({ type: 'death', height: state.height, cause: 'shock' });
+/** La décharge repousse à cette vitesse, et étourdit ce temps-là : ni visée ni prise possible. */
+export const SHOCK_PUSH_SPEED = 5;
+export const SHOCK_STUN_SECONDS = 0.7;
+
+/**
+ * Décharge d'une prise électrique tenue quand elle se charge : la corde lâche,
+ * le personnage est repoussé à l'opposé de la prise (vers le haut s'il est
+ * dessus), la série de parfaits retombe à zéro et il reste étourdi un court
+ * instant. Pas de mort : retour du propriétaire, « trop fort de tuer d'un coup ».
+ */
+function shock(state: SimState, anchor: Anchor, tuning: Tuning, events: RuleEvent[]): void {
+  release(state, tuning, events, true);
+  const away = { x: state.hero.pos.x - anchor.pos.x, y: state.hero.pos.y - anchor.pos.y };
+  const length = Math.hypot(away.x, away.y);
+  const dir = length > 1e-6 ? { x: away.x / length, y: away.y / length } : upOf(state.env);
+  state.hero.vel = { x: dir.x * SHOCK_PUSH_SPEED, y: dir.y * SHOCK_PUSH_SPEED };
+  state.combo = 0;
+  state.stunUntilStep = state.step + Math.round(SHOCK_STUN_SECONDS / tuning.stepSeconds);
+  events.push({ type: 'shock', anchorId: anchor.id });
 }
 
 /**
- * Prises à cycles tenues : une électrique qui se charge électrocute, une
+ * Prises à cycles tenues : une électrique qui se charge donne une décharge, une
  * éclipse qui s'éteint lâche la corde avec la vitesse du moment, comme une
  * fragile qui casse, mais sans se casser : elle se rallume deux secondes plus tard.
  */
@@ -201,7 +212,7 @@ export function applyCycles(state: SimState, tuning: Tuning, events: RuleEvent[]
   if (state.status !== 'alive' || !state.rope) return;
   const anchor = findAnchor(state, state.rope.anchorId);
   if (!anchor) return;
-  if (anchor.kind === 'electrique' && isCharged(anchor.id, state.step, tuning)) electrocute(state, events);
+  if (anchor.kind === 'electrique' && isCharged(anchor.id, state.step, tuning)) shock(state, anchor, tuning, events);
   else if (anchor.kind === 'eclipse' && !isLit(anchor.id, state.step, tuning)) release(state, tuning, events, true);
 }
 

@@ -170,6 +170,8 @@ export function floatingTextFor(event: RuleEvent, tuning: Tuning): string | null
       return 'Crac';
     case 'rescue':
       return 'Seconde chance !';
+    case 'shock':
+      return 'Décharge !';
     default:
       return null;
   }

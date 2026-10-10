@@ -208,7 +208,6 @@ const DEATH_MESSAGES: Record<DeathCause, string> = {
   fog: "La brume t'a rattrapé",
   obstacle: "Un obstacle t'a arrêté",
   fall: 'Tombé hors de la ville',
-  shock: 'Électrocuté par une prise piégée',
 };
 
 /** Couleur du cœur et du halo de chaque espèce d'accroche. */
