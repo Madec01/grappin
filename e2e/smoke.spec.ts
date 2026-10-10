@@ -257,7 +257,7 @@ test('les boutons répondent au toucher : Talismans, une ligne, Retour, puis un 
 
   await tapButton(page, 'back');
   await expect.poll(async () => (await state(page)).screen).toBe('title');
-  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual(['levels', 'free', 'talismans']);
+  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual(['levels', 'free', 'talismans', 'music']);
 
   await page.touchscreen.tap(CENTER.x, CENTER.y);
   await expect.poll(async () => (await state(page)).screen).toBe('playing');
