@@ -67,7 +67,7 @@ async function autoplay(page: Page, seconds: number, untilHeight = Infinity): Pr
     const tick = () => {
       const s = api.state();
       const now = performance.now();
-      if (s.screen === 'dead' || now - start > limitMs || s.height >= untilHeight) { done(); return; }
+      if (s.screen === 'dead' || s.screen === 'won' || now - start > limitMs || s.height >= untilHeight) { done(); return; }
       if (!s.attached && s.targetId !== null) {
         api.press();
         holdSince = now;
@@ -150,9 +150,10 @@ async function main(): Promise<void> {
     await page.waitForTimeout(400);
     await page.screenshot({ path: join(outDir, '01-accueil.png') });
 
-    // Doigt posé et tenu : la partie démarre, le grappin accroche, le personnage se balance.
-    await page.evaluate(() => window.__grappin!.press());
+    // Course libre, puis doigt posé et tenu : le grappin accroche, le personnage se balance.
+    await page.evaluate(() => window.__grappin!.playFree());
     await page.waitForFunction(() => window.__grappin?.state().screen === 'playing');
+    await page.evaluate(() => window.__grappin!.press());
     await page.waitForTimeout(700);
     await page.screenshot({ path: join(outDir, '02-balancement.png') });
     await page.evaluate(() => window.__grappin!.release());
@@ -168,13 +169,33 @@ async function main(): Promise<void> {
     await autoplay(page, 60, 112);
     await page.screenshot({ path: join(outDir, '06-fragiles.png') });
     const final = await page.evaluate(() => window.__grappin!.state());
-    console.log(`Partie du robot : ${final.height.toFixed(1)} m, score ${Math.round(final.score)}, écran ${final.screen}`);
+    console.log(`Course libre du robot : ${final.height.toFixed(1)} m, score ${Math.round(final.score)}, écran ${final.screen}`);
+
+    // Un niveau : le premier, joué jusqu'à la ligne d'arrivée, puis l'écran de victoire et la liste des niveaux.
+    const levelPage = await context.newPage();
+    await levelPage.goto(`http://localhost:${PORT}/`);
+    await levelPage.waitForFunction(() => window.__grappin?.state().screen === 'title');
+    await levelPage.evaluate(() => window.__grappin!.resetProfile());
+    await levelPage.evaluate(() => window.__grappin!.playLevel(1));
+    await levelPage.waitForFunction(() => window.__grappin?.state().screen === 'playing');
+    await levelPage.waitForTimeout(600);
+    await levelPage.screenshot({ path: join(outDir, '08-niveau-depart.png') });
+    await autoplay(levelPage, 90);
+    await levelPage.waitForTimeout(800);
+    await levelPage.screenshot({ path: join(outDir, '09-niveau-fin.png') });
+    const levelState = await levelPage.evaluate(() => window.__grappin!.state());
+    console.log(`Niveau 1 du robot : écran ${levelState.screen}, ${levelState.levelHeight.toFixed(1)} m sur ${levelState.goal ?? 0}`);
+    await levelPage.evaluate(() => window.__grappin!.restart());
+    await levelPage.waitForFunction(() => window.__grappin?.state().screen === 'title');
+    await levelPage.waitForTimeout(300);
+    await levelPage.screenshot({ path: join(outDir, '10-titre-apres-niveau.png') });
 
     // Écran de fin : une partie à brume rapide où personne ne joue, pour montrer « Perdu ».
     const ending = await context.newPage();
     await ending.goto(`http://localhost:${PORT}/?graine=${seed}&fogBaseSpeed=6`);
     await ending.waitForFunction(() => window.__grappin?.state().screen === 'title');
-    await ending.touchscreen.tap(VIEWPORT.width / 2, VIEWPORT.height / 2);
+    await ending.evaluate(() => window.__grappin!.playFree());
+    await ending.evaluate(() => window.__grappin!.press());
     await ending.waitForTimeout(100);
     await ending.evaluate(() => window.__grappin!.release());
     await ending.waitForFunction(() => window.__grappin?.state().screen === 'dead', undefined, { timeout: 20_000 });

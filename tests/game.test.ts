@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { Game, readSettings } from '../src/app/game';
-import { createProfile, loadProfile, memoryStorage, saveProfile, type Profile, type ProfileStorage, type RunOutcome } from '../src/meta/profile';
+import { levelById } from '../src/data/levels';
+import { createProfile, loadProfile, memoryStorage, saveProfile, type LevelOutcome, type Profile, type ProfileStorage, type RunOutcome } from '../src/meta/profile';
 import type { TalismanId } from '../src/meta/talismans';
+import { FIRST_CLEAR_XP, STAR_XP, freeRunStartY, unlockedLevel, type LevelResult } from '../src/meta/traversee';
+import type { ButtonId } from '../src/render/buttons';
 import type { DeathCause, GameFrame, GameScreen } from '../src/render/renderer';
-import type { ButtonId } from '../src/render/screens';
+import type { SimState } from '../src/sim/state';
 import { DEFAULT_TUNING, type Tuning } from '../src/sim/tuning';
 
 /** Ce que le faux rendu a reçu à la dernière image, et tout ce qu'il a vu passer au fil de la partie. */
@@ -14,13 +17,17 @@ interface Seen {
   /** Textes flottants et bannière de la dernière image. */
   lastTexts: string[];
   lastBanner: string | null;
+  lastBannerDetail: string | null;
   /** Textes flottants distincts vus à l'écran, et bannières de palier distinctes. */
   readonly texts: Set<string>;
   readonly banners: Set<string>;
   /** Réglages, profil et bilan de la dernière image. */
   lastTuning: Tuning | null;
   lastProfile: Profile | null;
-  lastOutcome: RunOutcome | null;
+  lastOutcome: RunOutcome | LevelOutcome | null;
+  lastResult: LevelResult | null;
+  /** L'état vivant de la simulation, tel que le rendu le reçoit : de quoi téléporter le personnage. */
+  state: SimState | null;
   /** Le bouton que le faux rendu trouve sous un point : aucun tant que le test n'en pose pas. */
   hit: (x: number, y: number) => ButtonId | null;
 }
@@ -37,24 +44,30 @@ function makeGame(search = '', saved?: Profile): { game: Game; seen: Seen; stora
     lastCause: null,
     lastTexts: [],
     lastBanner: null,
+    lastBannerDetail: null,
     texts: new Set(),
     banners: new Set(),
     lastTuning: null,
     lastProfile: null,
     lastOutcome: null,
+    lastResult: null,
+    state: null,
     hit: () => null,
   };
   const view = {
     width: 390,
     height: 844,
-    draw: (_state: unknown, _camera: unknown, frame: GameFrame) => {
+    draw: (state: SimState, _camera: unknown, frame: GameFrame) => {
+      seen.state = state;
       seen.screens.push(frame.screen);
       seen.lastCause = frame.deathCause;
       seen.lastTexts = frame.effects.texts.map((item) => item.text);
       seen.lastBanner = frame.effects.banner?.text ?? null;
+      seen.lastBannerDetail = frame.effects.banner?.detail ?? null;
       seen.lastTuning = frame.tuning;
       seen.lastProfile = frame.profile;
       seen.lastOutcome = frame.outcome;
+      seen.lastResult = frame.result;
       for (const text of seen.lastTexts) seen.texts.add(text);
       if (seen.lastBanner) seen.banners.add(seen.lastBanner);
     },
@@ -63,6 +76,13 @@ function makeGame(search = '', saved?: Profile): { game: Game; seen: Seen; stora
   const storage = memoryStorage();
   if (saved) saveProfile(storage, saved);
   return { game: new Game(view, readSettings(search), storage), seen, storage };
+}
+
+/** Comme `makeGame`, mais la course libre est déjà lancée, sans appui d'accroche : l'URL (brume, hauteur des paliers, graine) y règne, ce qu'un niveau ne permet pas. */
+function makeFreeGame(search = '', saved?: Profile): ReturnType<typeof makeGame> {
+  const made = makeGame(search, saved);
+  made.game.playFree();
+  return made;
 }
 
 /** Joue des images de 50 ms jusqu'à l'écran de fin ; renvoie le nombre d'images, ou -1 si la mort ne vient pas. */
@@ -80,7 +100,7 @@ function frameUntilDead(game: Game): number {
 
 describe('verrou de l\'écran de fin', () => {
   it('un appui juste après la mort est ignoré, puis accepté', () => {
-    const { game } = makeGame('?graine=1&fogBaseSpeed=6');
+    const { game } = makeFreeGame('?graine=1&fogBaseSpeed=6');
     game.press();
     game.release();
     for (let frames = 0; frames < 400 && game.debugState().screen !== 'dead'; frames += 1) game.frame(0.05);
@@ -162,7 +182,7 @@ describe('jeu', () => {
   it('démarre au premier appui, qui compte aussi comme l\'appui d\'accroche', () => {
     const { game } = makeGame('?graine=3');
     game.press();
-    expect(game.debugState()).toMatchObject({ screen: 'playing', attached: true });
+    expect(game.debugState()).toMatchObject({ screen: 'playing', attached: true, mode: 'level', levelId: 1 });
     game.release();
     expect(game.debugState().attached).toBe(false);
   });
@@ -184,7 +204,7 @@ describe('jeu', () => {
   });
 
   it('passe à l\'écran de fin à la mort, puis relance sur la même graine si elle est imposée', () => {
-    const { game } = makeGame('?graine=3');
+    const { game } = makeFreeGame('?graine=3');
     game.press();
     game.release();
     expect(frameUntilDead(game)).toBeGreaterThan(0);
@@ -225,9 +245,14 @@ describe('jeu', () => {
         'combo',
         'equipped',
         'fogY',
+        'freeRunStartY',
+        'goal',
         'height',
         'level',
+        'levelHeight',
+        'levelId',
         'missions',
+        'mode',
         'obstacles',
         'pickups',
         'pos',
@@ -236,9 +261,11 @@ describe('jeu', () => {
         'score',
         'screen',
         'seed',
+        'stars',
         'step',
         'targetId',
         'tier',
+        'unlockedLevel',
         'vel',
         'xp',
         'xpGained',
@@ -249,7 +276,7 @@ describe('jeu', () => {
 
 describe('mort et cause', () => {
   it('la brume tue un personnage laissé au sol : cause « fog », transmise au rendu', () => {
-    const { game, seen } = makeGame('?graine=3');
+    const { game, seen } = makeFreeGame('?graine=3');
     expect(game.debugState().cause).toBeNull();
     game.press();
     game.release();
@@ -261,7 +288,7 @@ describe('mort et cause', () => {
   it('un obstacle tue : cause « obstacle », sur l\'état et sur ce que reçoit le rendu', () => {
     // Paliers de 4 m : obstacles, fragiles et propulseurs apparaissent tout près du toit.
     for (let seed = 1; seed <= 10; seed += 1) {
-      const { game, seen } = makeGame(`?graine=${seed}&tierHeight=4`);
+      const { game, seen } = makeFreeGame(`?graine=${seed}&tierHeight=4`);
       playPilot(game, 60);
       if (game.debugState().cause !== 'obstacle') continue;
       expect(game.debugState().screen).toBe('dead');
@@ -272,7 +299,7 @@ describe('mort et cause', () => {
   });
 
   it('une nouvelle partie efface le palier, la cause et les effets en cours', () => {
-    const { game, seen } = makeGame('?graine=3&tierHeight=4');
+    const { game, seen } = makeFreeGame('?graine=3&tierHeight=4');
     const play = makePilot(game);
     // Joue jusqu'à la première bannière de palier : des effets sont alors en cours.
     for (let frames = 0; frames < 600 && seen.lastBanner === null; frames += 1) play();
@@ -288,10 +315,10 @@ describe('mort et cause', () => {
 
 describe('ce que le jeu sait de la route haute', () => {
   it('expose le palier, le nombre d\'obstacles chargés et les étoiles prises', () => {
-    const { game } = makeGame('?graine=3');
+    const { game } = makeFreeGame('?graine=3');
     expect(game.debugState()).toMatchObject({ tier: 0, obstacles: 0, pickups: 0 });
 
-    const hard = makeGame('?graine=3&tierHeight=4').game;
+    const hard = makeFreeGame('?graine=3&tierHeight=4').game;
     playPilot(hard, 60);
     expect(hard.debugState().tier).toBeGreaterThan(0);
     expect(hard.debugState().obstacles).toBeGreaterThan(0);
@@ -300,7 +327,7 @@ describe('ce que le jeu sait de la route haute', () => {
   it('compte les étoiles prises sans jamais les perdre, même quand la simulation les oublie sous la brume', () => {
     let best = 0;
     for (let seed = 1; seed <= 6; seed += 1) {
-      const { game } = makeGame(`?graine=${seed}&tierHeight=4`);
+      const { game } = makeFreeGame(`?graine=${seed}&tierHeight=4`);
       const run = playPilot(game, 60);
       expect(run.decreased).toBe(false);
       best = Math.max(best, run.maxPickups);
@@ -310,7 +337,7 @@ describe('ce que le jeu sait de la route haute', () => {
   });
 
   it('transmet les événements de règles au rendu : textes flottants et bannière de palier', () => {
-    const { game, seen } = makeGame('?graine=3&tierHeight=4');
+    const { game, seen } = makeFreeGame('?graine=3&tierHeight=4');
     playPilot(game, 60);
     expect([...seen.texts].some((text) => text.startsWith('Parfait ×'))).toBe(true);
     expect(seen.banners.has('Les gouttières · 4 m')).toBe(true);
@@ -372,16 +399,16 @@ describe('profil et progression', () => {
     expect(seen.lastTuning?.reelSpeed).toBe(DEFAULT_TUNING.reelSpeed);
   });
 
-  it('garde la graine annoncée par l\'écran titre quand les talismans changent avant le départ', () => {
+  it('garde la graine annoncée par l\'écran titre quand les talismans changent avant le départ de la course libre', () => {
     const { game } = makeGame();
     game.restart(41);
     game.equip('treuil');
-    game.press();
-    expect(game.debugState()).toMatchObject({ screen: 'playing', seed: 41 });
+    game.playFree();
+    expect(game.debugState()).toMatchObject({ screen: 'playing', mode: 'free', seed: 41 });
   });
 
   it('une partie finie ajoute son expérience et ses parties au profil, le sauvegarde, et donne le bilan au rendu', () => {
-    const { game, seen, storage } = makeGame('?graine=3&fogBaseSpeed=4');
+    const { game, seen, storage } = makeFreeGame('?graine=3&fogBaseSpeed=4');
     game.press();
     for (let frames = 0; frames < 2; frames += 1) game.frame(0.05);
     game.release();
@@ -400,7 +427,7 @@ describe('profil et progression', () => {
   });
 
   it('ne compte une partie qu\'une fois, même si l\'écran de fin dure', () => {
-    const { game, storage } = makeGame('?graine=3&fogBaseSpeed=4');
+    const { game, storage } = makeFreeGame('?graine=3&fogBaseSpeed=4');
     game.press();
     game.release();
     expect(frameUntilDead(game)).toBeGreaterThan(0);
@@ -410,7 +437,7 @@ describe('profil et progression', () => {
   });
 
   it('nourrit les missions des événements de la partie : le pilote en accomplit, avec leur récompense', () => {
-    const { game, seen, storage } = makeGame('?graine=3');
+    const { game, seen, storage } = makeFreeGame('?graine=3');
     playThenFall(game, 10);
     const outcome = seen.lastOutcome;
     expect(outcome).not.toBeNull();
@@ -427,7 +454,7 @@ describe('profil et progression', () => {
   });
 
   it('xpGained repart de zéro avec la partie suivante', () => {
-    const { game } = makeGame('?graine=3&fogBaseSpeed=4');
+    const { game } = makeFreeGame('?graine=3&fogBaseSpeed=4');
     game.press();
     game.frame(0.1);
     game.release();
@@ -446,7 +473,7 @@ describe('profil et progression', () => {
   });
 
   it('resetProfile() sauvegarde un profil neuf et revient à l\'écran titre', () => {
-    const { game, storage } = makeGame('?graine=3&fogBaseSpeed=4');
+    const { game, storage } = makeFreeGame('?graine=3&fogBaseSpeed=4');
     game.press();
     game.frame(0.1);
     game.release();
@@ -473,14 +500,14 @@ describe('profil et progression', () => {
   });
 
   it('la seconde chance renvoie le personnage vers le haut et le dit à l\'écran', () => {
-    const { game, seen } = makeGame('?graine=3&fogBaseSpeed=4', profileWith(720, ['chance']));
+    const { game, seen } = makeFreeGame('?graine=3&fogBaseSpeed=4', profileWith(720, ['chance']));
     expect(game.debugState().level).toBe(4);
     game.press();
     game.release();
     expect(frameUntilDead(game)).toBeGreaterThan(0);
     expect(seen.texts.has('Seconde chance !')).toBe(true);
 
-    const plain = makeGame('?graine=3&fogBaseSpeed=4');
+    const plain = makeFreeGame('?graine=3&fogBaseSpeed=4');
     plain.game.press();
     plain.game.release();
     expect(frameUntilDead(plain.game)).toBeGreaterThan(0);
@@ -596,5 +623,344 @@ describe('boutons et écran des talismans', () => {
     seen.hit = () => 'talismans';
     game.press(BUTTON.x, BUTTON.y);
     expect(game.debugState()).toMatchObject({ screen: 'playing' });
+  });
+});
+
+/** Profil d'un joueur qui a franchi les `cleared` premiers niveaux, une étoile chacun. */
+function clearedProfile(cleared: number): Profile {
+  const levels: Profile['levels'] = {};
+  for (let id = 1; id <= cleared; id += 1) levels[String(id)] = { stars: 1, bestScore: 100 };
+  return { ...createProfile(), levels };
+}
+
+/** Le niveau d'un numéro, que les tests savent exister. */
+function levelOf(id: number): NonNullable<ReturnType<typeof levelById>> {
+  const level = levelById(id);
+  if (!level) throw new Error(`Niveau inconnu : ${id}`);
+  return level;
+}
+
+/**
+ * Téléporte le personnage sous la ligne d'arrivée, lancé vers le haut, et joue
+ * jusqu'à l'écran de victoire. Le faux rendu reçoit l'état vivant de la
+ * simulation : c'est par lui qu'on y accède.
+ */
+function winByTeleport(game: Game, seen: Seen): void {
+  game.frame(0.016);
+  const state = seen.state;
+  if (!state || state.finishY === null) throw new Error('Pas de niveau en cours');
+  state.hero = { pos: { x: 0, y: state.finishY - 0.5 }, vel: { x: 0, y: 8 }, grounded: false };
+  for (let frames = 0; frames < 20 && game.debugState().screen === 'playing'; frames += 1) game.frame(0.05);
+}
+
+/** Laisse passer le verrou d'entrée des écrans de fin. */
+function settle(game: Game): void {
+  for (let frames = 0; frames < 8; frames += 1) game.frame(0.1);
+}
+
+describe('niveaux : lancer une partie', () => {
+  const BUTTON = { x: 195, y: 500 };
+
+  /** Un faux rendu qui répond « ce bouton » sous le point ci-dessus, et rien ailleurs. */
+  function tapping(seen: Seen, id: ButtonId): void {
+    seen.hit = (x, y) => (x === BUTTON.x && y === BUTTON.y ? id : null);
+  }
+
+  it('un appui hors bouton sur le titre joue le niveau le plus avancé, avec la graine du niveau et non celle de l\'URL', () => {
+    const fresh = makeGame('?graine=5');
+    fresh.game.press();
+    expect(fresh.game.debugState()).toMatchObject({ screen: 'playing', mode: 'level', levelId: 1, seed: levelOf(1).seed, attached: true });
+
+    const advanced = makeGame('?graine=5', clearedProfile(2));
+    advanced.game.press();
+    expect(advanced.game.debugState()).toMatchObject({ mode: 'level', levelId: 3, seed: levelOf(3).seed });
+  });
+
+  it('un niveau ignore la brume de l\'URL pour la sienne, et garde les talismans équipés', () => {
+    const { game, seen } = makeGame('?fogBaseSpeed=9', profileWith(0, ['treuil']));
+    expect(game.playLevel(1)).toBe(true);
+    game.frame(0.016);
+    expect(seen.lastTuning?.fogBaseSpeed).toBe(levelOf(1).fogBaseSpeed);
+    expect(seen.lastTuning?.reelSpeed).toBeCloseTo(DEFAULT_TUNING.reelSpeed * 1.15, 9);
+  });
+
+  it('playLevel() refuse un niveau verrouillé ou inconnu sans rien changer, et ne lance pas le grappin', () => {
+    const { game } = makeGame('?graine=3');
+    for (const id of [2, 10, 0, 11, 1.5]) expect(game.playLevel(id)).toBe(false);
+    expect(game.debugState()).toMatchObject({ screen: 'title', step: 0, mode: 'free', seed: 3 });
+
+    expect(game.playLevel(1)).toBe(true);
+    expect(game.debugState()).toMatchObject({ screen: 'playing', mode: 'level', levelId: 1, attached: false });
+  });
+
+  it('expose la hauteur depuis le toit, l\'objectif, le niveau jouable, les étoiles et le départ de la course libre', () => {
+    const { game } = makeGame('', clearedProfile(2));
+    expect(game.debugState()).toMatchObject({ mode: 'free', levelId: null, goal: null, unlockedLevel: 3, stars: 0, freeRunStartY: levelOf(3).startY });
+
+    game.playLevel(3);
+    const state = game.debugState();
+    expect(state).toMatchObject({ mode: 'level', levelId: 3, goal: 70 });
+    expect(state.height).toBeCloseTo(130 + DEFAULT_TUNING.heroRadius, 9);
+    expect(state.levelHeight).toBeCloseTo(DEFAULT_TUNING.heroRadius, 9);
+    expect(state.fogY).toBeCloseTo(130 + DEFAULT_TUNING.fogStart, 9);
+  });
+
+  it('la course libre part de la zone la plus haute franchie, avec la graine annoncée par le titre', () => {
+    const { game } = makeGame('?graine=9', clearedProfile(2));
+    game.playFree();
+    const state = game.debugState();
+    expect(state).toMatchObject({ screen: 'playing', mode: 'free', levelId: null, goal: null, seed: 9, attached: false });
+    expect(state.height).toBeCloseTo(freeRunStartY(clearedProfile(2)) + DEFAULT_TUNING.heroRadius, 9);
+    expect(state.levelHeight).toBeCloseTo(DEFAULT_TUNING.heroRadius, 9);
+
+    const fresh = makeGame();
+    fresh.game.playFree();
+    expect(fresh.game.debugState().height).toBeCloseTo(DEFAULT_TUNING.heroRadius, 9);
+  });
+
+  it('le bouton « Course libre » lance la course libre sans appui d\'accroche ; « Niveaux » ouvre la liste sans faire passer le temps', () => {
+    const { game, seen } = makeGame('?graine=3');
+    tapping(seen, 'levels');
+    game.press(BUTTON.x, BUTTON.y);
+    game.frame(1);
+    expect(game.debugState()).toMatchObject({ screen: 'levels', step: 0 });
+    expect(seen.screens.at(-1)).toBe('levels');
+
+    game.restart();
+    tapping(seen, 'free');
+    game.press(BUTTON.x, BUTTON.y);
+    expect(game.debugState()).toMatchObject({ screen: 'playing', mode: 'free', seed: 3, attached: false });
+  });
+
+  it('sur la liste, un niveau débloqué se lance, un niveau verrouillé ne réagit pas, « Retour » ramène au titre', () => {
+    const { game, seen } = makeGame('?graine=3', clearedProfile(1));
+    tapping(seen, 'levels');
+    game.press(BUTTON.x, BUTTON.y);
+
+    tapping(seen, 'niveau-3');
+    game.press(BUTTON.x, BUTTON.y);
+    expect(game.debugState().screen).toBe('levels');
+    // Un appui ailleurs ou sans position ne fait rien non plus.
+    game.press(10, 10);
+    game.press();
+    expect(game.debugState()).toMatchObject({ screen: 'levels', step: 0 });
+
+    tapping(seen, 'back');
+    game.press(BUTTON.x, BUTTON.y);
+    expect(game.debugState()).toMatchObject({ screen: 'title', seed: 3 });
+
+    tapping(seen, 'levels');
+    game.press(BUTTON.x, BUTTON.y);
+    tapping(seen, 'niveau-1');
+    game.press(BUTTON.x, BUTTON.y);
+    expect(game.debugState()).toMatchObject({ screen: 'playing', mode: 'level', levelId: 1, attached: false });
+
+    game.restart();
+    tapping(seen, 'levels');
+    game.press(BUTTON.x, BUTTON.y);
+    tapping(seen, 'niveau-2');
+    game.press(BUTTON.x, BUTTON.y);
+    expect(game.debugState()).toMatchObject({ screen: 'playing', levelId: 2, seed: levelOf(2).seed });
+  });
+});
+
+describe('niveaux : annonce', () => {
+  it('un niveau s\'annonce par son titre et sa phrase d\'intro, 3 s de temps réel, puis la bannière s\'efface', () => {
+    const { game, seen } = makeGame('', clearedProfile(2));
+    game.playLevel(3);
+    game.frame(0.05);
+    expect(seen.lastBanner).toBe('Niveau 3 · Les enseignes');
+    expect(seen.lastBannerDetail).toBe(levelOf(3).intro);
+
+    for (let frames = 0; frames < 28; frames += 1) game.frame(0.1);
+    expect(seen.lastBanner).not.toBeNull();
+    for (let frames = 0; frames < 3; frames += 1) game.frame(0.1);
+    expect(seen.lastBanner).toBeNull();
+  });
+
+  it('un niveau ne montre aucune bannière de palier, la course libre de même départ en montre une', () => {
+    // Au départ du niveau 3, la hauteur est déjà au palier 2 : l'événement de palier part dès le premier pas.
+    const level = makeGame('', clearedProfile(2));
+    level.game.playLevel(3);
+    for (let frames = 0; frames < 20; frames += 1) level.game.frame(0.1);
+    expect(level.game.debugState().tier).toBeGreaterThan(0);
+    expect([...level.seen.banners]).toEqual(['Niveau 3 · Les enseignes']);
+
+    const free = makeGame('', clearedProfile(2));
+    free.game.playFree();
+    free.game.frame(0.05);
+    expect(free.game.debugState().tier).toBeGreaterThan(0);
+    expect(free.seen.lastBanner).toMatch(/ · 100 m$/);
+  });
+
+  it('la course libre ne s\'annonce pas comme un niveau', () => {
+    const { game, seen } = makeFreeGame();
+    game.frame(0.05);
+    expect(seen.lastBanner).toBeNull();
+  });
+});
+
+describe('niveaux : victoire', () => {
+  it('franchir la ligne d\'arrivée gagne : étoiles, déblocage du suivant, bilan et profil sauvegardé', () => {
+    const { game, seen, storage } = makeGame('?graine=3');
+    game.playLevel(1);
+    expect(game.debugState().stars).toBe(0);
+    winByTeleport(game, seen);
+
+    const won = game.debugState();
+    expect(won).toMatchObject({ screen: 'won', cause: null, runs: 1, unlockedLevel: 2, mode: 'level', levelId: 1 });
+    expect(won.stars).toBeGreaterThanOrEqual(1);
+    expect(seen.screens.at(-1)).toBe('won');
+
+    const outcome = seen.lastOutcome as LevelOutcome;
+    expect(outcome).toMatchObject({ won: true, firstClear: true, stars: won.stars, totalStars: won.stars });
+    expect(outcome.level.id).toBe(1);
+    expect(outcome.xpGained).toBeGreaterThanOrEqual(FIRST_CLEAR_XP + outcome.newStars * STAR_XP);
+    expect(seen.lastResult).toMatchObject({ won: true, pickupsTotal: 0 });
+    expect(seen.lastProfile).toBe(outcome.profile);
+
+    const saved = loadProfile(storage);
+    expect(saved).toEqual(game.currentProfile());
+    expect(saved.levels['1']?.stars).toBe(won.stars);
+    expect(unlockedLevel(saved)).toBe(2);
+  });
+
+  it('une victoire ne se compte qu\'une fois, et l\'écran de victoire fige le temps', () => {
+    const { game, seen } = makeGame();
+    game.playLevel(1);
+    winByTeleport(game, seen);
+    const step = game.debugState().step;
+    for (let frames = 0; frames < 20; frames += 1) game.frame(0.05);
+    expect(game.debugState()).toMatchObject({ step, runs: 1 });
+  });
+
+  it('le verrou de six dixièmes de seconde vaut aussi après une victoire', () => {
+    const { game, seen } = makeGame();
+    game.playLevel(1);
+    winByTeleport(game, seen);
+    game.press();
+    expect(game.debugState().screen).toBe('won');
+    settle(game);
+    game.press();
+    expect(game.debugState()).toMatchObject({ screen: 'playing', levelId: 1, attached: true });
+  });
+
+  it('« Niveau suivant » lance le niveau 2, « Rejouer » le même niveau, « Niveaux » la liste ; un appui ailleurs relance le même niveau en accrochant', () => {
+    const { game, seen } = makeGame();
+    const tap = (id: ButtonId | null): void => {
+      seen.hit = () => id;
+      game.press(100, 100);
+    };
+    const winFirst = (): void => {
+      game.restart();
+      game.playLevel(1);
+      winByTeleport(game, seen);
+      settle(game);
+    };
+
+    winFirst();
+    tap('next');
+    expect(game.debugState()).toMatchObject({ screen: 'playing', mode: 'level', levelId: 2, seed: levelOf(2).seed, attached: false, stars: 0 });
+    expect(seen.lastOutcome).not.toBeNull();
+
+    winFirst();
+    tap('replay');
+    expect(game.debugState()).toMatchObject({ screen: 'playing', levelId: 1, attached: false, step: 0 });
+
+    winFirst();
+    tap('levels');
+    expect(game.debugState()).toMatchObject({ screen: 'levels', unlockedLevel: 2 });
+    tap('back');
+    expect(game.debugState()).toMatchObject({ screen: 'title', mode: 'free', step: 0 });
+
+    winFirst();
+    tap(null);
+    expect(game.debugState()).toMatchObject({ screen: 'playing', levelId: 1, attached: true });
+  });
+
+  it('au dernier niveau, il n\'y a pas de niveau suivant : « Niveau suivant » ne fait rien', () => {
+    const { game, seen } = makeGame('', clearedProfile(9));
+    expect(game.playLevel(10)).toBe(true);
+    winByTeleport(game, seen);
+    settle(game);
+    seen.hit = () => 'next';
+    game.press(100, 100);
+    expect(game.debugState()).toMatchObject({ screen: 'won', levelId: 10, unlockedLevel: 10 });
+  });
+
+  it('le pilote de test gagne le niveau 1 : les étoiles comptées sont celles de la partie', () => {
+    const { game, seen, storage } = makeGame();
+    game.playLevel(1);
+    const play = makePilot(game);
+    for (let frames = 0; frames < 90 * 60 && game.debugState().screen === 'playing'; frames += 1) play();
+    expect(game.debugState()).toMatchObject({ screen: 'won', unlockedLevel: 2 });
+    expect(game.debugState().levelHeight).toBeGreaterThanOrEqual(60);
+    expect(seen.lastResult?.perfectStreak).toBeGreaterThan(0);
+    expect(loadProfile(storage).levels['1']?.stars).toBe(game.debugState().stars);
+  });
+});
+
+describe('niveaux : défaite', () => {
+  it('la brume tue : écran de fin du niveau, aucune étoile, le niveau suivant reste verrouillé', () => {
+    const { game, seen, storage } = makeGame();
+    game.playLevel(1);
+    game.press();
+    game.release();
+    expect(frameUntilDead(game)).toBeGreaterThan(0);
+
+    expect(game.debugState()).toMatchObject({ screen: 'dead', mode: 'level', levelId: 1, cause: 'fog', stars: 0, unlockedLevel: 1, runs: 1 });
+    expect(seen.lastOutcome).toMatchObject({ won: false, stars: 0, firstClear: false });
+    expect(seen.lastResult).toMatchObject({ won: false });
+    expect(loadProfile(storage)).toEqual(game.currentProfile());
+    expect(game.currentProfile().levels['1']?.stars).toBe(0);
+  });
+
+  it('un appui ailleurs rejoue le même niveau en accrochant ; « Niveaux » ouvre la liste ; « Talismans » et « Retour » reviennent à l\'écran de fin', () => {
+    const { game, seen } = makeGame();
+    game.playLevel(1);
+    game.press();
+    game.release();
+    expect(frameUntilDead(game)).toBeGreaterThan(0);
+    const outcome = seen.lastOutcome;
+
+    seen.hit = (_x, y) => (y === 1 ? 'talismans' : y === 2 ? 'back' : null);
+    game.press(100, 1);
+    expect(game.debugState().screen).toBe('talismans');
+    game.press(100, 2);
+    game.frame(0.016);
+    expect(game.debugState()).toMatchObject({ screen: 'dead', levelId: 1 });
+    expect(seen.lastOutcome).toBe(outcome);
+
+    seen.hit = () => 'levels';
+    game.press(100, 100);
+    expect(game.debugState()).toMatchObject({ screen: 'levels', mode: 'free', step: 0 });
+
+    game.playLevel(1);
+    game.press();
+    game.release();
+    expect(frameUntilDead(game)).toBeGreaterThan(0);
+    seen.hit = () => null;
+    game.press(100, 100);
+    expect(game.debugState()).toMatchObject({ screen: 'playing', levelId: 1, seed: levelOf(1).seed, attached: true, step: 0 });
+  });
+
+  it('la course libre garde sa fin de partie : un appui rejoue une course libre, « Niveaux » ouvre la liste', () => {
+    const { game, seen } = makeFreeGame('?graine=3&fogBaseSpeed=4');
+    game.press();
+    game.release();
+    expect(frameUntilDead(game)).toBeGreaterThan(0);
+    expect(game.debugState()).toMatchObject({ screen: 'dead', mode: 'free', stars: 0 });
+
+    seen.hit = () => 'levels';
+    game.press(100, 100);
+    expect(game.debugState().screen).toBe('levels');
+
+    game.playFree();
+    game.press();
+    game.release();
+    expect(frameUntilDead(game)).toBeGreaterThan(0);
+    seen.hit = () => null;
+    game.press(100, 100);
+    expect(game.debugState()).toMatchObject({ screen: 'playing', mode: 'free', seed: 3, attached: true });
   });
 });

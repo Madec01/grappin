@@ -2,8 +2,8 @@ import { Game, readSettings, type DebugState } from './app/game';
 import { trackPointer } from './input/pointer';
 import { browserStorage, type Profile } from './meta/profile';
 import type { TalismanId } from './meta/talismans';
+import type { ButtonRect } from './render/buttons';
 import { Renderer } from './render/renderer';
-import type { ButtonRect } from './render/screens';
 
 /**
  * Point d'entrée : démarre PixiJS et le jeu, branche le doigt sur le canvas.
@@ -28,6 +28,10 @@ declare global {
       resetProfile: () => void;
       /** Boutons de l'écran affiché, tels que la dernière image les a dessinés. */
       buttons: () => readonly ButtonRect[];
+      /** Joue un niveau tout de suite, sans appui d'accroche. Faux, sans rien changer, s'il n'existe pas ou n'est pas débloqué. */
+      playLevel: (id: number) => boolean;
+      /** Joue la course libre tout de suite, sans appui d'accroche. */
+      playFree: () => void;
     };
   }
 }
@@ -50,6 +54,8 @@ async function start(): Promise<void> {
     equip: (id: TalismanId) => game.equip(id),
     resetProfile: () => game.resetProfile(),
     buttons: () => renderer.buttons(),
+    playLevel: (id: number) => game.playLevel(id),
+    playFree: () => game.playFree(),
   };
 }
 

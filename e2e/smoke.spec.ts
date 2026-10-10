@@ -4,8 +4,9 @@ import { expect, test, type Page } from '@playwright/test';
  * Test de fumée sur écran de téléphone (390 × 844, tactile) : la page charge,
  * un doigt posé accroche le grappin, le relâcher libère le personnage, la
  * graine d'URL est respectée, un pilote automatique grimpe sans erreur, et la
- * progression (expérience, sauvegarde, talismans, boutons) tient d'une partie
- * et d'un rechargement à l'autre. Tout passe par `window.__grappin`.
+ * progression (expérience, sauvegarde, talismans, boutons, niveaux et étoiles)
+ * tient d'une partie et d'un rechargement à l'autre. Tout passe par
+ * `window.__grappin`.
  */
 
 const CENTER = { x: 195, y: 422 };
@@ -107,7 +108,7 @@ test('?graine=7 fixe la graine et restart() la conserve', async ({ page }) => {
  * Pilote automatique injecté dans la page, même stratégie que `scripts/capture.ts` :
  * accroche dès qu'un point est visé, lâche dans la fenêtre du lâcher parfait,
  * jamais plus de 2,5 s tenu. Il rend la main quand le personnage dépasse
- * `targetHeight` mètres, meurt, ou après `limitMs`. Passé en texte à
+ * `targetHeight` mètres, meurt, gagne le niveau, ou après `limitMs`. Passé en texte à
  * `page.evaluate` : tsx réécrit les fonctions avec un helper `__name` qui n'existe pas dans la page.
  */
 function autopilot(targetHeight: number, limitMs: number): string {
@@ -118,7 +119,7 @@ function autopilot(targetHeight: number, limitMs: number): string {
     const tick = () => {
       const s = api.state();
       const now = performance.now();
-      if (s.screen === 'dead' || s.height > ${targetHeight} || now - start > ${limitMs}) { done(); return; }
+      if (s.screen === 'dead' || s.screen === 'won' || s.height > ${targetHeight} || now - start > ${limitMs}) { done(); return; }
       if (!s.attached && s.targetId !== null) {
         api.press();
         holdSince = now;
@@ -139,7 +140,9 @@ test('un pilote automatique grimpe au-delà de 10 m sans erreur de console', asy
   const errors = watchErrors(page);
   // Brume ralentie : sur les machines lentes de l'intégration continue, le pilote réagit à la cadence
   // des images, donc mal ; ce test vérifie que le jeu tourne sans erreur, pas l'adresse du pilote.
+  // C'est la course libre qui obéit à l'adresse : un niveau a sa graine et sa brume.
   await open(page, '/?graine=3&fogBaseSpeed=0.15');
+  await page.evaluate(() => window.__grappin!.playFree());
   await page.evaluate(autopilot(12, 30_000));
 
   const climbed = await state(page);
@@ -194,9 +197,52 @@ test('les boutons répondent au toucher : Talismans, une ligne, Retour, puis un 
 
   await tapButton(page, 'back');
   await expect.poll(async () => (await state(page)).screen).toBe('title');
-  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual(['talismans']);
+  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual(['levels', 'free', 'talismans']);
 
   await page.touchscreen.tap(CENTER.x, CENTER.y);
   await expect.poll(async () => (await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
+test('niveaux : la liste, un niveau verrouillé, le pilote gagne le niveau 1, le niveau 2 s\'ouvre, et les étoiles survivent au rechargement', async ({ page }) => {
+  // Le pilote joue en temps réel : jusqu'à 90 s, plus le temps de démarrer et de recharger.
+  test.setTimeout(150_000);
+  const errors = watchErrors(page);
+  await open(page, '/');
+  await page.evaluate(() => window.__grappin!.resetProfile());
+
+  // La liste : dix lignes, seul le niveau 1 est un bouton, et « Retour » ramène au titre.
+  await tapButton(page, 'levels');
+  await expect.poll(async () => (await state(page)).screen).toBe('levels');
+  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual(['niveau-1', 'back']);
+  await tapButton(page, 'back');
+  await expect.poll(async () => (await state(page)).screen).toBe('title');
+
+  // Le niveau 2 est verrouillé ; le niveau 1 se lance par la liste.
+  expect(await page.evaluate(() => window.__grappin!.playLevel(2))).toBe(false);
+  await tapButton(page, 'levels');
+  await tapButton(page, 'niveau-1');
+  await expect.poll(async () => (await state(page)).screen).toBe('playing');
+  expect(await state(page)).toMatchObject({ mode: 'level', levelId: 1, goal: 60, unlockedLevel: 1 });
+
+  await page.evaluate(autopilot(Infinity, 90_000));
+  const won = await state(page);
+  expect(won.screen).toBe('won');
+  expect(won.levelHeight).toBeGreaterThanOrEqual(60);
+  expect(won.stars).toBeGreaterThanOrEqual(1);
+  expect((await profile(page)).levels['1']!.stars).toBeGreaterThanOrEqual(1);
+  expect(won.unlockedLevel).toBe(2);
+
+  // Les boutons de l'écran de victoire, sitôt le verrou d'entrée passé ; « Niveau suivant » lance le niveau 2.
+  await page.waitForTimeout(800);
+  expect((await buttons(page)).map((button) => button.id)).toEqual(['next', 'replay', 'levels']);
+  await tapButton(page, 'next');
+  await expect.poll(async () => (await state(page)).screen).toBe('playing');
+  expect(await state(page)).toMatchObject({ mode: 'level', levelId: 2, goal: 70 });
+
+  await page.reload();
+  await page.waitForFunction(() => window.__grappin !== undefined);
+  expect((await state(page)).unlockedLevel).toBe(2);
+  expect((await profile(page)).levels['1']!.stars).toBeGreaterThanOrEqual(1);
   expect(errors).toEqual([]);
 });

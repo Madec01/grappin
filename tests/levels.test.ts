@@ -99,7 +99,7 @@ describe('étoiles et déblocages', () => {
     expect(highestCleared(won.profile)).toBe(1);
     expect(unlockedLevel(won.profile)).toBe(2);
     expect(freeRunStartY(won.profile)).toBe(LEVELS[1]!.startY);
-    // Rejouer sans faire mieux ne rapporte ni étoile ni prime : le score, plus la mission « Atteins 60 m »
+    // Rejouer sans faire mieux ne rapporte ni étoile ni prime : le score, plus la mission « Grimpe 60 m »
     // arrivée entre-temps dans les missions actives.
     const again = endLevel(won.profile, level, { ...quietRun, height: 60 }, 30, { won: true, pickupsTaken: 0, pickupsTotal: 0, perfectStreak: 0 });
     expect(again.newStars).toBe(0);

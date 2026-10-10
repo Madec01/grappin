@@ -5,8 +5,8 @@ import type { Tuning } from '../sim/tuning';
 import { formatDecimal } from './format';
 
 /**
- * Effets de temps réel : textes flottants, bannière de palier et animation du
- * trait du grappin.
+ * Effets de temps réel : textes flottants, bannière (palier ou intro d'un
+ * niveau) et animation du trait du grappin.
  *
  * Tout ce qui dure un peu de temps réel à l'écran vit ici, jamais dans la
  * simulation. Le jeu y verse les événements de règles et le temps écoulé ; le
@@ -19,6 +19,8 @@ export const ROPE_DRAW_SECONDS = 0.06;
 /** Vie d'un texte flottant, puis de la bannière de palier, en secondes. */
 export const FLOAT_SECONDS = 0.7;
 export const BANNER_SECONDS = 2;
+/** L'intro d'un niveau se lit sur deux lignes : elle reste plus longtemps. */
+export const INTRO_SECONDS = 3;
 
 /** La bannière apparaît en un quart de seconde et s'efface pendant ses 0,6 dernières secondes. */
 const BANNER_FADE_IN_SECONDS = 0.25;
@@ -48,6 +50,10 @@ export interface FloatingText {
 
 export interface Banner {
   readonly text: string;
+  /** Seconde ligne, plus petite, ou null. */
+  readonly detail: string | null;
+  /** Vie de la bannière, en secondes. */
+  readonly seconds: number;
   age: number;
 }
 
@@ -67,10 +73,10 @@ export function floatRise(age: number): number {
   return FLOAT_RISE * (1 - (1 - t) * (1 - t));
 }
 
-/** Opacité de la bannière : fondu d'entrée, plateau, fondu de sortie. */
-export function bannerAlpha(age: number): number {
+/** Opacité de la bannière : fondu d'entrée, plateau, fondu de sortie, pour une bannière qui dure `seconds`. */
+export function bannerAlpha(age: number, seconds = BANNER_SECONDS): number {
   const fadeIn = clamp01(age / BANNER_FADE_IN_SECONDS);
-  const fadeOut = clamp01((BANNER_SECONDS - age) / BANNER_FADE_OUT_SECONDS);
+  const fadeOut = clamp01((seconds - age) / BANNER_FADE_OUT_SECONDS);
   return Math.min(fadeIn, fadeOut);
 }
 
@@ -124,17 +130,22 @@ export class Effects {
     this.floating = this.floating.filter((item) => item.age < FLOAT_SECONDS);
     if (this.current) {
       this.current.age += dtSeconds;
-      if (this.current.age >= BANNER_SECONDS) this.current = null;
+      if (this.current.age >= this.current.seconds) this.current = null;
     }
   }
 
   /** Prend en compte un événement de règles ; `hero` est le personnage à l'écran, en pixels CSS. */
   handle(event: RuleEvent, hero: Vec2): void {
     if (event.type === 'attach') this.ropeAge = 0;
-    if (event.type === 'tier') this.current = { text: `${event.name} · ${event.tier * this.tuning.tierHeight} m`, age: 0 };
+    if (event.type === 'tier') this.current = { text: `${event.name} · ${event.tier * this.tuning.tierHeight} m`, detail: null, seconds: BANNER_SECONDS, age: 0 };
     const text = floatingTextFor(event, this.tuning);
     if (text === null) return;
     this.floating.push({ text, x: hero.x, y: this.freeY(hero.x, hero.y - FLOAT_START_LIFT), age: 0 });
+  }
+
+  /** Annonce un niveau au départ : son titre, puis une phrase plus petite. Remplace la bannière en cours. */
+  intro(title: string, detail: string): void {
+    this.current = { text: title, detail, seconds: INTRO_SECONDS, age: 0 };
   }
 
   /** Ordonnée de naissance d'un texte en `x` : `bornY`, ou plus haut s'il y recouvrirait un texte encore visible. */

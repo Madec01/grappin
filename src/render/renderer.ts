@@ -1,15 +1,17 @@
 import { Application, Container, Graphics, type Text } from 'pixi.js';
 import type { Vec2 } from '../core/math/vec2';
-import type { Profile, RunOutcome } from '../meta/profile';
+import type { LevelOutcome, Profile, RunOutcome } from '../meta/profile';
+import type { LevelResult } from '../meta/traversee';
 import { multiplier } from '../sim/rules';
 import type { AnchorKind, RuleEvent, SimState } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
+import type { ButtonId, ButtonRect } from './buttons';
 import type { Camera } from './camera';
 import { fragileGauge, shadowPoints } from './cues';
 import { bannerAlpha, floatAlpha, floatRise, type Effects } from './effects';
 import { formatDecimal } from './format';
-import { Screens, type ButtonId, type ButtonRect, type OverlayView } from './screens';
-import { COLOR, makeText, readSafeInset } from './style';
+import { Screens, type OverlayView } from './screens';
+import { COLOR, makeText, readSafeInset, starPoints } from './style';
 
 /**
  * Rendu PixiJS du prototype gris : formes et textes, aucun asset.
@@ -22,7 +24,7 @@ import { COLOR, makeText, readSafeInset } from './style';
  */
 
 /** Écran du jeu à habiller : le rendu ne sait que l'afficher, c'est le jeu qui le choisit. */
-export type GameScreen = 'title' | 'playing' | 'dead' | 'talismans';
+export type GameScreen = 'title' | 'levels' | 'playing' | 'dead' | 'won' | 'talismans';
 
 /** Ce qui a tué le personnage. */
 export type DeathCause = Extract<RuleEvent, { type: 'death' }>['cause'];
@@ -31,7 +33,7 @@ export type DeathCause = Extract<RuleEvent, { type: 'death' }>['cause'];
  * Ce que le jeu ajoute à l'état de la simulation pour un dessin : l'écran à
  * montrer, la cause de la mort, les effets de temps réel, les réglages de la
  * partie (talismans compris), le profil du joueur et l'issue de la partie
- * qui vient de finir.
+ * qui vient de finir, avec ce qui a fait ses étoiles si c'était un niveau.
  */
 export interface GameFrame {
   readonly screen: GameScreen;
@@ -39,8 +41,10 @@ export interface GameFrame {
   readonly effects: Effects;
   readonly tuning: Tuning;
   readonly profile: Profile;
-  /** Bilan de la partie finie, ou null tant qu'elle court. */
-  readonly outcome: RunOutcome | null;
+  /** Bilan de la partie finie, ou null tant qu'elle court. Celui d'un niveau est un `LevelOutcome`. */
+  readonly outcome: RunOutcome | LevelOutcome | null;
+  /** Étoiles prises et série de parfaits du niveau fini, ou null en course libre ou tant que la partie court. */
+  readonly result: LevelResult | null;
 }
 
 const TAU = Math.PI * 2;
@@ -87,11 +91,16 @@ const CHEVRON_MIN_HALF_WIDTH = 4;
 const CHEVRON_COUNT = 2;
 const CHEVRON_GAP = 2;
 
-/** Étoile à quatre branches : rayon d'une pointe au moins en pixels, creux à cette part du rayon. */
+/** Étoile à quatre branches : rayon d'une pointe au moins en pixels. */
 const STAR_MIN_RADIUS = 5;
 /** Rayon dessiné d'une étoile, en mètres : constant, quel que soit le rayon de ramassage. */
 const STAR_RADIUS = 0.35;
-const STAR_PINCH = 0.28;
+
+/** Ligne d'arrivée d'un niveau : épaisseur, longueur d'un tiret et d'un blanc, en pixels CSS. */
+const FINISH_WIDTH = 2;
+const FINISH_DASH = 14;
+const FINISH_GAP = 10;
+const FINISH_FONT_SIZE = 14;
 
 /** Ombre prédictive : rayon d'un point en pixels, opacité. */
 const SHADOW_DOT_RADIUS = 1.8;
@@ -104,13 +113,25 @@ const HUD_SAFE_GAP = 16;
 const HEIGHT_FONT_SIZE = 44;
 /** La bannière de palier, centrée, sous l'interface : distance sous le haut de l'interface. */
 const BANNER_OFFSET = 88;
+const BANNER_SIDE_MARGIN = 32;
 const FLOAT_FONT_SIZE = 20;
 const BANNER_FONT_SIZE = 24;
+/** Seconde ligne de la bannière (l'intro d'un niveau), et distance qui la sépare de la première. */
+const BANNER_DETAIL_FONT_SIZE = 16;
+const BANNER_DETAIL_GAP = 4;
+/** Objectif d'un niveau à côté de la hauteur, plus petit. */
+const GOAL_FONT_SIZE = 22;
+const GOAL_GAP = 8;
 
 const DEATH_MESSAGES: Record<DeathCause, string> = {
   fog: "La brume t'a rattrapé",
   obstacle: "Un obstacle t'a arrêté",
 };
+
+/** Hauteur à afficher : depuis le toit de départ dans un niveau, absolue en course libre. */
+function shownHeight(state: SimState): number {
+  return state.finishY === null ? state.height : Math.max(0, state.height - state.groundY);
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -122,6 +143,7 @@ export class Renderer {
   // Couches, du fond vers l'avant. L'ordre d'ajout à la scène dans le constructeur fait foi.
   private readonly altitudeLines = new Graphics();
   private readonly altitudeLabelLayer = new Container();
+  private readonly finishLine = new Graphics();
   private readonly obstacles = new Graphics();
   private readonly pickups = new Graphics();
   private readonly roof = new Graphics();
@@ -138,11 +160,16 @@ export class Renderer {
 
   private readonly hud = new Container();
   private readonly heightText = makeText('', HEIGHT_FONT_SIZE, COLOR.text, { bold: true });
+  private readonly goalText = makeText('', GOAL_FONT_SIZE, COLOR.textDim, { bold: true });
   private readonly multiplierText = makeText('', 30, COLOR.text, { bold: true });
   private readonly scoreText = makeText('', 20, COLOR.textDim);
   private readonly bannerText = makeText('', BANNER_FONT_SIZE, COLOR.text, { bold: true, outlined: true });
+  /** Seconde ligne de la bannière : sa largeur de retour à la ligne est fixée par `layout()`. */
+  private readonly bannerDetail = makeText('', BANNER_DETAIL_FONT_SIZE, COLOR.text, { outlined: true, wrap: 0 });
+  /** « Arrivée », petit, à droite de la ligne d'arrivée. */
+  private readonly finishLabel = makeText('Arrivée', FINISH_FONT_SIZE, COLOR.finish, { bold: true });
 
-  /** Titre, fin de partie et talismans, par-dessus tout le reste. */
+  /** Titre, niveaux, fin de partie, victoire et talismans, par-dessus tout le reste. */
   private readonly screens = new Screens();
 
   /** Dimensions pour lesquelles la mise en page a été calculée. */
@@ -152,14 +179,19 @@ export class Renderer {
   private constructor(app: Application) {
     this.app = app;
 
-    this.hud.addChild(this.heightText, this.multiplierText, this.scoreText);
+    this.hud.addChild(this.heightText, this.goalText, this.multiplierText, this.scoreText);
     this.multiplierText.anchor.set(1, 0);
     this.heightText.anchor.set(0, 0);
+    this.goalText.anchor.set(0, 1);
     this.scoreText.anchor.set(0, 0);
     this.bannerText.anchor.set(0.5, 0);
+    this.bannerDetail.anchor.set(0.5, 0);
+    this.finishLabel.anchor.set(1, 1);
     app.stage.addChild(
       this.altitudeLines,
       this.altitudeLabelLayer,
+      this.finishLine,
+      this.finishLabel,
       this.obstacles,
       this.pickups,
       this.roof,
@@ -172,6 +204,7 @@ export class Renderer {
       this.floatLayer,
       this.hud,
       this.bannerText,
+      this.bannerDetail,
       this.screens.root,
     );
   }
@@ -225,10 +258,11 @@ export class Renderer {
   draw(state: SimState, camera: Camera, frame: GameFrame): void {
     if (this.width !== this.laidOutWidth || this.height !== this.laidOutHeight) this.layout();
     const { tuning } = frame;
-    this.drawAltitude(camera);
+    this.drawAltitude(state, camera);
+    this.drawFinish(state, camera);
     this.drawObstacles(state, camera);
     this.drawPickups(state, camera, tuning);
-    this.drawRoof(camera);
+    this.drawRoof(state, camera);
     this.drawAnchors(state, camera, tuning);
     this.drawTargetRing(state, camera);
     this.drawRope(state, camera, frame.effects.ropeDrawn);
@@ -252,25 +286,47 @@ export class Renderer {
     this.multiplierText.position.set(width - HUD_SIDE_MARGIN, top + 8);
     this.scoreText.position.set(HUD_SIDE_MARGIN, top + HEIGHT_FONT_SIZE * 1.2);
     this.bannerText.position.set(width / 2, top + BANNER_OFFSET);
+    this.bannerDetail.position.x = width / 2;
+    this.bannerDetail.style.wordWrapWidth = width - 2 * BANNER_SIDE_MARGIN;
   }
 
-  /** Lignes fines tous les 10 m, avec leur altitude en petit texte à gauche. */
-  private drawAltitude(camera: Camera): void {
+  /**
+   * Lignes fines tous les 10 m, avec leur altitude en petit texte à gauche. Un
+   * niveau les compte depuis son toit de départ, comme l'interface ; la course
+   * libre depuis le sol.
+   */
+  private drawAltitude(state: SimState, camera: Camera): void {
     const lines = this.altitudeLines.clear();
-    const first = Math.max(1, Math.ceil(camera.worldYAt(this.height) / ALTITUDE_STEP));
-    const last = Math.floor(camera.worldYAt(0) / ALTITUDE_STEP);
+    const origin = state.finishY === null ? 0 : state.groundY;
+    const first = Math.max(1, Math.ceil((camera.worldYAt(this.height) - origin) / ALTITUDE_STEP));
+    const last = Math.floor((camera.worldYAt(0) - origin) / ALTITUDE_STEP);
 
     for (let slot = 0; slot < Math.max(this.altitudeLabels.length, last - first + 1); slot += 1) {
       const level = first + slot;
       const label = this.altitudeLabel(slot);
       label.visible = level <= last;
       if (!label.visible) continue;
-      const y = camera.worldToScreen({ x: 0, y: level * ALTITUDE_STEP }).y;
+      const y = camera.worldToScreen({ x: 0, y: origin + level * ALTITUDE_STEP }).y;
       lines.moveTo(0, y).lineTo(this.width, y);
       label.text = `${level * ALTITUDE_STEP} m`;
       label.position.set(HUD_SIDE_MARGIN / 2, y - 2);
     }
     lines.stroke({ width: 1, color: COLOR.altitudeLine });
+  }
+
+  /**
+   * Ligne d'arrivée d'un niveau : pointillés clairs sur toute la largeur et
+   * « Arrivée » à droite. Elle est dessinée sous les accroches et les dangers,
+   * qu'elle ne masque jamais. Rien en course libre.
+   */
+  private drawFinish(state: SimState, camera: Camera): void {
+    const g = this.finishLine.clear();
+    const y = state.finishY === null ? null : camera.worldToScreen({ x: 0, y: state.finishY }).y;
+    this.finishLabel.visible = y !== null && y >= 0 && y <= this.height;
+    if (y === null || !this.finishLabel.visible) return;
+    for (let x = 0; x < this.width; x += FINISH_DASH + FINISH_GAP) g.moveTo(x, y).lineTo(Math.min(x + FINISH_DASH, this.width), y);
+    g.stroke({ width: FINISH_WIDTH, color: COLOR.finish });
+    this.finishLabel.position.set(this.width - HUD_SIDE_MARGIN / 2, y - FINISH_WIDTH - 2);
   }
 
   /** Étiquette numéro `slot` du réservoir ; le réservoir grandit seulement si l'écran montre plus de lignes. */
@@ -307,19 +363,18 @@ export class Renderer {
   private drawPickups(state: SimState, camera: Camera, tuning: Tuning): void {
     const g = this.pickups.clear();
     const outer = Math.max(STAR_RADIUS * camera.scale, STAR_MIN_RADIUS);
-    const inner = outer * STAR_PINCH;
     const halo = tuning.pickupRadius > STAR_RADIUS + 1e-9 ? tuning.pickupRadius * camera.scale : 0;
     for (const pickup of state.pickups) {
       if (pickup.taken) continue;
       const { x, y } = camera.worldToScreen(pickup.pos);
       if (halo > 0) g.circle(x, y, halo).fill({ color: COLOR.star, alpha: 0.08 });
-      g.poly([x, y - outer, x + inner, y - inner, x + outer, y, x + inner, y + inner, x, y + outer, x - inner, y + inner, x - outer, y, x - inner, y - inner]).fill(COLOR.star);
+      g.poly(starPoints(x, y, outer)).fill(COLOR.star);
     }
   }
 
-  /** Le toit de départ : dessus en y = 0, de -5 à +5 m. */
-  private drawRoof(camera: Camera): void {
-    const topLeft = camera.worldToScreen({ x: -ROOF_HALF_WIDTH, y: 0 });
+  /** Le toit de départ : dessus à la hauteur du sol de la partie, de -5 à +5 m. */
+  private drawRoof(state: SimState, camera: Camera): void {
+    const topLeft = camera.worldToScreen({ x: -ROOF_HALF_WIDTH, y: state.groundY });
     const scale = camera.scale;
     this.roof
       .clear()
@@ -463,20 +518,40 @@ export class Renderer {
     return label;
   }
 
-  /** Bannière de palier : nom et hauteur, au centre-haut, qui apparaît puis s'efface. */
+  /**
+   * Bannière au centre-haut, qui apparaît puis s'efface : nom et hauteur d'un
+   * palier, ou, au départ d'un niveau, son titre et en dessous sa phrase d'intro.
+   */
   private drawBanner(effects: Effects): void {
     const { banner } = effects;
     this.bannerText.visible = banner !== null;
+    this.bannerDetail.visible = banner !== null && banner.detail !== null;
     if (!banner) return;
+    const alpha = bannerAlpha(banner.age, banner.seconds);
     this.bannerText.text = banner.text;
-    this.bannerText.alpha = bannerAlpha(banner.age);
+    this.bannerText.alpha = alpha;
+    if (banner.detail === null) return;
+    this.bannerDetail.text = banner.detail;
+    this.bannerDetail.alpha = alpha;
+    this.bannerDetail.position.y = this.bannerText.y + this.bannerText.height + BANNER_DETAIL_GAP;
   }
 
-  /** Hauteur en grand à gauche, multiplicateur à droite, score dessous ; seulement en cours de partie, l'écran de fin redit hauteur et score. */
+  /**
+   * Hauteur en grand à gauche, multiplicateur à droite, score dessous ; seulement
+   * en cours de partie, l'écran de fin redit hauteur et score. Dans un niveau,
+   * la hauteur se compte depuis le toit et l'objectif la suit : « 32 / 70 m ».
+   */
   private drawHud(state: SimState, screen: GameScreen, tuning: Tuning): void {
     this.hud.visible = screen === 'playing';
     if (!this.hud.visible) return;
-    this.heightText.text = `${Math.floor(state.height)} m`;
+    this.goalText.visible = state.finishY !== null;
+    if (state.finishY === null) {
+      this.heightText.text = `${Math.floor(state.height)} m`;
+    } else {
+      this.heightText.text = String(Math.floor(shownHeight(state)));
+      this.goalText.text = `/ ${state.finishY - state.groundY} m`;
+      this.goalText.position.set(this.heightText.x + this.heightText.width + GOAL_GAP, this.heightText.y + this.heightText.height * 0.85);
+    }
     this.multiplierText.text = `×${formatDecimal(multiplier(state.combo, tuning))}`;
     this.scoreText.text = Math.floor(state.score).toLocaleString('fr-FR');
   }
@@ -490,6 +565,8 @@ export class Renderer {
     switch (frame.screen) {
       case 'title':
         return { kind: 'title', profile: frame.profile };
+      case 'levels':
+        return { kind: 'levels', profile: frame.profile };
       case 'talismans':
         return { kind: 'talismans', profile: frame.profile };
       case 'dead':
@@ -497,11 +574,16 @@ export class Renderer {
         if (!frame.outcome) return { kind: 'none' };
         return {
           kind: 'dead',
-          height: state.height,
+          height: shownHeight(state),
+          goal: state.finishY === null ? null : state.finishY - state.groundY,
           score: state.score,
           cause: frame.deathCause ? DEATH_MESSAGES[frame.deathCause] : '',
           outcome: frame.outcome,
         };
+      case 'won':
+        // Une victoire n'existe que dans un niveau, avec son bilan et ce qui a fait ses étoiles.
+        if (!frame.outcome || !('level' in frame.outcome) || !frame.result) return { kind: 'none' };
+        return { kind: 'won', score: state.score, outcome: frame.outcome, result: frame.result };
       case 'playing':
         return { kind: 'none' };
     }

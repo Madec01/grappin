@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { levelById } from '../src/data/levels';
 import { MISSIONS, missionById } from '../src/meta/missions';
-import { equippedLine, missionDoneLine, missionProgress, slotsLine } from '../src/render/labels';
+import { PERFECT_STREAK_STAR } from '../src/meta/traversee';
+import { equippedLine, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, slotsLine, starLines } from '../src/render/labels';
 
 const mission = (id: string) => {
   const def = missionById(id);
@@ -44,6 +46,44 @@ describe('talismans équipés', () => {
 
 describe('fin de partie', () => {
   it('annonce la mission accomplie et sa récompense', () => {
-    expect(missionDoneLine(mission('hauteur-30'))).toBe('Mission accomplie : Atteins 30 m, +40\u00A0XP');
+    expect(missionDoneLine(mission('hauteur-30'))).toBe('Mission accomplie : Grimpe 30 m en une partie, +40\u00A0XP');
+  });
+});
+
+describe('niveaux', () => {
+  const level = levelById(3);
+  if (!level) throw new Error('Niveau 3 absent');
+
+  it('écrit le titre, la ligne de la liste et l\'intervalle de hauteur', () => {
+    expect(levelTitle(level)).toBe('Niveau 3 · Les enseignes');
+    expect(levelRowTitle(level)).toBe('3 · Les enseignes');
+    expect(levelRange(level)).toBe('130 → 200 m');
+  });
+});
+
+describe('étoiles d\'un niveau', () => {
+  it('dit « cinq » dans son libellé : la série demandée est de cinq lâchers parfaits', () => {
+    expect(PERFECT_STREAK_STAR).toBe(5);
+    expect(starLines({ won: true, pickupsTaken: 0, pickupsTotal: 0, perfectStreak: 0 })[2]?.label).toBe('Cinq parfaits d\'affilée');
+  });
+
+  it('donne les trois étoiles dans l\'ordre, toutes gagnées sans rien à compter', () => {
+    expect(starLines({ won: true, pickupsTaken: 3, pickupsTotal: 3, perfectStreak: 5 })).toEqual([
+      { label: 'Terminer', done: true, progress: null },
+      { label: 'Toutes les étoiles', done: true, progress: null },
+      { label: 'Cinq parfaits d\'affilée', done: true, progress: null },
+    ]);
+  });
+
+  it('compte ce qui manque : « 2/3 » étoiles prises, « 3/5 » parfaits d\'affilée', () => {
+    const lines = starLines({ won: true, pickupsTaken: 2, pickupsTotal: 3, perfectStreak: 3 });
+    expect(lines.map((line) => line.done)).toEqual([true, false, false]);
+    expect(lines[1]?.progress).toBe('2/3');
+    expect(lines[2]?.progress).toBe('3/5');
+  });
+
+  it('un niveau sans étoile à ramasser donne la deuxième étoile d\'office, sans rien à compter', () => {
+    const [, all] = starLines({ won: true, pickupsTaken: 0, pickupsTotal: 0, perfectStreak: 0 });
+    expect(all).toEqual({ label: 'Toutes les étoiles', done: true, progress: null });
   });
 });

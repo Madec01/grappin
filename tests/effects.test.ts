@@ -3,6 +3,7 @@ import {
   BANNER_SECONDS,
   Effects,
   FLOAT_SECONDS,
+  INTRO_SECONDS,
   ROPE_DRAW_SECONDS,
   bannerAlpha,
   floatAlpha,
@@ -85,6 +86,13 @@ describe('courbes d\'animation', () => {
     expect(bannerAlpha(1)).toBe(1);
     expect(bannerAlpha(1.7)).toBeCloseTo(0.5, 6);
     expect(bannerAlpha(BANNER_SECONDS)).toBe(0);
+  });
+
+  it('une bannière plus longue garde le même fondu d\'entrée et de sortie, calé sur sa durée', () => {
+    expect(bannerAlpha(0.125, INTRO_SECONDS)).toBeCloseTo(0.5, 6);
+    expect(bannerAlpha(BANNER_SECONDS, INTRO_SECONDS)).toBe(1);
+    expect(bannerAlpha(INTRO_SECONDS - 0.3, INTRO_SECONDS)).toBeCloseTo(0.5, 6);
+    expect(bannerAlpha(INTRO_SECONDS, INTRO_SECONDS)).toBe(0);
   });
 });
 
@@ -177,6 +185,38 @@ describe('bannière de palier', () => {
     effects.update(1);
     effects.handle(tier(2, 'Les enseignes'), HERO);
     expect(effects.banner).toMatchObject({ text: 'Les enseignes · 100 m', age: 0 });
+  });
+});
+
+describe('intro d\'un niveau', () => {
+  it('annonce le titre et une seconde ligne, 3 s de temps réel, puis disparaît', () => {
+    expect(INTRO_SECONDS).toBe(3);
+    const effects = new Effects(DEFAULT_TUNING);
+    effects.intro('Niveau 3 · Les enseignes', 'Des couloirs d\'étoiles.');
+    expect(effects.banner).toMatchObject({ text: 'Niveau 3 · Les enseignes', detail: 'Des couloirs d\'étoiles.', seconds: INTRO_SECONDS, age: 0 });
+
+    effects.update(2.99);
+    expect(effects.banner).not.toBeNull();
+    effects.update(0.02);
+    expect(effects.banner).toBeNull();
+  });
+
+  it('une bannière de palier n\'a pas de seconde ligne et dure 2 s', () => {
+    const effects = new Effects(DEFAULT_TUNING);
+    effects.handle(tier(1, 'Les gouttières'), HERO);
+    expect(effects.banner).toMatchObject({ detail: null, seconds: BANNER_SECONDS });
+  });
+
+  it('remplace la bannière en cours, et un palier neuf la remplace à son tour', () => {
+    const effects = new Effects(DEFAULT_TUNING);
+    effects.handle(tier(1, 'Les gouttières'), HERO);
+    effects.update(1);
+    effects.intro('Niveau 1 · Les toits', 'Garde le doigt posé.');
+    expect(effects.banner).toMatchObject({ text: 'Niveau 1 · Les toits', age: 0 });
+
+    effects.update(1);
+    effects.handle(tier(2, 'Les enseignes'), HERO);
+    expect(effects.banner).toMatchObject({ text: 'Les enseignes · 100 m', detail: null, age: 0 });
   });
 });
 

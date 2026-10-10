@@ -38,13 +38,13 @@ export class RunTracker {
     }
   }
 
-  /** Bilan de la partie, à sa fin. */
+  /** Bilan de la partie, à sa fin. La hauteur est celle grimpée depuis le toit de départ, dans tous les modes. */
   stats(state: SimState, tuning: Tuning): RunStats {
     return {
       holds: this.holds,
       perfectStreak: this.bestPerfectStreak,
       grazes: this.grazes,
-      height: state.height,
+      height: state.height - state.groundY,
       pickups: this.pickups,
       combo: this.bestCombo,
       fragileReleases: this.fragileReleases,

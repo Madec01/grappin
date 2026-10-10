@@ -1,7 +1,8 @@
 import { Text } from 'pixi.js';
 
 /**
- * Style commun du rendu : palette grise, police système et fabrique de textes.
+ * Style commun du rendu : palette grise, police système, fabrique de textes
+ * et forme de l'étoile.
  * Le décor (renderer.ts) et les écrans posés dessus (screens.ts) y puisent.
  */
 
@@ -18,6 +19,8 @@ export const COLOR = {
   kindMark: 0xc9d1e3,
   wear: 0xf4f6fb,
   target: 0xe8eefc,
+  /** Ligne d'arrivée d'un niveau. */
+  finish: 0xe8eefc,
   rope: 0xc9d1e3,
   shadow: 0xc9d1e3,
   star: 0xf4f6fb,
@@ -42,6 +45,15 @@ export const COLOR = {
   barTrack: 0x2a3350,
   barFill: 0xc9d1e3,
 } as const;
+
+/** Étoile à quatre branches : le creux entre deux pointes est à cette part du rayon. */
+const STAR_PINCH = 0.28;
+
+/** Étoile du jeu, losange concave à quatre branches, centrée en (`x`, `y`) : points à plat pour `Graphics.poly`. */
+export function starPoints(x: number, y: number, outer: number): number[] {
+  const inner = outer * STAR_PINCH;
+  return [x, y - outer, x + inner, y - inner, x + outer, y, x + inner, y + inner, x, y + outer, x - inner, y + inner, x - outer, y, x - inner, y - inner];
+}
 
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 

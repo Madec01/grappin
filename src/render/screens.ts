@@ -1,14 +1,18 @@
 import { Container, Graphics } from 'pixi.js';
+import { LEVELS, levelById, type LevelDef } from '../data/levels';
 import { levelFor, levelProgress } from '../meta/levels';
 import { missionById, type MissionDef } from '../meta/missions';
-import { showsHint, type Profile, type RunOutcome } from '../meta/profile';
-import { TALISMANS, slotsFor, type Talisman, type TalismanId } from '../meta/talismans';
-import { equippedLine, missionDoneLine, missionProgress, slotsLine } from './labels';
-import { COLOR, makeText, readSafeInset } from './style';
+import { showsHint, type LevelOutcome, type Profile, type RunOutcome } from '../meta/profile';
+import { TALISMANS, slotsFor, type Talisman } from '../meta/talismans';
+import { starsOf, unlockedLevel, type LevelResult } from '../meta/traversee';
+import { levelButton, type ButtonId, type ButtonRect } from './buttons';
+import { equippedLine, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, slotsLine, starLines, type StarLine } from './labels';
+import { COLOR, makeText, readSafeInset, starPoints } from './style';
 
 /**
- * Les écrans posés sur le jeu : titre, fin de partie et talismans. Un voile
- * sombre et des textes en formes grises, rien d'autre.
+ * Les écrans posés sur le jeu : titre, liste des niveaux, fin de partie,
+ * victoire et talismans. Un voile sombre, des textes et des formes grises,
+ * rien d'autre.
  *
  * Chaque écran est fait de deux blocs empilés : celui du haut (l'information)
  * et celui du bas (le bouton et l'invite), collé au bas de l'écran pour rester
@@ -17,23 +21,21 @@ import { COLOR, makeText, readSafeInset } from './style';
  * `hitTest`, à partir des rectangles réellement dessinés.
  */
 
-/** Un bouton ou une ligne sur laquelle on peut taper : « Talismans », « Retour », ou un talisman débloqué. */
-export type ButtonId = 'talismans' | 'back' | TalismanId;
-
-/** Rectangle d'un bouton, en pixels CSS de l'écran. */
-export interface ButtonRect {
-  readonly id: ButtonId;
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-}
-
 /** Ce que les écrans ont à montrer. `none` : la partie est en cours, rien n'est posé sur le jeu. */
 export type OverlayView =
   | { readonly kind: 'none' }
   | { readonly kind: 'title'; readonly profile: Profile }
-  | { readonly kind: 'dead'; readonly height: number; readonly score: number; readonly cause: string; readonly outcome: RunOutcome }
+  | { readonly kind: 'levels'; readonly profile: Profile }
+  | {
+      readonly kind: 'dead';
+      /** Hauteur atteinte, et hauteur à atteindre si la partie était un niveau (« Objectif »), sinon null. */
+      readonly height: number;
+      readonly goal: number | null;
+      readonly score: number;
+      readonly cause: string;
+      readonly outcome: RunOutcome;
+    }
+  | { readonly kind: 'won'; readonly score: number; readonly outcome: LevelOutcome; readonly result: LevelResult }
   | { readonly kind: 'talismans'; readonly profile: Profile };
 
 /** Marges et mise en page, en pixels CSS. */
@@ -45,8 +47,9 @@ const MAX_WIDTH = 440;
 const BLOCK_GAP = 24;
 /** Voile sur le jeu : assez dense pour que le décor (anneau de visée, lignes d'altitude) ne gêne pas la lecture, assez clair pour le deviner. */
 const SHADE_ALPHA = 0.74;
-/** L'écran des talismans porte beaucoup de texte : voile plus dense. */
+/** Les écrans des talismans, des niveaux et de la victoire portent beaucoup de texte : voile plus dense. */
 const SHADE_ALPHA_DENSE = 0.9;
+const DENSE_VIEWS: ReadonlySet<OverlayView['kind']> = new Set(['talismans', 'levels', 'won']);
 
 /** Boutons : 56 px de haut, soit plus que les 44 px d'un doigt même réduits d'un cinquième. */
 const BUTTON_WIDTH = 220;
@@ -62,13 +65,62 @@ const MISSION_GAP = 12;
 /** Distance entre une mission et son avancement. */
 const MISSION_PROGRESS_GAP = 12;
 
+/** Écart entre deux boutons empilés, et entre deux étoiles de la victoire. */
+const BUTTON_GAP = 12;
+const WIN_ROW_GAP = 8;
+
 const ROW_GAP = 10;
 const ROW_PADDING = 12;
 const ROW_MIN_HEIGHT = 72;
 const ROW_RADIUS = 10;
 const ROW_EDGE_WIDTH = 1.5;
 
+/** Liste des niveaux : une ligne de 52 px et 6 px d'écart, soit 58 px par niveau, dix niveaux dans 580 px. */
+const LEVEL_ROW_HEIGHT = 52;
+const LEVEL_ROW_GAP = 6;
+/** Étoiles d'un niveau : trois, de ce rayon en pixels et à ce pas l'une de l'autre. */
+const STARS_PER_LEVEL = 3;
+const ROW_STAR_RADIUS = 9;
+const ROW_STAR_STEP = 26;
+/** Étoiles de l'écran de victoire : rayon, hauteur de ligne, et marge entre l'étoile et son texte. */
+const WIN_STAR_RADIUS = 12;
+const WIN_ROW_HEIGHT = 34;
+const WIN_STAR_GAP = 12;
+/** Étoile creuse : fond et contour. */
+const STAR_EMPTY_EDGE_WIDTH = 1.5;
+/** Cadenas des niveaux verrouillés, en pixels : largeur du corps, hauteur du corps, hauteur de l'anse et son retrait de chaque côté. */
+const LOCK_WIDTH = 16;
+const LOCK_BODY = 12;
+const LOCK_SHACKLE = 7;
+const LOCK_SHACKLE_INSET = 3.5;
+
 const HINT = "Garde le doigt posé pour prendre de l'élan, relâche en montant";
+
+/** Une étoile du jeu, pleine si elle est gagnée, creuse sinon. */
+function drawStar(g: Graphics, x: number, y: number, radius: number, filled: boolean): void {
+  const shape = g.poly(starPoints(x, y, radius));
+  if (filled) shape.fill(COLOR.star);
+  else shape.fill(COLOR.barTrack).stroke({ width: STAR_EMPTY_EDGE_WIDTH, color: COLOR.textLocked });
+}
+
+/** Une coche de la largeur `size`, dont le coin haut gauche est en (`x`, `y`). */
+function drawCheck(g: Graphics, x: number, y: number, size: number): void {
+  g.moveTo(x, y + size * 0.55)
+    .lineTo(x + size * 0.38, y + size * 0.9)
+    .lineTo(x + size, y)
+    .stroke({ width: 3, color: COLOR.text, cap: 'round', join: 'round' });
+}
+
+/** Un cadenas, dont le coin haut gauche est en (`x`, `y`). */
+function drawPadlock(g: Graphics, x: number, y: number): void {
+  const radius = LOCK_WIDTH / 2 - LOCK_SHACKLE_INSET;
+  g.moveTo(x + LOCK_SHACKLE_INSET, y + LOCK_SHACKLE)
+    .lineTo(x + LOCK_SHACKLE_INSET, y + radius)
+    .arc(x + LOCK_WIDTH / 2, y + radius, radius, Math.PI, 0)
+    .lineTo(x + LOCK_WIDTH - LOCK_SHACKLE_INSET, y + LOCK_SHACKLE)
+    .stroke({ width: 2, color: COLOR.textLocked });
+  g.roundRect(x, y + LOCK_SHACKLE, LOCK_WIDTH, LOCK_BODY, 3).fill(COLOR.textLocked);
+}
 
 /** Un bloc d'écran : une pile verticale de textes et de formes, avec les boutons qu'elle porte. */
 class Column {
@@ -161,6 +213,73 @@ class Column {
     if (!locked) this.buttons.push({ id: talisman.id, x: 0, y: this.cursor, width: this.width, height });
     this.cursor += height;
   }
+
+  /** « 7 ★ sur 30 » : le nombre, une étoile dessinée, puis le reste de la phrase, le tout centré. */
+  starCount(count: number, max: number): void {
+    const before = makeText(String(count), 18, COLOR.textDim, { bold: true });
+    const after = makeText(`sur ${max}`, 18, COLOR.textDim, { bold: true });
+    const radius = 8;
+    const gap = 8;
+    const total = before.width + gap + 2 * radius + gap + after.width;
+    const left = (this.width - total) / 2;
+    before.position.set(left, this.cursor);
+    after.position.set(left + before.width + 2 * gap + 2 * radius, this.cursor);
+    const star = new Graphics();
+    drawStar(star, left + before.width + gap + radius, this.cursor + before.height / 2, radius, true);
+    this.root.addChild(before, star, after);
+    this.cursor += before.height;
+  }
+
+  /**
+   * Une ligne de la liste des niveaux : numéro et nom, intervalle de hauteur, et
+   * à droite trois étoiles, pleines ou creuses, ou un cadenas si le niveau est
+   * verrouillé. Le niveau à jouer a un fond plus clair ; une ligne verrouillée
+   * est grisée et n'est pas un bouton.
+   */
+  level(level: LevelDef, stars: number, locked: boolean, current: boolean): void {
+    const name = makeText(levelRowTitle(level), 17, locked ? COLOR.textLocked : COLOR.text, { bold: true, align: 'left' });
+    name.position.set(ROW_PADDING, this.cursor + 6);
+    const range = makeText(levelRange(level), 13, locked ? COLOR.textLocked : COLOR.textFaint, { align: 'left' });
+    range.position.set(ROW_PADDING, name.y + name.height);
+
+    const background = new Graphics().roundRect(0, this.cursor, this.width, LEVEL_ROW_HEIGHT, ROW_RADIUS);
+    if (locked) background.fill({ color: COLOR.panel, alpha: 0.3 });
+    else if (current) background.fill({ color: COLOR.panelEquipped, alpha: 0.95 }).stroke({ width: ROW_EDGE_WIDTH, color: COLOR.panelEdgeEquipped });
+    else background.fill({ color: COLOR.panel, alpha: 0.6 }).stroke({ width: ROW_EDGE_WIDTH, color: COLOR.panelEdge });
+
+    const shapes = new Graphics();
+    const middle = this.cursor + LEVEL_ROW_HEIGHT / 2;
+    if (locked) {
+      drawPadlock(shapes, this.width - ROW_PADDING - LOCK_WIDTH, middle - (LOCK_SHACKLE + LOCK_BODY) / 2);
+    } else {
+      for (let star = 0; star < STARS_PER_LEVEL; star += 1) {
+        const x = this.width - ROW_PADDING - ROW_STAR_STEP * (STARS_PER_LEVEL - star) + ROW_STAR_STEP / 2;
+        drawStar(shapes, x, middle, ROW_STAR_RADIUS, star < stars);
+      }
+      this.buttons.push({ id: levelButton(level.id), x: 0, y: this.cursor, width: this.width, height: LEVEL_ROW_HEIGHT });
+    }
+    this.root.addChild(background, name, range, shapes);
+    this.cursor += LEVEL_ROW_HEIGHT;
+  }
+
+  /** Une étoile de la victoire : l'étoile pleine ou creuse, ce qu'elle demande, et à droite une coche ou l'avancement. */
+  starLine(line: StarLine): void {
+    const middle = this.cursor + WIN_ROW_HEIGHT / 2;
+    const shapes = new Graphics();
+    drawStar(shapes, WIN_STAR_RADIUS, middle, WIN_STAR_RADIUS, line.done);
+    const label = makeText(line.label, 19, line.done ? COLOR.text : COLOR.textDim, { bold: line.done, align: 'left' });
+    label.position.set(2 * WIN_STAR_RADIUS + WIN_STAR_GAP, middle - label.height / 2);
+    this.root.addChild(shapes, label);
+    if (line.done) {
+      drawCheck(shapes, this.width - 18, middle - 7, 14);
+    } else if (line.progress !== null) {
+      const progress = makeText(line.progress, 17, COLOR.textDim, { bold: true });
+      progress.anchor.set(1, 0.5);
+      progress.position.set(this.width, middle);
+      this.root.addChild(progress);
+    }
+    this.cursor += WIN_ROW_HEIGHT;
+  }
 }
 
 /** Les deux blocs d'un écran, et où placer celui du haut quand il reste de la place. */
@@ -180,9 +299,20 @@ function buildTitle(profile: Profile, width: number): Layout {
   upper.bar(progress.ratio);
   if (profile.bestHeight > 0) {
     upper.gap(14);
-    upper.line(`Record : ${Math.floor(profile.bestHeight)} m`, 18, COLOR.textDim);
+    upper.line(`Meilleure montée : ${Math.floor(profile.bestHeight)} m`, 18, COLOR.textDim);
   }
-  upper.gap(28);
+  // Le niveau qu'un appui va jouer, puis les étoiles gagnées sur l'ensemble de la traversée.
+  const next = levelById(unlockedLevel(profile));
+  if (next) {
+    upper.gap(14);
+    upper.line(levelTitle(next), 20, COLOR.text, true);
+  }
+  upper.gap(4);
+  upper.starCount(
+    LEVELS.reduce((sum, level) => sum + starsOf(profile, level.id), 0),
+    LEVELS.length * STARS_PER_LEVEL,
+  );
+  upper.gap(24);
   profile.missions
     .flatMap((state) => {
       const def = missionById(state.id);
@@ -195,9 +325,13 @@ function buildTitle(profile: Profile, width: number): Layout {
 
   const lower = new Column(width);
   lower.line(equippedLine(profile.equipped), 16, COLOR.textDim);
-  lower.gap(16);
+  lower.gap(14);
+  lower.button('levels', 'Niveaux');
+  lower.gap(BUTTON_GAP);
+  lower.button('free', 'Course libre');
+  lower.gap(BUTTON_GAP);
   lower.button('talismans', 'Talismans');
-  lower.gap(28);
+  lower.gap(22);
   lower.line('Toucher pour jouer', 24, COLOR.textDim);
   if (showsHint(profile)) {
     lower.gap(10);
@@ -206,15 +340,34 @@ function buildTitle(profile: Profile, width: number): Layout {
   return { upper, lower, align: 'center' };
 }
 
-function buildDead(height: number, score: number, cause: string, outcome: RunOutcome, width: number): Layout {
+function buildLevels(profile: Profile, width: number): Layout {
+  const current = unlockedLevel(profile);
   const upper = new Column(width);
-  upper.line(`Perdu à ${Math.floor(height)} m`, 38, COLOR.text, true);
-  upper.gap(6);
-  upper.line(cause, 22, COLOR.textDim);
-  upper.gap(18);
+  upper.line('Niveaux', 34, COLOR.text, true);
+  upper.gap(16);
+  LEVELS.forEach((level, index) => {
+    if (index > 0) upper.gap(LEVEL_ROW_GAP);
+    upper.level(level, starsOf(profile, level.id), level.id > current, level.id === current);
+  });
+
+  const lower = new Column(width);
+  lower.button('back', 'Retour');
+  return { upper, lower, align: 'top' };
+}
+
+/**
+ * Ce que toute fin de partie dit du bilan : score, expérience, record,
+ * missions accomplies, niveau de grimpeur et déblocages. `news` : une ligne de
+ * plus, juste après l'expérience.
+ */
+function describeOutcome(upper: Column, score: number, outcome: RunOutcome, news: string | null = null): void {
   upper.line(`Score ${Math.floor(score).toLocaleString('fr-FR')}`, 26, COLOR.text);
   upper.gap(4);
   upper.line(`+${outcome.xpGained} XP`, 26, COLOR.text, true);
+  if (news !== null) {
+    upper.gap(12);
+    upper.line(news, 20, COLOR.text, true);
+  }
   if (outcome.newBestHeight) {
     upper.gap(12);
     upper.line('Nouveau record !', 22, COLOR.text, true);
@@ -231,11 +384,51 @@ function buildDead(height: number, score: number, cause: string, outcome: RunOut
       upper.line(`Débloqué : ${talisman.name}`, 20, COLOR.text);
     }
   }
+}
+
+function buildDead(height: number, goal: number | null, score: number, cause: string, outcome: RunOutcome, width: number): Layout {
+  const upper = new Column(width);
+  upper.line(`Perdu à ${Math.floor(height)} m`, 38, COLOR.text, true);
+  upper.gap(6);
+  upper.line(cause, 22, COLOR.textDim);
+  if (goal !== null) {
+    upper.gap(4);
+    upper.line(`Objectif : ${goal} m`, 20, COLOR.textDim);
+  }
+  upper.gap(18);
+  describeOutcome(upper, score, outcome);
 
   const lower = new Column(width);
+  lower.button('levels', 'Niveaux');
+  lower.gap(BUTTON_GAP);
   lower.button('talismans', 'Talismans');
   lower.gap(22);
-  lower.line('Toucher pour rejouer', 24, COLOR.textDim);
+  lower.line(goal === null ? 'Toucher pour rejouer' : 'Toucher pour réessayer', 24, COLOR.textDim);
+  return { upper, lower, align: 'center' };
+}
+
+function buildWon(score: number, outcome: LevelOutcome, result: LevelResult, width: number): Layout {
+  const next = levelById(outcome.level.id + 1);
+  const upper = new Column(width);
+  upper.line('Niveau terminé !', 38, COLOR.text, true);
+  upper.gap(6);
+  upper.line(levelTitle(outcome.level), 22, COLOR.textDim);
+  upper.gap(18);
+  starLines(result).forEach((line, index) => {
+    if (index > 0) upper.gap(WIN_ROW_GAP);
+    upper.starLine(line);
+  });
+  upper.gap(18);
+  describeOutcome(upper, score, outcome, outcome.firstClear && next ? `Nouveau niveau débloqué : ${next.name}` : null);
+
+  const lower = new Column(width);
+  if (next) {
+    lower.button('next', 'Niveau suivant');
+    lower.gap(BUTTON_GAP);
+  }
+  lower.button('replay', 'Rejouer');
+  lower.gap(BUTTON_GAP);
+  lower.button('levels', 'Niveaux');
   return { upper, lower, align: 'center' };
 }
 
@@ -260,8 +453,12 @@ function buildLayout(view: Exclude<OverlayView, { kind: 'none' }>, width: number
   switch (view.kind) {
     case 'title':
       return buildTitle(view.profile, width);
+    case 'levels':
+      return buildLevels(view.profile, width);
     case 'dead':
-      return buildDead(view.height, view.score, view.cause, view.outcome, width);
+      return buildDead(view.height, view.goal, view.score, view.cause, view.outcome, width);
+    case 'won':
+      return buildWon(view.score, view.outcome, view.result, width);
     case 'talismans':
       return buildTalismans(view.profile, width);
   }
@@ -303,7 +500,7 @@ export class Screens {
     this.shownWidth = width;
     this.shownHeight = height;
 
-    this.shade.rect(0, 0, width, height).fill({ color: COLOR.shade, alpha: view.kind === 'talismans' ? SHADE_ALPHA_DENSE : SHADE_ALPHA });
+    this.shade.rect(0, 0, width, height).fill({ color: COLOR.shade, alpha: DENSE_VIEWS.has(view.kind) ? SHADE_ALPHA_DENSE : SHADE_ALPHA });
 
     const contentWidth = Math.min(width - 2 * SIDE_MARGIN, MAX_WIDTH);
     const { upper, lower, align } = buildLayout(view, contentWidth);

@@ -2,6 +2,18 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.4.0] — 2026-10-10 — Niveaux et variété
+
+Décision du propriétaire : les niveaux fixes deviennent le mode principal, pour ne plus repartir de zéro et casser la répétition.
+
+### Ajouté
+
+- Dix niveaux fixes et enchaînés, de 60 à 100 m, chacun avec sa graine, sa brume, son profil et sa nouveauté ; ligne d'arrivée et victoire ; aucun obstacle dans les huit premiers mètres ; niveau engendré en entier à son départ.
+- Trois étoiles par niveau, primes d'expérience, déblocage du niveau suivant, départ avancé de la course libre à la zone la plus haute franchie.
+- Sept motifs de segments : chaîne, escalier, couloir d'étoiles, champ de dalles, rafale de propulseurs, série de fragiles, grand saut ; au moins une étoile par segment hors apprentissage.
+- Écrans des niveaux, de victoire et de fin de niveau, intro du niveau, ligne d'arrivée dessinée, hauteur relative à l'objectif.
+- Le toit de départ et la brume suivent la hauteur de départ ; la simulation accepte un plan de parcours, course libre ou niveau.
+
 ## [0.3.0] — 2026-10-09 — Progression
 
 Décision du propriétaire : missions et niveaux à talismans, avant l'habillage.

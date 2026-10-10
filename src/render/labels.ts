@@ -1,5 +1,7 @@
+import type { LevelDef } from '../data/levels';
 import type { MissionDef } from '../meta/missions';
 import { talismanById, type TalismanId } from '../meta/talismans';
+import { PERFECT_STREAK_STAR, starChecks, type LevelResult } from '../meta/traversee';
 
 /**
  * Textes de l'interface calculés à partir du profil : fonctions pures, sans
@@ -27,4 +29,37 @@ export function slotsLine(slots: number, used: number): string {
 /** Une mission accomplie, sur l'écran de fin. L'espace insécable garde « XP » avec son nombre quand la ligne se coupe. */
 export function missionDoneLine(def: MissionDef): string {
   return `Mission accomplie : ${def.text}, +${def.reward}\u00A0XP`;
+}
+
+/** « Niveau 3 · Les enseignes » : sur le titre, la victoire et l'intro du niveau. */
+export function levelTitle(level: LevelDef): string {
+  return `Niveau ${level.id} · ${level.name}`;
+}
+
+/** « 3 · Les enseignes » : une ligne de la liste des niveaux. */
+export function levelRowTitle(level: LevelDef): string {
+  return `${level.id} · ${level.name}`;
+}
+
+/** « 130 → 200 m » : de quelle hauteur à quelle hauteur monte le niveau. */
+export function levelRange(level: LevelDef): string {
+  return `${level.startY} → ${level.endY} m`;
+}
+
+/** Une des trois étoiles d'un niveau : ce qu'elle demande, si elle est gagnée, et sinon où l'on en est. */
+export interface StarLine {
+  readonly label: string;
+  readonly done: boolean;
+  /** « 2/3 » tant que l'étoile n'est pas gagnée, null quand elle l'est ou qu'il n'y a rien à compter. */
+  readonly progress: string | null;
+}
+
+/** Les trois étoiles de l'écran de victoire, dans l'ordre de `starChecks`. */
+export function starLines(result: LevelResult): readonly StarLine[] {
+  const [finished, allPickups, perfects] = starChecks(result);
+  return [
+    { label: 'Terminer', done: finished, progress: null },
+    { label: 'Toutes les étoiles', done: allPickups, progress: allPickups ? null : `${result.pickupsTaken}/${result.pickupsTotal}` },
+    { label: "Cinq parfaits d'affilée", done: perfects, progress: perfects ? null : `${result.perfectStreak}/${PERFECT_STREAK_STAR}` },
+  ];
 }

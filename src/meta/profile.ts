@@ -27,6 +27,7 @@ export interface Profile {
   readonly version: typeof PROFILE_VERSION;
   readonly xp: number;
   readonly runs: number;
+  /** Meilleure montée en une partie, en mètres depuis le toit de départ. */
   readonly bestHeight: number;
   readonly bestScore: number;
   readonly equipped: TalismanId[];
@@ -173,6 +174,7 @@ export function endRun(profile: Profile, run: RunStats, score: number, extraXp =
 export interface LevelOutcome extends RunOutcome {
   readonly level: LevelDef;
   readonly won: boolean;
+  readonly result: LevelResult;
   /** Étoiles de cette partie, et étoiles retenues pour le niveau après elle. */
   readonly stars: number;
   readonly totalStars: number;
@@ -190,7 +192,7 @@ export function endLevel(profile: Profile, level: LevelDef, run: RunStats, score
   const outcome = endRun(profile, run, score, newStars * STAR_XP + (firstClear ? FIRST_CLEAR_XP : 0));
   const record: LevelRecord = { stars: Math.max(before.stars, stars), bestScore: Math.max(before.bestScore, Math.floor(score)) };
   const next: Profile = { ...outcome.profile, levels: { ...outcome.profile.levels, [String(level.id)]: record } };
-  return { ...outcome, profile: next, level, won: result.won, stars, totalStars: record.stars, newStars, firstClear };
+  return { ...outcome, profile: next, level, won: result.won, result, stars, totalStars: record.stars, newStars, firstClear };
 }
 
 /** Équipe ou retire un talisman, dans la limite des emplacements et des déblocages. Renvoie le profil inchangé si impossible. */
