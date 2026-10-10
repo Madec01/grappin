@@ -130,7 +130,7 @@ export const DEFAULT_TUNING: Tuning = {
   fogSpeedGain: 0.1,
   fogStepHeight: 50,
   fogMaxSpeed: 3,
-  fogStart: -3,
+  fogStart: -5,
 };
 
 /**

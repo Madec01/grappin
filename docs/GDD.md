@@ -169,7 +169,7 @@ Valeurs de départ pour le prototype, à régler à la main sur téléphone. Ell
 | Coyote time | 120 ms |
 | Fenêtre du lâcher parfait | vitesse orientée entre 30° et 60° au-dessus de l'horizontale, dans le sens du mouvement |
 | Multiplicateur | 1 + 0,25 × combo, plafonné à 5 |
-| Vitesse de la brume | 0,8 m/s au départ, +0,1 m/s tous les 50 m, plafonnée à 3 m/s |
+| Vitesse de la brume | Course libre : 0,8 m/s au départ, +0,1 m/s tous les 50 m depuis le toit de départ, plafonnée à 3 m/s. Niveau : la vitesse du niveau, constante, de 0,5 m/s au premier à 1,55 m/s au vingtième. Départ cinq mètres sous le toit. |
 | Pompage | vitesse plancher 4,5 m/s au point bas, 4 m/s² |
 | Accroche fragile | casse après 1 s de tenue |
 | Propulseur | vitesse × 1,35 au lâcher |

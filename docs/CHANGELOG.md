@@ -2,6 +2,18 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.6.1] — 2026-10-10 — La brume ralentit
+
+Retour du propriétaire : « la brume monte trop vite ».
+
+### Corrigé
+
+- B-005 : dans un niveau, la brume gagnait de la vitesse avec la hauteur absolue de la ville, comme en course libre : au niveau 7 elle montait déjà à 2,6 m/s au lieu des 1,2 prévus, et dès le niveau 10 elle plafonnait à 3 m/s quel que soit le réglage du niveau. Un niveau joue désormais sa brume à vitesse constante, et le gain par palier se compte depuis le toit de départ, aussi en course libre partie haut.
+
+### Modifié
+
+- Brume de chaque niveau ralentie de 15 % (de 0,5 m/s au niveau 1 à 1,55 m/s au niveau 20), et la brume part cinq mètres sous le toit au lieu de trois.
+
 ## [0.6.0] — 2026-10-10 — Le lanceur et dix niveaux de plus
 
 Demandes du propriétaire : « il faut plus de niveaux » et une nouvelle mécanique, le lanceur : « on s'accroche dessus et il faut tirer avec le doigt dans une direction opposée à celle où on veut aller, et plus on tire fort plus ça va loin ».

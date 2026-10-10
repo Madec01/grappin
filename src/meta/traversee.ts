@@ -65,5 +65,6 @@ export function levelPlan(level: LevelDef): CoursePlan {
 
 /** Réglages d'un niveau : ceux de la partie, avec la brume du niveau. */
 export function levelTuning(level: LevelDef, tuning: Tuning): Tuning {
-  return withTuning(tuning, { fogBaseSpeed: level.fogBaseSpeed });
+  // La brume d'un niveau monte à la vitesse du niveau, et à elle seule : le gain par palier est celui de la course libre.
+  return withTuning(tuning, { fogBaseSpeed: level.fogBaseSpeed, fogSpeedGain: 0 });
 }

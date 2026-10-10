@@ -341,7 +341,8 @@ export function fogSpeed(height: number, tuning: Tuning): number {
  * personnage est alors renvoyé vers le haut depuis la ligne de brume, corde lâchée.
  */
 export function applyFog(state: SimState, tuning: Tuning, events: RuleEvent[]): void {
-  state.fogY += fogSpeed(state.height, tuning) * state.fogFactor * tuning.stepSeconds;
+  // Le gain de vitesse se compte depuis le toit de départ : un niveau ou une course libre partis haut ne commencent pas avec une brume déjà lancée.
+  state.fogY += fogSpeed(state.height - state.groundY, tuning) * state.fogFactor * tuning.stepSeconds;
   if (state.status !== 'alive' || state.hero.pos.y >= state.fogY) return;
   if (state.chancesLeft > 0) {
     state.chancesLeft -= 1;

@@ -112,6 +112,8 @@ describe('score, sol et brume', () => {
   it('la brume accélère par paliers de hauteur et tue en passant au-dessus du personnage', () => {
     expect(fogSpeed(0, T)).toBe(T.fogBaseSpeed);
     expect(fogSpeed(120, T)).toBeCloseTo(T.fogBaseSpeed + 2 * T.fogSpeedGain, 9);
+    // Dans un niveau, la brume garde sa vitesse : aucun gain.
+    expect(fogSpeed(10_000, { ...T, fogSpeedGain: 0 })).toBe(T.fogBaseSpeed);
     expect(fogSpeed(10_000, T)).toBe(T.fogMaxSpeed);
     const sim = new Simulation(1);
     // Personne ne tape : posé sur le toit, le personnage attend la brume.
