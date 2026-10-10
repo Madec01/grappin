@@ -77,12 +77,25 @@ Décision du propriétaire du 10 octobre 2026 : les traversées en niveaux fixes
 - 0.4.0 : dix niveaux fixes et enchaînés, ligne d'arrivée, trois étoiles, course libre à départ avancé, sept motifs de segments, écrans des niveaux et de victoire.
 - 0.4.1 : les six événements validés par le propriétaire : bascule, coup de vent, panne, pluie d'étoiles, alerte, câble. Conception en section 9 ter du GDD.
 - 0.4.2 : mode test (`?test=1`) pour jouer n'importe quel niveau sur un profil à part.
+- 0.4.3 : les six événements tirés au hasard en course libre dès le palier 1, un segment sur deux.
+
+Retour du propriétaire du 10 octobre 2026 après test : « la bascule rajoute de la difficulté, on meurt souvent au début surtout si on prend beaucoup de vitesse, mais avec l'habitude ça passe ». Bascule gardée telle quelle.
 
 Critère de sortie : le propriétaire enchaîne plusieurs niveaux sans sentiment de répétition, et un niveau perdu se rejoue sans agacement.
 
-## Phase 5 — Habillage ville de nuit — v0.5
+## Phase 5 — Habillage néon minimaliste — v0.5
 
-- Silhouettes et lueurs : toits, lampadaires, enseignes, cloches, fenêtres, brume lumineuse.
+Décision du propriétaire du 10 octobre 2026 : « on va garder ce style minimaliste et en faire un style néon ». Pas de décor figuratif chargé : des formes simples qui brillent.
+
+- Palette néon sur fond nuit : deux ou trois couleurs de tube (cyan, magenta, jaune) réservées aux points, à la corde, aux étoiles et aux dangers ; le fond reste sombre et calme pour que tout se lise.
+- Lueurs sans coût : halo en couches d'alpha autour des formes, pas de filtre de flou plein écran, pour tenir 60 images par seconde sur téléphone.
+- Les points sont des tubes : anneau qui s'allume quand on le vise, pulse quand on y pend, grésille pour un fragile, scintille pour un propulseur ; la panne devient une vraie extinction de néon, le câble un rail lumineux, la bascule fait pencher la ville de lumière.
+- Silhouettes de ville en traits fins, toits et antennes en contour néon discret, brume en nappe colorée ; les bords de la ville (± 14 m) enfin visibles.
+- Typographie et interface dans le même esprit, police libre (Google Fonts, licence OFL).
+- Accroches réactives au passage. Traînée, étirement, sifflement du vent, éclat et son du lâcher parfait.
+- Audio Web Audio : bruitages et musique libres (Freesound, OpenGameArt, CC0), déverrouillage au premier tap, volumes.
+- Application installable, plein écran portrait, hors ligne. Écrans d'accueil, options, crédits.
+- Nouvelles prises proposées par le propriétaire, à valider avant de les construire : voir le backlog, « Idées du propriétaire du 10 octobre 2026 ».
 - Accroches réactives au passage. Traînée, étirement, sifflement du vent, éclat et son du lâcher parfait.
 - Audio Web Audio : bruitages et musique libres, déverrouillage au premier tap, volumes.
 - Application installable, plein écran portrait, hors ligne. Écrans d'accueil, options, crédits.

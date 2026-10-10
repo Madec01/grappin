@@ -12,9 +12,11 @@ Version 0.4.1, 10 octobre 2026. Le propriétaire du projet est le seul valideur 
 
 **Public.** Joueurs mobiles de tous niveaux. Une seule main suffit.
 
-## 2. Univers [VALIDÉ dans le principe, à préciser]
+## 2. Univers [VALIDÉ, style néon minimaliste décidé le 10 octobre 2026]
 
 **Ascension nocturne d'une ville.** Le personnage grimpe une ville la nuit, de toit en toit, de lampadaire en enseigne. Direction artistique proposée par le Lead et retenue par le propriétaire : silhouettes et lueurs, formes simples sur dégradés nocturnes, lisibles à grande vitesse et presque entièrement dessinables en code.
+
+**Style néon minimaliste.** Décision du propriétaire après avoir joué la 0.4.2 : « on va garder ce style minimaliste et en faire un style néon ». Les formes restent celles d'aujourd'hui, des ronds, des traits, des étoiles ; ce qui change, c'est la lumière : chaque élément de jeu est un tube de néon sur fond nuit, avec son halo, sa couleur de tube et ses états (allumé, visé, tenu, grésillant, éteint). Le décor de ville reste en contours fins, jamais au point de concurrencer les points et les dangers. Détail en phase 5 de la feuille de route.
 
 **Accroches réactives, transposées dans la ville.** Les lampadaires s'allument au passage, les cloches d'église sonnent, les fenêtres s'éclairent, les enseignes grésillent. Elles matérialisent la chaîne.
 
@@ -104,7 +106,7 @@ Retour du propriétaire sur la 0.2.0 : « difficile de prendre de la vitesse, on
 
 ## 9 ter. Événements pendant les niveaux [VALIDÉ le 10 octobre 2026]
 
-Demande du propriétaire : des événements qui influencent le jeu pendant un niveau, dont « faire tourner le niveau pour qu'il devienne horizontal ». Les six événements proposés par le Lead ont été retenus. Chacun est planifié à une hauteur fixe d'un niveau, annoncé par une bannière, et le robot vérificateur prouve chaque segment dans les conditions de l'événement qui le couvre. En course libre, à partir du palier 2, un segment sur trois environ porte un événement, le câble et la bascule à partir du palier 4.
+Demande du propriétaire : des événements qui influencent le jeu pendant un niveau, dont « faire tourner le niveau pour qu'il devienne horizontal ». Les six événements proposés par le Lead ont été retenus. Chacun est planifié à une hauteur fixe d'un niveau, annoncé par une bannière, et le robot vérificateur prouve chaque segment dans les conditions de l'événement qui le couvre. En course libre, passé le palier 0 d'apprentissage, un segment sur deux environ porte l'un des six événements, tiré au sort sans jamais répéter le précédent ; décision du propriétaire du 10 octobre 2026, pour que la grimpe sans fin ait toutes les nouveautés.
 
 - **La bascule.** La gravité tourne d'un quart de tour en deux secondes, vers la gauche ou la droite, tient le temps d'une section, puis revient. Le niveau tourne à l'écran pour que le bas reste en bas : la progression devient horizontale, le personnage pend de côté des points, et tomber hors de la ville est une chute. La physique ne change pas d'une ligne : seule la direction de la gravité.
 - **Le coup de vent.** Une poussée latérale de 3 m/s² qui dévie les vols, montée en une seconde, visible par des traînées.

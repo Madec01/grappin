@@ -59,14 +59,15 @@ const CONTEXT_ANCHORS = 4;
 const PRUNE_BEHIND = 10;
 /** Un niveau est engendré jusqu'à cette hauteur au-dessus de sa ligne d'arrivée, pour le dernier balancement. */
 const BEYOND_FINISH = 6;
-/** Course libre : chance qu'un segment porte un événement, et événements permis par palier. */
-const FREE_EVENT_CHANCE = 0.35;
-function freeEventsFor(tier: number): EventKind[] {
-  const kinds: EventKind[] = [];
-  if (tier >= 2) kinds.push('pluie', 'alerte');
-  if (tier >= 3) kinds.push('panne', 'vent');
-  if (tier >= 4) kinds.push('cable', 'bascule');
-  return kinds;
+/**
+ * Course libre : chance qu'un segment porte un événement, et événements permis
+ * par palier. Décision du propriétaire : les six dès que la zone d'apprentissage
+ * du palier 0 est passée, pour que la grimpe sans fin ait toutes les nouveautés.
+ */
+const FREE_EVENT_CHANCE = 0.5;
+const FREE_EVENT_KINDS: readonly EventKind[] = ['bascule', 'vent', 'panne', 'pluie', 'alerte', 'cable'];
+function freeEventsFor(tier: number): readonly EventKind[] {
+  return tier >= 1 ? FREE_EVENT_KINDS : [];
 }
 
 /** Longueur d'un événement de course libre : un segment, puisque les segments s'arrêtent à ses bords. */
@@ -79,10 +80,10 @@ const FREE_EVENT_LENGTH = 20;
 function scheduleFreeEvent(state: SimState, rng: Rng, tier: number, segmentY: number): void {
   const kinds = freeEventsFor(tier);
   if (kinds.length === 0 || rng.next() >= FREE_EVENT_CHANCE) return;
-  // Jamais deux événements qui se chevauchent : le précédent doit être fini avant ce segment.
+  // Jamais deux événements qui se chevauchent : le précédent doit être fini avant ce segment. Et jamais deux fois le même de suite.
   const last = state.schedule.at(-1);
   if (last && state.groundY + last.at + last.length + 6 > segmentY) return;
-  const kind = rng.pick(kinds);
+  const kind = rng.pick(kinds.filter((k) => k !== last?.kind));
   const side: -1 | 1 = rng.next() < 0.5 ? -1 : 1;
   state.schedule.push({ kind, at: segmentY - state.groundY + 2, length: FREE_EVENT_LENGTH, side, strength: 3 });
   state.eventRuntimes.push({ startStep: null, endStep: null });

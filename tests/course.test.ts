@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Anchor } from '../src/sim/state';
 import { createRng } from '../src/core/math/rng';
 import { environmentOf, eventsAt } from '../src/sim/events';
 import { HALF_WIDTH, buildSegment, tierProfile } from '../src/sim/generator';
@@ -44,8 +45,11 @@ describe('parcours engendré', () => {
       b.state.hero.grounded = false;
       b.step();
     }
-    expect(JSON.stringify(a.state.anchors)).toBe(JSON.stringify(b.state.anchors));
+    // Les points sur câble glissent à chaque pas joué : on compare leur câble, pas leur position du moment.
+    const settled = (anchors: readonly Anchor[]): string => JSON.stringify(anchors.map((anchor) => (anchor.cable ? { ...anchor, pos: anchor.cable.from } : anchor)));
+    expect(settled(a.state.anchors)).toBe(settled(b.state.anchors));
     expect(JSON.stringify(a.state.obstacles)).toBe(JSON.stringify(b.state.obstacles));
+    expect(JSON.stringify(a.state.schedule)).toBe(JSON.stringify(b.state.schedule));
   });
 
   it('introduit les contraintes une à la fois selon le palier', () => {

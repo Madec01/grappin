@@ -179,4 +179,29 @@ describe('vérification sous un événement', () => {
     expect(free.state.schedule.length).toBeGreaterThan(0);
     expect(free.state.course.unverified).toBe(0);
   });
+
+  it('la course libre tire les six événements au hasard dès le palier 1, jamais dans la zone d\'apprentissage, jamais deux fois le même de suite', () => {
+    const seen = new Set<string>();
+    let scheduled = 0;
+    for (let seed = 1; seed <= 24; seed += 1) {
+      const free = new Simulation(seed);
+      free.state.hero.pos = { x: 0, y: 400 };
+      free.state.hero.grounded = false;
+      free.state.fogY = 380;
+      free.step();
+      const { schedule } = free.state;
+      scheduled += schedule.length;
+      for (const [i, event] of schedule.entries()) {
+        seen.add(event.kind);
+        expect(event.at, `graine ${seed}`).toBeGreaterThanOrEqual(T.tierHeight);
+        if (i > 0) expect(event.kind, `graine ${seed}`).not.toBe(schedule[i - 1]!.kind);
+        // Jamais deux événements qui se chevauchent.
+        if (i > 0) expect(event.at, `graine ${seed}`).toBeGreaterThanOrEqual(schedule[i - 1]!.at + schedule[i - 1]!.length);
+      }
+      expect(free.state.course.unverified, `graine ${seed}`).toBe(0);
+    }
+    expect([...seen].sort()).toEqual(['alerte', 'bascule', 'cable', 'panne', 'pluie', 'vent']);
+    // Sur 400 m à une chance sur deux par segment d'une vingtaine de mètres, au moins une poignée d'événements par partie.
+    expect(scheduled / 24).toBeGreaterThan(5);
+  });
 });

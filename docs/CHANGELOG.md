@@ -2,6 +2,14 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.4.3] — 2026-10-10 — Les six événements en course libre
+
+Retour du propriétaire après test des niveaux : « la bascule rajoute de la difficulté, on meurt souvent au début surtout si on prend beaucoup de vitesse, mais avec l'habitude ça passe ». Demande : que la course libre tire toutes ces nouveautés au hasard.
+
+### Modifié
+
+- Course libre : passé le palier 0 d'apprentissage, un segment sur deux porte l'un des six événements, tiré au sort sans répéter le précédent ; auparavant, trois événements seulement avant le palier 4 et un segment sur trois.
+
 ## [0.4.2] — 2026-10-10 — Mode test
 
 Demande du propriétaire : pouvoir tester les niveaux sans les gagner un par un.
