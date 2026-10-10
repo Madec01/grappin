@@ -139,6 +139,24 @@ function autopilot(targetHeight: number, limitMs: number): string {
   })`;
 }
 
+test('?test=1 : tous les niveaux se jouent, sur un profil à part', async ({ page }) => {
+  const errors = watchErrors(page);
+  await open(page, '/?test=1');
+  expect((await state(page)).testMode).toBe(true);
+  // Le niveau 7 n'a jamais été débloqué : le mode test le lance quand même.
+  expect(await page.evaluate(() => window.__grappin!.playLevel(7))).toBe(true);
+  expect(await state(page)).toMatchObject({ screen: 'playing', mode: 'level', levelId: 7 });
+  await page.waitForTimeout(500);
+  expect(errors).toEqual([]);
+  // La vraie progression n'est pas touchée : seule la clé du mode test existe, si quelque chose a été écrit.
+  const keys = await page.evaluate(() => Object.keys(window.localStorage));
+  expect(keys).not.toContain('grappin.profil');
+
+  await open(page, '/');
+  expect((await state(page)).testMode).toBe(false);
+  expect(await page.evaluate(() => window.__grappin!.playLevel(7))).toBe(false);
+});
+
 test('un pilote automatique grimpe au-delà de 10 m sans erreur de console', async ({ page }) => {
   const errors = watchErrors(page);
   // Brume ralentie : sur les machines lentes de l'intégration continue, le pilote réagit à la cadence

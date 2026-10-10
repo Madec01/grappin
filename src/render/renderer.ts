@@ -51,6 +51,8 @@ export interface GameFrame {
   readonly outcome: RunOutcome | LevelOutcome | null;
   /** Étoiles prises et série de parfaits du niveau fini, ou null en course libre ou tant que la partie court. */
   readonly result: LevelResult | null;
+  /** Mode test : un rappel discret pendant la partie, et les écrans le disent. */
+  readonly testMode: boolean;
 }
 
 const TAU = Math.PI * 2;
@@ -208,6 +210,7 @@ export class Renderer {
   private readonly goalText = makeText('', GOAL_FONT_SIZE, COLOR.textDim, { bold: true });
   private readonly multiplierText = makeText('', 30, COLOR.text, { bold: true });
   private readonly scoreText = makeText('', 20, COLOR.textDim);
+  private readonly testTag = makeText('MODE TEST', 13, COLOR.textDim, { bold: true });
   private readonly bannerText = makeText('', BANNER_FONT_SIZE, COLOR.text, { bold: true, outlined: true });
   /** Seconde ligne de la bannière : sa largeur de retour à la ligne est fixée par `layout()`. */
   private readonly bannerDetail = makeText('', BANNER_DETAIL_FONT_SIZE, COLOR.text, { outlined: true, wrap: 0 });
@@ -224,8 +227,9 @@ export class Renderer {
   private constructor(app: Application) {
     this.app = app;
 
-    this.hud.addChild(this.heightText, this.goalText, this.multiplierText, this.scoreText);
+    this.hud.addChild(this.heightText, this.goalText, this.multiplierText, this.scoreText, this.testTag);
     this.multiplierText.anchor.set(1, 0);
+    this.testTag.anchor.set(0.5, 0);
     this.heightText.anchor.set(0, 0);
     this.goalText.anchor.set(0, 1);
     this.scoreText.anchor.set(0, 0);
@@ -324,7 +328,7 @@ export class Renderer {
     this.drawShadow(state, camera, tuning);
     this.drawHero(state, camera, tuning);
     this.drawFloatingTexts(effects);
-    this.drawHud(state, frame.screen, tuning);
+    this.drawHud(state, frame, tuning);
     this.drawBanner(effects);
     this.drawOverlay(state, frame);
   }
@@ -341,6 +345,7 @@ export class Renderer {
     this.heightText.position.set(HUD_SIDE_MARGIN, top);
     this.multiplierText.position.set(width - HUD_SIDE_MARGIN, top + 8);
     this.scoreText.position.set(HUD_SIDE_MARGIN, top + HEIGHT_FONT_SIZE * 1.2);
+    this.testTag.position.set(width / 2, top);
     this.bannerText.position.set(width / 2, top + BANNER_OFFSET);
     this.bannerDetail.position.x = width / 2;
     this.bannerDetail.style.wordWrapWidth = width - 2 * BANNER_SIDE_MARGIN;
@@ -651,9 +656,10 @@ export class Renderer {
    * en cours de partie, l'écran de fin redit hauteur et score. Dans un niveau,
    * la hauteur se compte depuis le toit et l'objectif la suit : « 32 / 70 m ».
    */
-  private drawHud(state: SimState, screen: GameScreen, tuning: Tuning): void {
-    this.hud.visible = screen === 'playing';
+  private drawHud(state: SimState, frame: GameFrame, tuning: Tuning): void {
+    this.hud.visible = frame.screen === 'playing';
     if (!this.hud.visible) return;
+    this.testTag.visible = frame.testMode;
     this.goalText.visible = state.finishY !== null;
     if (state.finishY === null) {
       this.heightText.text = `${Math.floor(state.height)} m`;
@@ -674,9 +680,9 @@ export class Renderer {
   private overlayView(state: SimState, frame: GameFrame): OverlayView {
     switch (frame.screen) {
       case 'title':
-        return { kind: 'title', profile: frame.profile };
+        return { kind: 'title', profile: frame.profile, testMode: frame.testMode };
       case 'levels':
-        return { kind: 'levels', profile: frame.profile };
+        return { kind: 'levels', profile: frame.profile, testMode: frame.testMode };
       case 'talismans':
         return { kind: 'talismans', profile: frame.profile };
       case 'dead':

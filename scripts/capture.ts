@@ -191,6 +191,21 @@ async function main(): Promise<void> {
     await levelPage.waitForTimeout(300);
     await levelPage.screenshot({ path: join(outDir, '10-titre-apres-niveau.png') });
 
+    // Le mode test : le titre qui le dit, puis la liste des niveaux tous ouverts, avec leurs événements.
+    const testPage = await context.newPage();
+    await testPage.goto(`http://localhost:${PORT}/?test=1`);
+    await testPage.waitForFunction(() => window.__grappin?.state().screen === 'title');
+    await testPage.waitForTimeout(300);
+    await testPage.screenshot({ path: join(outDir, '17-mode-test-titre.png') });
+    const levelsButton = (await testPage.evaluate(() => window.__grappin!.buttons())).find((b) => b.id === 'levels');
+    if (levelsButton) {
+      await testPage.evaluate(({ x, y }) => window.__grappin!.press(x, y), { x: levelsButton.x + levelsButton.width / 2, y: levelsButton.y + levelsButton.height / 2 });
+      await testPage.evaluate(() => window.__grappin!.release());
+      await testPage.waitForTimeout(300);
+      await testPage.screenshot({ path: join(outDir, '18-mode-test-niveaux.png') });
+    }
+    await testPage.close();
+
     // Les événements : tous les niveaux ouverts, puis chaque événement attrapé à sa hauteur.
     await levelPage.evaluate(() => window.__grappin!.unlockAll());
     const shots: Array<[number, number, string]> = [

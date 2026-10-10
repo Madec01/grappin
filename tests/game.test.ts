@@ -12,6 +12,8 @@ import { DEFAULT_TUNING, type Tuning } from '../src/sim/tuning';
 
 /** Ce que le faux rendu a reçu à la dernière image, et tout ce qu'il a vu passer au fil de la partie. */
 interface Seen {
+  /** Mode test tel que la dernière image l'a reçu. */
+  lastTestMode: boolean;
   /** Écran demandé à chaque image. */
   readonly screens: GameScreen[];
   lastCause: DeathCause | null;
@@ -53,6 +55,7 @@ function makeGame(search = '', saved?: Profile): { game: Game; seen: Seen; stora
     texts: new Set(),
     banners: new Set(),
     lastTuning: null,
+    lastTestMode: false,
     lastProfile: null,
     lastOutcome: null,
     lastResult: null,
@@ -76,6 +79,7 @@ function makeGame(search = '', saved?: Profile): { game: Game; seen: Seen; stora
       seen.lastBanner = frame.effects.banner?.text ?? null;
       seen.lastBannerDetail = frame.effects.banner?.detail ?? null;
       seen.lastTuning = frame.tuning;
+      seen.lastTestMode = frame.testMode;
       seen.lastProfile = frame.profile;
       seen.lastOutcome = frame.outcome;
       seen.lastResult = frame.result;
@@ -180,6 +184,43 @@ describe('réglages d\'URL', () => {
     expect(settings.tuning).toEqual(DEFAULT_TUNING);
     expect(readSettings('').seed).toBeNull();
   });
+
+  it('?test=1 ouvre le mode test ; absent, vide, à 0 ou à non, il reste fermé', () => {
+    expect(readSettings('?test=1').testMode).toBe(true);
+    expect(readSettings('?test').testMode).toBe(true);
+    expect(readSettings('?graine=3&test=oui').testMode).toBe(true);
+    expect(readSettings('').testMode).toBe(false);
+    expect(readSettings('?test=0').testMode).toBe(false);
+    expect(readSettings('?test=non').testMode).toBe(false);
+  });
+});
+
+describe('mode test', () => {
+  const BUTTON = { x: 195, y: 500 };
+
+  it('tous les niveaux se lancent sans les avoir débloqués, depuis la liste comme par playLevel(), et le jeu le dit', () => {
+    const { game, seen } = makeGame('?test=1');
+    expect(game.debugState()).toMatchObject({ testMode: true, unlockedLevel: 1 });
+    expect(game.playLevel(10)).toBe(true);
+    expect(game.debugState()).toMatchObject({ screen: 'playing', mode: 'level', levelId: 10, testMode: true });
+
+    game.restart();
+    seen.hit = (x, y) => (x === BUTTON.x && y === BUTTON.y ? 'levels' : null);
+    game.press(BUTTON.x, BUTTON.y);
+    seen.hit = (x, y) => (x === BUTTON.x && y === BUTTON.y ? 'niveau-7' : null);
+    game.press(BUTTON.x, BUTTON.y);
+    expect(game.debugState()).toMatchObject({ screen: 'playing', mode: 'level', levelId: 7 });
+    game.frame(0.016);
+    expect(seen.lastTestMode).toBe(true);
+  });
+
+  it('hors mode test, rien ne change : un niveau verrouillé reste fermé et le rendu ne signale rien', () => {
+    const { game, seen } = makeGame('?graine=3');
+    expect(game.playLevel(7)).toBe(false);
+    expect(game.debugState()).toMatchObject({ screen: 'title', testMode: false });
+    game.frame(0.016);
+    expect(seen.lastTestMode).toBe(false);
+  });
 });
 
 describe('jeu', () => {
@@ -281,6 +322,7 @@ describe('jeu', () => {
         'step',
         'targetId',
         'tier',
+        'testMode',
         'unlockedLevel',
         'vel',
         'windX',

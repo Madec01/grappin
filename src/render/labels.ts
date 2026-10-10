@@ -47,6 +47,21 @@ export function levelRange(level: LevelDef): string {
   return `${level.startY} → ${level.endY} m`;
 }
 
+/** Nom court de chaque événement, pour la liste des niveaux du mode test. */
+const EVENT_NAMES: Record<EventKind, string> = {
+  bascule: 'bascule',
+  vent: 'vent',
+  panne: 'panne',
+  pluie: 'pluie d\'étoiles',
+  alerte: 'alerte',
+  cable: 'câbles',
+};
+
+/** « bascule 25 m · panne 55 m » : les événements du niveau et la hauteur où ils commencent, ou une chaîne vide sans événement. */
+export function levelEvents(level: LevelDef): string {
+  return level.events.map((event) => `${EVENT_NAMES[event.kind]} ${event.at} m`).join(' · ');
+}
+
 /** Une des trois étoiles d'un niveau : ce qu'elle demande, si elle est gagnée, et sinon où l'on en est. */
 export interface StarLine {
   readonly label: string;

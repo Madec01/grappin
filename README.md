@@ -26,6 +26,7 @@ Le jeu se joue aussi à la souris, avec le même geste : clic maintenu, puis rel
 Des paramètres d'adresse permettent de régler le jeu sans toucher au code :
 
 - `?graine=12` rejoue toujours le même parcours.
+- `?test=1` ouvre le mode test : tous les niveaux se jouent sans les avoir débloqués, la liste des niveaux dit les événements de chacun, et la progression se fait sur un profil à part, sans toucher à la vraie. En ligne : https://madec01.github.io/grappin/?test=1
 - Dans la console du navigateur, `__grappin.resetProfile()` efface la progression, `__grappin.profile()` l'affiche.
 - Tout réglage de `src/sim/tuning.ts` se surcharge par son nom, par exemple `?gravity=9&ropeMax=6&kickSpeed=4`.
 

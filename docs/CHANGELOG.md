@@ -2,6 +2,14 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.4.2] — 2026-10-10 — Mode test
+
+Demande du propriétaire : pouvoir tester les niveaux sans les gagner un par un.
+
+### Ajouté
+
+- Mode test par `?test=1` : tous les niveaux ouverts dans la liste et par `playLevel()`, la liste dit les événements de chaque niveau et la hauteur où ils commencent, un rappel « MODE TEST » pendant la partie, et un profil à part (`grappin.profil.test`) pour ne rien mêler à la vraie progression.
+
 ## [0.4.1] — 2026-10-10 — Six événements
 
 Décision du propriétaire : les six événements proposés, dont la bascule du niveau.

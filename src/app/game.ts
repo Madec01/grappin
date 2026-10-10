@@ -44,6 +44,12 @@ export interface GameSettings {
   /** Graine imposée par `?graine=` à la course libre, ou null pour une graine aléatoire à chaque partie. Un niveau a toujours la sienne. */
   readonly seed: number | null;
   readonly tuning: Tuning;
+  /**
+   * Mode test, `?test=1` : tous les niveaux se jouent sans les avoir débloqués,
+   * pour les essayer dans l'ordre que l'on veut. La progression se fait sur un
+   * profil à part (voir `main.ts`), pour ne rien mêler à la vraie.
+   */
+  readonly testMode: boolean;
 }
 
 /** Instantané lisible de l'extérieur : tests de bout en bout et séances de réglage. */
@@ -91,6 +97,8 @@ export interface DebugState {
   readonly stars: number;
   /** Hauteur de départ de la prochaine course libre. */
   readonly freeRunStartY: number;
+  /** Mode test actif : tous les niveaux ouverts, profil à part. */
+  readonly testMode: boolean;
   /** Direction unitaire de la gravité : (0, -1) d'ordinaire, qui tourne vers (±1, 0) pendant une bascule. */
   readonly gravityX: number;
   readonly gravityY: number;
@@ -106,8 +114,9 @@ export interface DebugState {
 
 /**
  * Lit les réglages dans la chaîne de requête de l'URL : `?graine=123` fixe la
- * graine, et tout paramètre nommé comme une clé de `Tuning` en surcharge la
- * valeur (`?gravity=9&ropeMax=6`). Une valeur illisible est ignorée.
+ * graine, `?test=1` ouvre le mode test, et tout paramètre nommé comme une clé
+ * de `Tuning` en surcharge la valeur (`?gravity=9&ropeMax=6`). Une valeur
+ * illisible est ignorée.
  */
 export function readSettings(search: string): GameSettings {
   const params = new URLSearchParams(search);
@@ -119,7 +128,8 @@ export function readSettings(search: string): GameSettings {
   }
   const seedText = params.get('graine')?.trim();
   const seed = seedText ? Number(seedText) : Number.NaN;
-  return { seed: Number.isInteger(seed) ? seed : null, tuning: withTuning(DEFAULT_TUNING, overrides) };
+  const test = params.get('test')?.trim();
+  return { seed: Number.isInteger(seed) ? seed : null, tuning: withTuning(DEFAULT_TUNING, overrides), testMode: test !== undefined && test !== '0' && test !== 'non' };
 }
 
 /** Graine 32 bits tirée au hasard : le seul aléa hors simulation, qui ne le relit jamais. */
@@ -298,6 +308,7 @@ export class Game {
       profile: this.profile,
       outcome: this.run.outcome,
       result: this.run.result,
+      testMode: this.settings.testMode,
     });
   }
 
@@ -333,6 +344,7 @@ export class Game {
       unlockedLevel: unlockedLevel(this.profile),
       stars: this.run.outcome && 'level' in this.run.outcome ? this.run.outcome.stars : 0,
       freeRunStartY: freeRunStartY(this.profile),
+      testMode: this.settings.testMode,
       gravityX: state.env.gravityDir.x,
       gravityY: state.env.gravityDir.y,
       windX: state.env.wind.x,
@@ -383,10 +395,10 @@ export class Game {
     if (grab) run.sim.press();
   }
 
-  /** Lance un niveau, s'il existe et si le profil l'a débloqué. */
+  /** Lance un niveau, s'il existe et si le profil l'a débloqué ; en mode test, tous le sont. */
   private startLevel(id: number, grab: boolean): boolean {
     const level = levelById(id);
-    if (!level || !isUnlocked(this.profile, id)) return false;
+    if (!level || !(this.settings.testMode || isUnlocked(this.profile, id))) return false;
     this.begin(this.newLevelRun(level), grab);
     return true;
   }

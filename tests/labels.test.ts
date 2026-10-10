@@ -3,7 +3,7 @@ import { levelById } from '../src/data/levels';
 import { MISSIONS, missionById } from '../src/meta/missions';
 import { PERFECT_STREAK_STAR } from '../src/meta/traversee';
 import type { EventKind } from '../src/sim/events';
-import { equippedLine, eventAnnouncement, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, slotsLine, starLines } from '../src/render/labels';
+import { equippedLine, eventAnnouncement, levelEvents, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, slotsLine, starLines } from '../src/render/labels';
 
 const mission = (id: string) => {
   const def = missionById(id);
@@ -113,5 +113,18 @@ describe('annonce d\'un événement de niveau', () => {
   it('annonce chaque événement du jeu au départ', () => {
     const kinds: EventKind[] = ['bascule', 'vent', 'panne', 'pluie', 'alerte', 'cable'];
     for (const kind of kinds) expect(eventAnnouncement(kind, 'start', 1)?.title).toBeTruthy();
+  });
+});
+
+describe('liste des niveaux du mode test', () => {
+  it('dit les événements du niveau et où ils commencent, et rien pour un niveau sans événement', () => {
+    const quiet = levelById(1);
+    const busy = levelById(8);
+    if (!quiet || !busy) throw new Error('Niveaux 1 et 8 attendus');
+    expect(levelEvents(quiet)).toBe('');
+    expect(levelEvents(busy)).toBe('bascule 20 m · panne 55 m');
+    const all = levelById(9);
+    if (!all) throw new Error('Niveau 9 attendu');
+    expect(levelEvents(all)).toBe('vent 10 m · pluie d\'étoiles 40 m · câbles 62 m');
   });
 });

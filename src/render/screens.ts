@@ -6,7 +6,7 @@ import { showsHint, type LevelOutcome, type Profile, type RunOutcome } from '../
 import { TALISMANS, slotsFor, type Talisman } from '../meta/talismans';
 import { starsOf, unlockedLevel, type LevelResult } from '../meta/traversee';
 import { levelButton, type ButtonId, type ButtonRect } from './buttons';
-import { equippedLine, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, slotsLine, starLines, type StarLine } from './labels';
+import { type StarLine, equippedLine, levelEvents, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, slotsLine, starLines } from './labels';
 import { COLOR, makeText, readSafeInset, starPoints } from './style';
 
 /**
@@ -22,10 +22,13 @@ import { COLOR, makeText, readSafeInset, starPoints } from './style';
  */
 
 /** Ce que les écrans ont à montrer. `none` : la partie est en cours, rien n'est posé sur le jeu. */
+/** Ce que le mode test dit de lui-même, sur le titre et la liste des niveaux. */
+const TEST_MODE_LINE = 'Mode test · tous les niveaux ouverts, progression à part';
+
 export type OverlayView =
   | { readonly kind: 'none' }
-  | { readonly kind: 'title'; readonly profile: Profile }
-  | { readonly kind: 'levels'; readonly profile: Profile }
+  | { readonly kind: 'title'; readonly profile: Profile; readonly testMode: boolean }
+  | { readonly kind: 'levels'; readonly profile: Profile; readonly testMode: boolean }
   | {
       readonly kind: 'dead';
       /** Hauteur atteinte, et hauteur à atteindre si la partie était un niveau (« Objectif »), sinon null. */
@@ -236,10 +239,10 @@ class Column {
    * verrouillé. Le niveau à jouer a un fond plus clair ; une ligne verrouillée
    * est grisée et n'est pas un bouton.
    */
-  level(level: LevelDef, stars: number, locked: boolean, current: boolean): void {
+  level(level: LevelDef, stars: number, locked: boolean, current: boolean, detail: string = levelRange(level)): void {
     const name = makeText(levelRowTitle(level), 17, locked ? COLOR.textLocked : COLOR.text, { bold: true, align: 'left' });
     name.position.set(ROW_PADDING, this.cursor + 6);
-    const range = makeText(levelRange(level), 13, locked ? COLOR.textLocked : COLOR.textFaint, { align: 'left' });
+    const range = makeText(detail, 13, locked ? COLOR.textLocked : COLOR.textFaint, { align: 'left' });
     range.position.set(ROW_PADDING, name.y + name.height);
 
     const background = new Graphics().roundRect(0, this.cursor, this.width, LEVEL_ROW_HEIGHT, ROW_RADIUS);
@@ -289,10 +292,14 @@ interface Layout {
   readonly align: 'center' | 'top';
 }
 
-function buildTitle(profile: Profile, width: number): Layout {
+function buildTitle(profile: Profile, width: number, testMode: boolean): Layout {
   const upper = new Column(width);
   const progress = levelProgress(profile.xp);
   upper.line('GRAPPIN', 56, COLOR.text, true);
+  if (testMode) {
+    upper.gap(6);
+    upper.line(TEST_MODE_LINE, 15, COLOR.textDim);
+  }
   upper.gap(16);
   upper.line(`Niveau ${progress.level}`, 24, COLOR.text, true);
   upper.gap(8);
@@ -340,14 +347,20 @@ function buildTitle(profile: Profile, width: number): Layout {
   return { upper, lower, align: 'center' };
 }
 
-function buildLevels(profile: Profile, width: number): Layout {
+function buildLevels(profile: Profile, width: number, testMode: boolean): Layout {
   const current = unlockedLevel(profile);
   const upper = new Column(width);
   upper.line('Niveaux', 34, COLOR.text, true);
-  upper.gap(16);
+  if (testMode) {
+    upper.gap(4);
+    upper.line(TEST_MODE_LINE, 15, COLOR.textDim);
+  }
+  upper.gap(testMode ? 12 : 16);
   LEVELS.forEach((level, index) => {
     if (index > 0) upper.gap(LEVEL_ROW_GAP);
-    upper.level(level, starsOf(profile, level.id), level.id > current, level.id === current);
+    // En mode test, rien n'est verrouillé et la ligne du dessous dit les événements du niveau, ce que l'on vient tester.
+    const detail = testMode && level.events.length > 0 ? levelEvents(level) : levelRange(level);
+    upper.level(level, starsOf(profile, level.id), !testMode && level.id > current, level.id === current, detail);
   });
 
   const lower = new Column(width);
@@ -452,9 +465,9 @@ function buildTalismans(profile: Profile, width: number): Layout {
 function buildLayout(view: Exclude<OverlayView, { kind: 'none' }>, width: number): Layout {
   switch (view.kind) {
     case 'title':
-      return buildTitle(view.profile, width);
+      return buildTitle(view.profile, width, view.testMode);
     case 'levels':
-      return buildLevels(view.profile, width);
+      return buildLevels(view.profile, width, view.testMode);
     case 'dead':
       return buildDead(view.height, view.goal, view.score, view.cause, view.outcome, width);
     case 'won':

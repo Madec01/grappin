@@ -76,6 +76,7 @@ Décision du propriétaire du 10 octobre 2026 : les traversées en niveaux fixes
 
 - 0.4.0 : dix niveaux fixes et enchaînés, ligne d'arrivée, trois étoiles, course libre à départ avancé, sept motifs de segments, écrans des niveaux et de victoire.
 - 0.4.1 : les six événements validés par le propriétaire : bascule, coup de vent, panne, pluie d'étoiles, alerte, câble. Conception en section 9 ter du GDD.
+- 0.4.2 : mode test (`?test=1`) pour jouer n'importe quel niveau sur un profil à part.
 
 Critère de sortie : le propriétaire enchaîne plusieurs niveaux sans sentiment de répétition, et un niveau perdu se rejoue sans agacement.
 

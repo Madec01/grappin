@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { levelFor, levelProgress, xpToReach } from '../src/meta/levels';
 import { MISSIONS, nextMissions, settleMissions, type RunStats } from '../src/meta/missions';
-import { ACTIVE_MISSIONS, createProfile, endRun, loadProfile, memoryStorage, saveProfile, showsHint, toggleTalisman } from '../src/meta/profile';
+import { ACTIVE_MISSIONS, STORAGE_KEY, TEST_STORAGE_KEY, browserStorage, createProfile, endRun, loadProfile, memoryStorage, saveProfile, showsHint, toggleTalisman } from '../src/meta/profile';
 import { RunTracker } from '../src/meta/runTracker';
 import { TALISMANS, applyTalismans, slotsFor } from '../src/meta/talismans';
 import { Simulation } from '../src/sim/simulation';
@@ -172,5 +172,30 @@ describe('suiveur de partie', () => {
     expect(stats.boosters).toBe(1);
     expect(stats.height).toBe(42);
     expect(stats.seconds).toBeCloseTo(10, 9);
+  });
+});
+
+describe('stockage du navigateur', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('le profil normal et celui du mode test vivent sous deux clés, et un stockage en panne ne casse rien', () => {
+    const items = new Map<string, string>();
+    vi.stubGlobal('window', { localStorage: { getItem: (key: string) => items.get(key) ?? null, setItem: (key: string, value: string) => void items.set(key, value) } });
+    const normal = browserStorage();
+    const test = browserStorage(TEST_STORAGE_KEY);
+    saveProfile(test, { ...createProfile(), xp: 50 });
+    expect(items.has(STORAGE_KEY)).toBe(false);
+    expect(loadProfile(test).xp).toBe(50);
+    expect(loadProfile(normal).xp).toBe(0);
+    saveProfile(normal, { ...createProfile(), xp: 7 });
+    expect(loadProfile(normal).xp).toBe(7);
+    expect(loadProfile(test).xp).toBe(50);
+
+    vi.stubGlobal('window', { localStorage: { getItem: () => { throw new Error('privé'); }, setItem: () => { throw new Error('privé'); } } });
+    const broken = browserStorage();
+    expect(broken.read()).toBeNull();
+    expect(() => saveProfile(broken, createProfile())).not.toThrow();
   });
 });

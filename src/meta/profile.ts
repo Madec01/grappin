@@ -43,7 +43,9 @@ export interface ProfileStorage {
   write(text: string): void;
 }
 
-const STORAGE_KEY = 'grappin.profil';
+/** Clé du profil dans `localStorage`, et celle du profil à part du mode test. */
+export const STORAGE_KEY = 'grappin.profil';
+export const TEST_STORAGE_KEY = 'grappin.profil.test';
 
 export function createProfile(): Profile {
   return {
@@ -59,18 +61,18 @@ export function createProfile(): Profile {
   };
 }
 
-export function browserStorage(): ProfileStorage {
+export function browserStorage(key: string = STORAGE_KEY): ProfileStorage {
   return {
     read: () => {
       try {
-        return window.localStorage.getItem(STORAGE_KEY);
+        return window.localStorage.getItem(key);
       } catch {
         return null;
       }
     },
     write: (text) => {
       try {
-        window.localStorage.setItem(STORAGE_KEY, text);
+        window.localStorage.setItem(key, text);
       } catch {
         // Stockage indisponible, navigation privée par exemple : la partie se joue sans mémoire.
       }

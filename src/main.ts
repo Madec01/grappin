@@ -1,6 +1,6 @@
 import { Game, readSettings, type DebugState } from './app/game';
 import { trackPointer } from './input/pointer';
-import { browserStorage, type Profile } from './meta/profile';
+import { STORAGE_KEY, TEST_STORAGE_KEY, browserStorage, type Profile } from './meta/profile';
 import type { TalismanId } from './meta/talismans';
 import type { ButtonRect } from './render/buttons';
 import { Renderer } from './render/renderer';
@@ -41,7 +41,8 @@ declare global {
 async function start(): Promise<void> {
   const settings = readSettings(window.location.search);
   const renderer = await Renderer.create();
-  const game = new Game(renderer, settings, browserStorage());
+  // Le mode test joue sur son propre profil : la vraie progression n'en sait rien.
+  const game = new Game(renderer, settings, browserStorage(settings.testMode ? TEST_STORAGE_KEY : STORAGE_KEY));
 
   renderer.onFrame((elapsedSeconds) => game.frame(elapsedSeconds));
   trackPointer(renderer.canvas, { onPress: (x, y) => game.press(x, y), onRelease: () => game.release() });
