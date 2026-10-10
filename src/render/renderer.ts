@@ -76,6 +76,11 @@ const ROOF_THICKNESS = 0.4;
 
 /** Épaisseurs de trait, en pixels CSS : des tubes fins, c'est le halo qui fait la lumière. */
 const ROPE_WIDTH = 2;
+/** La corde chauffe avec la vitesse : au-dessus de cette vitesse, elle épaissit (jusqu'à +3 px), son halo se renforce et s'élargit. */
+const ROPE_CALM_SPEED = 4;
+const ROPE_HEAT_WIDTH = 3;
+const ROPE_HEAT_GLOW = 1.4;
+const ROPE_HEAT_SPREAD = 0.9;
 const TARGET_RING_WIDTH = 3;
 const FOG_EDGE_WIDTH = 2;
 const OBSTACLE_EDGE_WIDTH = 2;
@@ -929,7 +934,10 @@ export class Renderer {
     const to = camera.worldToScreen(anchor.pos);
     const drawn = effects.ropeDrawn;
     const tip = { x: from.x + (to.x - from.x) * drawn, y: from.y + (to.y - from.y) * drawn };
-    neonLine(g, from, tip, { color: COLOR.tube, halo: COLOR.tubeHalo, width: ROPE_WIDTH, cap: 'round' });
+    // La vitesse se lit sur la corde : plus le treuil accélère le balancement, plus elle épaissit et brille, jusqu'au plafond du treuil.
+    const speed = Math.hypot(state.hero.vel.x, state.hero.vel.y);
+    const heat = Math.min(1, Math.max(0, (speed - ROPE_CALM_SPEED) / (tuning.reelMaxSpeed - ROPE_CALM_SPEED)));
+    neonLine(g, from, tip, { color: COLOR.tube, halo: COLOR.tubeHalo, width: ROPE_WIDTH + ROPE_HEAT_WIDTH * heat, strength: 1 + ROPE_HEAT_GLOW * heat, spread: 1 + ROPE_HEAT_SPREAD * heat, cap: 'round' });
   }
 
   /**

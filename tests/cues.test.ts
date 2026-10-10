@@ -64,7 +64,8 @@ describe('ombre prédictive', () => {
   it('plafonne la vitesse du lâcher d\'un propulseur comme le fait la simulation', () => {
     const state = flying(hold('booster'), { x: 20, y: 0 });
     const last = shadowPoints(state, DEFAULT_TUNING).at(-1)!;
-    expect(last.x).toBeCloseTo(DEFAULT_TUNING.maxSpeed * DEFAULT_TUNING.shadowSeconds, 9);
+    // Le lâcher d'un propulseur est plafonné par releaseMaxSpeed, pas par la vitesse absolue.
+    expect(last.x).toBeCloseTo(DEFAULT_TUNING.releaseMaxSpeed * DEFAULT_TUNING.shadowSeconds, 9);
   });
 });
 

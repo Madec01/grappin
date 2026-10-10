@@ -222,3 +222,21 @@ describe('mémoire d\'appui', () => {
     expect(withTuning(T, { stepSeconds: 1 / 60 }).stepSeconds).toBe(1 / 60);
   });
 });
+
+describe('plafond du lâcher', () => {
+  it('un lâcher ne part jamais plus vite que releaseMaxSpeed, propulseur compris, et le propulseur dit « Boost »', () => {
+    const sim = new Simulation(3, withTuning(T, { fogBaseSpeed: 0 }));
+    sim.state.anchors = [{ id: 1, pos: { x: 0, y: 10 }, kind: 'normal', broken: false }, { id: 2, pos: { x: 3, y: 30 }, kind: 'booster', broken: false }];
+    sim.state.hero = { pos: { x: 0, y: 6 }, vel: { x: 19, y: 0 }, grounded: false };
+    sim.state.rope = { anchorId: 1, length: 4 };
+    sim.release();
+    expect(Math.hypot(sim.state.hero.vel.x, sim.state.hero.vel.y)).toBeLessThanOrEqual(T.releaseMaxSpeed + 1e-9);
+    expect(sim.drain().some((e) => e.type === 'boost')).toBe(false);
+
+    sim.state.hero = { pos: { x: 3, y: 26 }, vel: { x: 14, y: 0 }, grounded: false };
+    sim.state.rope = { anchorId: 2, length: 4 };
+    sim.release();
+    expect(Math.hypot(sim.state.hero.vel.x, sim.state.hero.vel.y)).toBeCloseTo(T.releaseMaxSpeed, 6);
+    expect(sim.drain().some((e) => e.type === 'boost')).toBe(true);
+  });
+});

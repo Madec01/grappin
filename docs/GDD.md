@@ -163,7 +163,7 @@ Valeurs de départ pour le prototype, à régler à la main sur téléphone. Ell
 | Pas de simulation | 1/120 s |
 | Longueur de corde | distance au moment du tap, bornée par la portée, puis raccourcie par le treuil jusqu'à 1,5 m |
 | Treuil | 3,5 m/s de raccourcissement, 60 % de la conservation du moment cinétique (2,5 et 50 % avant le retour du propriétaire du 9 octobre 2026 : « difficile de prendre de la vitesse ») |
-| Vitesse maximale | 24 m/s |
+| Vitesse maximale | 20 m/s ; le treuil n'accélère pas au-delà de 13 m/s ; un lâcher ne part pas à plus de 16 m/s (retour du propriétaire du 10 octobre 2026 : « la vitesse devient impossible à gérer ») |
 | Portée du grappin | 7 m |
 | Élan minimal à l'accroche, sinon impulsion | 2 m/s tangentiels, impulsion à 3 m/s |
 | Coyote time | 120 ms |

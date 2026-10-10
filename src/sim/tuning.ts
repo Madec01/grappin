@@ -29,6 +29,9 @@ export interface Tuning {
   readonly pressBufferSeconds: number;
   /** Vitesse maximale du personnage, toutes directions. */
   readonly maxSpeed: number;
+  /** Le treuil n'accélère jamais le balancement au-delà de cette vitesse ; un lâcher ne part jamais plus vite que `releaseMaxSpeed`. */
+  readonly reelMaxSpeed: number;
+  readonly releaseMaxSpeed: number;
   /** Sous cette vitesse tangentielle à l'accroche, le jeu donne une impulsion. */
   readonly minSwingSpeed: number;
   /** Vitesse tangentielle donnée par l'impulsion « jamais immobile ». */
@@ -97,7 +100,9 @@ export const DEFAULT_TUNING: Tuning = {
   coyoteReach: 1.2,
   coyoteSeconds: 0.12,
   pressBufferSeconds: 0.15,
-  maxSpeed: 24,
+  maxSpeed: 20,
+  reelMaxSpeed: 13,
+  releaseMaxSpeed: 16,
   minSwingSpeed: 2,
   kickSpeed: 3,
   hangSeconds: 0.5,

@@ -128,3 +128,22 @@ describe('pompage', () => {
     expect(maxSpeed).toBeLessThan(T.swingAssistSpeed + 1);
   });
 });
+
+describe('plafond du treuil', () => {
+  it('le treuil accélère le balancement jusqu\'à reelMaxSpeed, pas au-delà, et ne freine jamais ce qui va déjà plus vite', () => {
+    const anchor = { x: 0, y: 10 };
+    // Au point bas d'une corde de 7 m, 8 m/s de côté : le treuil seul monterait bien plus haut que 13 m/s en raccourcissant à 1,5 m.
+    let body = { pos: { x: 0, y: 3 }, vel: { x: 8, y: 0 } };
+    let rope = 7;
+    for (let i = 0; i < 400; i += 1) {
+      const next = swingStep(body, anchor, rope, DEFAULT_TUNING);
+      body = next.body;
+      rope = next.ropeLength;
+    }
+    const tangential = Math.hypot(body.vel.x, body.vel.y);
+    expect(tangential).toBeLessThanOrEqual(DEFAULT_TUNING.reelMaxSpeed + 1.5);
+    // Déjà au-dessus du plafond : le treuil laisse la vitesse telle quelle (hors gravité).
+    const fast = reelIn({ pos: { x: 0, y: 3 }, vel: { x: 18, y: 0 } }, anchor, 7, 6.9, DEFAULT_TUNING.reelSpin, DEFAULT_TUNING.stepSeconds, DEFAULT_TUNING.reelMaxSpeed);
+    expect(Math.abs(fast.vel.x)).toBeCloseTo(18, 6);
+  });
+});

@@ -2,6 +2,15 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.6.4] — 2026-10-10 — La vitesse se lit et se plafonne
+
+Retour du propriétaire : « des fois la vitesse devient impossible à gérer et on part dans le décor », et oui pour la rendre lisible.
+
+### Modifié
+
+- Le treuil n'accélère jamais le balancement au-delà de 13 m/s (il ne freine pas non plus ce qui va déjà plus vite), et aucun lâcher ne part à plus de 16 m/s, propulseur et lanceur compris ; la vitesse maximale absolue passe de 24 à 20 m/s.
+- La corde montre la vitesse : au-dessus de 4 m/s elle épaissit (jusqu'à +3 px), son halo se renforce et s'élargit, au maximum au plafond du treuil. L'ombre prédictive suit le lâcher plafonné.
+
 ## [0.6.3] — 2026-10-10 — Plus d'étoile au-dessus de l'arrivée
 
 ### Corrigé

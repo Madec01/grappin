@@ -70,7 +70,7 @@ export function integrate(body: Body, anchor: Vec2 | null, ropeLength: number, t
  * un pendule ne monte jamais plus haut que son élan de départ. Si la corde est
  * molle, rien ne change : elle se tendra plus tard.
  */
-export function reelIn(body: Body, anchor: Vec2, oldLength: number, newLength: number, spin: number, dt: number): Body {
+export function reelIn(body: Body, anchor: Vec2, oldLength: number, newLength: number, spin: number, dt: number, maxSpin = Infinity): Body {
   if (newLength >= oldLength) return body;
   const r = sub(body.pos, anchor);
   const d = length(r);
@@ -80,7 +80,10 @@ export function reelIn(body: Body, anchor: Vec2, oldLength: number, newLength: n
   const radial = dot(body.vel, n);
   const along = dot(body.vel, t);
   const pulled = -(oldLength - newLength) / dt;
-  const spun = along * (1 + spin * (oldLength / newLength - 1));
+  // Le treuil accélère, mais jamais au-delà de `maxSpin` : ce qu'il ne gagne pas, il ne le retire pas non plus.
+  const gained = along * (1 + spin * (oldLength / newLength - 1));
+  const cap = Math.max(Math.abs(along), maxSpin);
+  const spun = Math.abs(gained) > cap ? (gained < 0 ? -cap : cap) : gained;
   const vel = add(scale(n, radial < pulled ? radial : pulled), scale(t, spun));
   return { pos: body.pos, vel };
 }
@@ -119,7 +122,7 @@ export function swingAssist(body: Body, anchor: Vec2, ropeLength: number, tuning
 export function swingStep(body: Body, anchor: Vec2, ropeLength: number, tuning: Tuning, env: Environment = STILL): { body: Body; ropeLength: number } {
   const assisted = swingAssist(body, anchor, ropeLength, tuning, env);
   const shorter = Math.max(tuning.ropeMin, ropeLength - tuning.reelSpeed * tuning.stepSeconds);
-  const pulled = reelIn(assisted, anchor, ropeLength, shorter, tuning.reelSpin, tuning.stepSeconds);
+  const pulled = reelIn(assisted, anchor, ropeLength, shorter, tuning.reelSpin, tuning.stepSeconds, tuning.reelMaxSpeed);
   return { body: integrate(pulled, anchor, shorter, tuning, env), ropeLength: shorter };
 }
 

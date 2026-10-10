@@ -155,9 +155,10 @@ export function multiplier(combo: number, tuning: Tuning): number {
  */
 export function releaseVelocity(state: SwingContext, tuning: Tuning): Vec2 {
   const anchor = state.rope ? findAnchor(state, state.rope.anchorId) : undefined;
-  if (anchor?.kind === 'lanceur') return launchVelocity(state.pull ?? { x: 0, y: 0 }, state.env ?? STILL);
-  if (anchor?.kind !== 'booster') return state.hero.vel;
-  return clampLength(scale(state.hero.vel, tuning.boostFactor), tuning.maxSpeed);
+  // Un lâcher ne part jamais plus vite que `releaseMaxSpeed` : retour du propriétaire, « la vitesse devient impossible à gérer ».
+  if (anchor?.kind === 'lanceur') return clampLength(launchVelocity(state.pull ?? { x: 0, y: 0 }, state.env ?? STILL), tuning.releaseMaxSpeed);
+  if (anchor?.kind === 'booster') return clampLength(scale(state.hero.vel, tuning.boostFactor), tuning.releaseMaxSpeed);
+  return clampLength(state.hero.vel, tuning.releaseMaxSpeed);
 }
 
 /** Libère le personnage avec la vitesse du moment. Renvoie vrai si une corde a été lâchée. `forced` : la casse a lâché le personnage. */
@@ -167,12 +168,8 @@ export function release(state: SimState, tuning: Tuning, events: RuleEvent[], fo
   if (!state.rope) return false;
   const kind = findAnchor(state, state.rope.anchorId)?.kind ?? 'normal';
   const held = (state.step - state.attachStep) * tuning.stepSeconds;
-  const boosted = releaseVelocity(state, tuning);
-  if (boosted !== state.hero.vel) {
-    state.hero.vel = boosted;
-    // Un lancer n'est pas un coup de propulseur : pas de « Boost ».
-    if (kind !== 'lanceur') events.push({ type: 'boost' });
-  }
+  state.hero.vel = releaseVelocity(state, tuning);
+  if (kind === 'booster') events.push({ type: 'boost' });
   // Un lancer ne se juge pas : la série de parfaits reste ce qu'elle est.
   const perfect = kind !== 'lanceur' && isPerfectRelease(state.hero.vel.x, state.hero.vel.y, tuning, state.env);
   if (kind !== 'lanceur') state.combo = perfect ? state.combo + 1 : 0;
