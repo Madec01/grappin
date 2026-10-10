@@ -193,7 +193,8 @@ async function main(): Promise<void> {
 
     // Le mode test : le titre qui le dit, puis la liste des niveaux tous ouverts, avec leurs événements.
     const testPage = await context.newPage();
-    await testPage.goto(`http://localhost:${PORT}/?test=1`);
+    // Brume lente pour la course libre de la zone haute, où le pilote meurt vite ; un niveau garde sa propre brume.
+    await testPage.goto(`http://localhost:${PORT}/?test=1&fogBaseSpeed=0.12`);
     await testPage.waitForFunction(() => window.__grappin?.state().screen === 'title');
     await testPage.waitForTimeout(300);
     await testPage.screenshot({ path: join(outDir, '17-mode-test-titre.png') });
