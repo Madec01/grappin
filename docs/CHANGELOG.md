@@ -2,6 +2,15 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.6.5] — 2026-10-10 — Une ambiance de couleurs par famille de musique
+
+Demande du propriétaire : « des jeux de couleurs en fonction des musiques ».
+
+### Ajouté
+
+- Cinq ambiances, une par famille de pistes : Cyan nuit (biome 1 : niveaux 1, 2, 11, 12, et le titre), Indigo (biome 2 : 3, 4, 13, 14), Glace (biome 3 : 5, 6, 15, 16), Lime (biome 4 : 7, 8, 17, 19), Braise (boss : 9, 10, 18, 20). L'ambiance change le fond, les lignes d'altitude, les silhouettes, le tube des points normaux, la corde, le personnage, la brume et l'accent de l'interface, avec un fondu d'une seconde ; en course libre elle suit la zone traversée, musique coupée ou non.
+- Ce qui porte un sens ne change jamais : étoiles jaunes, fragile magenta, propulseur cyan vif, électrique orange puis rouge, éclipse violette, lanceur vert d'eau, dangers rouge-magenta.
+
 ## [0.6.4] — 2026-10-10 — La vitesse se lit et se plafonne
 
 Retour du propriétaire : « des fois la vitesse devient impossible à gérer et on part dans le décor », et oui pour la rendre lisible.
