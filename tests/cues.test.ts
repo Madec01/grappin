@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { levelById } from '../src/data/levels';
 import { levelPlan } from '../src/meta/traversee';
-import { SHADOW_POINTS, fragileGauge, isDark, shadowPoints, windSide } from '../src/render/cues';
+import { SHADOW_POINTS, fragileGauge, isDark, isOff, shadowPoints, windSide } from '../src/render/cues';
+import { ECLIPSE_LIT_SECONDS, ECLIPSE_PERIOD_SECONDS, isLit } from '../src/sim/cycles';
 import { STILL } from '../src/sim/environment';
 import { LIGHT_OFF_SECONDS, LIGHT_PERIOD_SECONDS, lightIsOff } from '../src/sim/events';
 import { freeFlightAt } from '../src/sim/physics';
@@ -136,6 +137,59 @@ describe('lampadaires éteints', () => {
       if (isDark(state, id, DEFAULT_TUNING)) dark += 1;
     }
     expect(dark / steps).toBeCloseTo(LIGHT_OFF_SECONDS / LIGHT_PERIOD_SECONDS, 2);
+  });
+});
+
+describe('tubes éteints', () => {
+  /** Une accroche de l'espèce donnée dans un état tout neuf. */
+  const anchorOf = (kind: AnchorKind) => {
+    const state = new Simulation(3).state;
+    return { state, anchor: { ...state.anchors[0]!, kind } };
+  };
+
+  it('une accroche ordinaire n\'est éteinte que par la panne', () => {
+    const { state, anchor } = anchorOf('normal');
+    expect(isOff(state, anchor, DEFAULT_TUNING)).toBe(false);
+    state.lightsOff = true;
+    for (let step = 0; step < 1000; step += 25) {
+      state.step = step;
+      expect(isOff(state, anchor, DEFAULT_TUNING)).toBe(isDark(state, anchor.id, DEFAULT_TUNING));
+    }
+  });
+
+  it('une prise à éclipse est éteinte hors de son cycle, allumée dedans, sans panne', () => {
+    const { state, anchor } = anchorOf('eclipse');
+    const steps = Math.round(ECLIPSE_PERIOD_SECONDS / DEFAULT_TUNING.stepSeconds);
+    let off = 0;
+    for (let step = 0; step < steps; step += 1) {
+      state.step = step;
+      expect(isOff(state, anchor, DEFAULT_TUNING)).toBe(!isLit(anchor.id, step, DEFAULT_TUNING));
+      if (isOff(state, anchor, DEFAULT_TUNING)) off += 1;
+    }
+    expect(off / steps).toBeCloseTo(1 - ECLIPSE_LIT_SECONDS / ECLIPSE_PERIOD_SECONDS, 2);
+  });
+
+  it('une prise électrique n\'a pas de cycle de lumière : seule la panne l\'éteint', () => {
+    const { state, anchor } = anchorOf('electrique');
+    for (let step = 0; step < 1000; step += 25) {
+      state.step = step;
+      expect(isOff(state, anchor, DEFAULT_TUNING)).toBe(false);
+    }
+  });
+
+  it('la panne éteint aussi une prise à éclipse allumée', () => {
+    const { state, anchor } = anchorOf('eclipse');
+    state.lightsOff = true;
+    let checked = 0;
+    for (let step = 0; step < 1000; step += 5) {
+      state.step = step;
+      if (isLit(anchor.id, step, DEFAULT_TUNING) && isDark(state, anchor.id, DEFAULT_TUNING)) {
+        expect(isOff(state, anchor, DEFAULT_TUNING)).toBe(true);
+        checked += 1;
+      }
+    }
+    // Le cas se présente : l'éclipse allumée et le lampadaire dans le noir se recouvrent.
+    expect(checked).toBeGreaterThan(0);
   });
 });
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   ALERT_BLINK_HZ,
   BANNER_SECONDS,
@@ -8,11 +8,17 @@ import {
   INTRO_SECONDS,
   ROPE_DRAW_SECONDS,
   WIND_STREAKS,
+  FLICKER_HZ,
+  SIZZLE_HZ,
   alertAlpha,
   bannerAlpha,
+  flicker,
   floatAlpha,
   floatRise,
   floatingTextFor,
+  noise,
+  pulse,
+  sizzle,
 } from '../src/render/effects';
 import { formatDecimal } from '../src/render/format';
 import type { RuleEvent } from '../src/sim/state';
@@ -376,5 +382,79 @@ describe('traînées du coup de vent', () => {
     for (let frame = 0; frame < 600; frame += 1) effects.update(1 / 60, 3);
     for (const streak of effects.windStreaks) heights.add(streak.y);
     expect(heights.size).toBe(2 * WIND_STREAKS);
+  });
+});
+
+describe('ondes des tubes de néon', () => {
+  it('la pulsation oscille de `min` à 1, au rythme demandé', () => {
+    let low = 1;
+    let high = 0;
+    for (let t = 0; t < 2; t += 0.001) {
+      const value = pulse(t, 2.5, 0.3);
+      low = Math.min(low, value);
+      high = Math.max(high, value);
+      expect(pulse(t + 0.4, 2.5, 0.3)).toBeCloseTo(value, 9);
+    }
+    expect(low).toBeCloseTo(0.3, 3);
+    expect(high).toBeCloseTo(1, 3);
+    expect(pulse(0, 1)).toBeGreaterThanOrEqual(0.55);
+  });
+
+  it('le bruit est une empreinte : dans [0, 1), toujours la même pour le même entier, jamais constante', () => {
+    const values = Array.from({ length: 200 }, (_, n) => noise(n));
+    expect(values.every((value) => value >= 0 && value < 1)).toBe(true);
+    expect(values.map((_, n) => noise(n))).toEqual(values);
+    expect(new Set(values).size).toBeGreaterThan(190);
+    expect(values.reduce((sum, value) => sum + value, 0) / values.length).toBeGreaterThan(0.4);
+    expect(values.reduce((sum, value) => sum + value, 0) / values.length).toBeLessThan(0.6);
+  });
+
+  it('le bruit ne tire jamais au hasard', () => {
+    const spy = vi.spyOn(Math, 'random');
+    for (let n = 0; n < 50; n += 1) {
+      noise(n);
+      sizzle(n / 7, n);
+      flicker(n / 7, n);
+    }
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('le grésillement est allumé une bonne part du temps, par à-coups, et décalé d\'une prise à l\'autre', () => {
+    const SECONDS = 20;
+    let on = 0;
+    let changes = 0;
+    let previous = sizzle(0, 3);
+    const slots = SECONDS * SIZZLE_HZ;
+    for (let slot = 0; slot < slots; slot += 1) {
+      // Au milieu de chaque à-coup : constant tout du long.
+      const t = (slot + 0.5) / SIZZLE_HZ;
+      const value = sizzle(t, 3);
+      expect(sizzle(t + 0.4 / SIZZLE_HZ, 3)).toBe(value);
+      if (value) on += 1;
+      if (value !== previous) changes += 1;
+      previous = value;
+    }
+    expect(on / slots).toBeGreaterThan(0.45);
+    expect(on / slots).toBeLessThan(0.75);
+    // Ça saute : bien plus d'un changement par seconde.
+    expect(changes).toBeGreaterThan(SECONDS * 4);
+    let different = 0;
+    for (let slot = 0; slot < slots; slot += 1) {
+      const t = (slot + 0.5) / SIZZLE_HZ;
+      if (sizzle(t, 3) !== sizzle(t, 8)) different += 1;
+    }
+    expect(different).toBeGreaterThan(slots / 5);
+  });
+
+  it('le scintillement reste entre `min` et 1 et saute au rythme de FLICKER_HZ', () => {
+    for (let slot = 0; slot < 100; slot += 1) {
+      const t = (slot + 0.5) / FLICKER_HZ;
+      const value = flicker(t, 5, 0.4);
+      expect(value).toBeGreaterThanOrEqual(0.4);
+      expect(value).toBeLessThan(1);
+      expect(flicker(t + 0.3 / FLICKER_HZ, 5, 0.4)).toBe(value);
+    }
+    expect(flicker(0.3, 1)).not.toBe(flicker(0.3, 2));
   });
 });

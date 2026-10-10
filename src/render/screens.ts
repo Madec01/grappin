@@ -7,12 +7,15 @@ import { TALISMANS, slotsFor, type Talisman } from '../meta/talismans';
 import { starsOf, unlockedLevel, type LevelResult } from '../meta/traversee';
 import { levelButton, type ButtonId, type ButtonRect } from './buttons';
 import { type StarLine, equippedLine, levelEvents, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, slotsLine, starLines } from './labels';
+import { neonBar, neonPoly, neonPolyline, neonRoundRect } from './neon';
 import { COLOR, makeText, readSafeInset, starPoints } from './style';
 
 /**
  * Les écrans posés sur le jeu : titre, liste des niveaux, fin de partie,
- * victoire et talismans. Un voile sombre, des textes et des formes grises,
- * rien d'autre.
+ * victoire et talismans. Un voile nuit, des textes blancs, des formes à contour
+ * néon fin : boutons, lignes équipées, étoiles, barre d'expérience. Un écran
+ * n'est dessiné qu'une fois par vue et par taille d'écran : ses halos ne
+ * coûtent rien à l'image.
  *
  * Chaque écran est fait de deux blocs empilés : celui du haut (l'information)
  * et celui du bas (le bouton et l'invite), collé au bas de l'écran pour rester
@@ -58,7 +61,7 @@ const DENSE_VIEWS: ReadonlySet<OverlayView['kind']> = new Set(['talismans', 'lev
 const BUTTON_WIDTH = 220;
 const BUTTON_HEIGHT = 56;
 const BUTTON_RADIUS = 12;
-const BUTTON_EDGE_WIDTH = 2;
+const BUTTON_EDGE_WIDTH = 1.5;
 const BUTTON_FONT_SIZE = 22;
 
 const BAR_WIDTH = 220;
@@ -99,19 +102,25 @@ const LOCK_SHACKLE_INSET = 3.5;
 
 const HINT = "Garde le doigt posé pour prendre de l'élan, relâche en montant";
 
-/** Une étoile du jeu, pleine si elle est gagnée, creuse sinon. */
+/** Portée du halo des éléments d'interface : plus courte que celle du jeu, pour ne pas déborder sur le texte voisin. */
+const UI_SPREAD = 0.6;
+/** Force du halo des boutons et des lignes allumées : un cran sous celle du jeu, pour que le texte reste le plus lumineux. */
+const UI_STRENGTH = 0.8;
+
+/** Une étoile du jeu : un tube jaune à halo chaud si elle est gagnée, un contour éteint sinon. */
 function drawStar(g: Graphics, x: number, y: number, radius: number, filled: boolean): void {
-  const shape = g.poly(starPoints(x, y, radius));
-  if (filled) shape.fill(COLOR.star);
-  else shape.fill(COLOR.barTrack).stroke({ width: STAR_EMPTY_EDGE_WIDTH, color: COLOR.textLocked });
+  if (filled) neonPoly(g, (grow) => starPoints(x, y, radius + grow), { color: COLOR.star, halo: COLOR.starHalo, spread: UI_SPREAD });
+  else g.poly(starPoints(x, y, radius)).fill(COLOR.barTrack).stroke({ width: STAR_EMPTY_EDGE_WIDTH, color: COLOR.textLocked });
 }
 
-/** Une coche de la largeur `size`, dont le coin haut gauche est en (`x`, `y`). */
+/** Une coche de la largeur `size`, dont le coin haut gauche est en (`x`, `y`) : un trait de tube cyan. */
 function drawCheck(g: Graphics, x: number, y: number, size: number): void {
-  g.moveTo(x, y + size * 0.55)
-    .lineTo(x + size * 0.38, y + size * 0.9)
-    .lineTo(x + size, y)
-    .stroke({ width: 3, color: COLOR.text, cap: 'round', join: 'round' });
+  const points = [
+    { x, y: y + size * 0.55 },
+    { x: x + size * 0.38, y: y + size * 0.9 },
+    { x: x + size, y },
+  ];
+  neonPolyline(g, points, { color: COLOR.tube, halo: COLOR.tubeHalo, width: 3, cap: 'round', join: 'round', spread: UI_SPREAD });
 }
 
 /** Un cadenas, dont le coin haut gauche est en (`x`, `y`). */
@@ -145,21 +154,21 @@ class Column {
     this.cursor += pixels;
   }
 
-  /** Texte centré, qui passe à la ligne s'il dépasse la largeur du bloc. */
-  line(text: string, size: number, color: number, bold = false): void {
-    const label = makeText(text, size, color, { bold, wrap: this.width });
+  /** Texte centré, qui passe à la ligne s'il dépasse la largeur du bloc. `glow` : la couleur d'un halo de néon autour des lettres, pour les titres. */
+  line(text: string, size: number, color: number, bold = false, glow?: number): void {
+    const label = makeText(text, size, color, { bold, wrap: this.width, ...(glow === undefined ? {} : { glow }) });
     label.anchor.set(0.5, 0);
     label.position.set(this.width / 2, this.cursor);
     this.root.addChild(label);
     this.cursor += label.height;
   }
 
-  /** Barre d'expérience : fond gris, remplissage clair sur la part `ratio`. */
+  /** Barre d'expérience : un rail sombre, et un tube cyan sur la part `ratio`. */
   bar(ratio: number): void {
     const x = (this.width - BAR_WIDTH) / 2;
     const g = new Graphics().roundRect(x, this.cursor, BAR_WIDTH, BAR_HEIGHT, BAR_HEIGHT / 2).fill(COLOR.barTrack);
     const filled = BAR_WIDTH * Math.min(1, Math.max(0, ratio));
-    if (filled > 0) g.roundRect(x, this.cursor, filled, BAR_HEIGHT, BAR_HEIGHT / 2).fill(COLOR.barFill);
+    if (filled > 0) neonBar(g, x, this.cursor, filled, BAR_HEIGHT, { color: COLOR.barFill, halo: COLOR.tubeHalo, spread: UI_SPREAD });
     this.root.addChild(g);
     this.cursor += BAR_HEIGHT;
   }
@@ -175,19 +184,33 @@ class Column {
     this.cursor += Math.max(label.height, done.height);
   }
 
-  /** Bouton centré, à bord clair. */
+  /** Bouton centré, sur fond nuit, au contour de néon fin. */
   button(id: ButtonId, label: string): void {
     const x = (this.width - BUTTON_WIDTH) / 2;
-    const g = new Graphics()
-      .roundRect(x, this.cursor, BUTTON_WIDTH, BUTTON_HEIGHT, BUTTON_RADIUS)
-      .fill({ color: COLOR.panel, alpha: 0.9 })
-      .stroke({ width: BUTTON_EDGE_WIDTH, color: COLOR.buttonEdge });
+    const g = new Graphics().roundRect(x, this.cursor, BUTTON_WIDTH, BUTTON_HEIGHT, BUTTON_RADIUS).fill({ color: COLOR.panel, alpha: 0.9 });
+    neonRoundRect(g, x, this.cursor, BUTTON_WIDTH, BUTTON_HEIGHT, BUTTON_RADIUS, { color: COLOR.buttonEdge, halo: COLOR.tubeHalo, width: BUTTON_EDGE_WIDTH, spread: UI_SPREAD, strength: UI_STRENGTH });
     const text = makeText(label, BUTTON_FONT_SIZE, COLOR.text, { bold: true });
     text.anchor.set(0.5);
     text.position.set(this.width / 2, this.cursor + BUTTON_HEIGHT / 2);
     this.root.addChild(g, text);
     this.buttons.push({ id, x, y: this.cursor, width: BUTTON_WIDTH, height: BUTTON_HEIGHT });
     this.cursor += BUTTON_HEIGHT;
+  }
+
+  /**
+   * Fond d'une ligne : verrouillée, un voile à peine visible ; au repos, un
+   * contour bleu sombre ; allumée (talisman équipé, niveau à jouer), un contour
+   * de néon cyan. `g` porte déjà le rectangle arrondi de la ligne, posée au
+   * curseur.
+   */
+  private paintRow(g: Graphics, height: number, look: 'locked' | 'idle' | 'lit'): void {
+    const top = this.cursor;
+    if (look === 'locked') g.fill({ color: COLOR.panel, alpha: 0.3 });
+    else if (look === 'idle') g.fill({ color: COLOR.panel, alpha: 0.6 }).stroke({ width: ROW_EDGE_WIDTH, color: COLOR.panelEdge });
+    else {
+      g.fill({ color: COLOR.panelEquipped, alpha: 0.95 });
+      neonRoundRect(g, 0, top, this.width, height, ROW_RADIUS, { color: COLOR.panelEdgeEquipped, halo: COLOR.tubeHalo, width: ROW_EDGE_WIDTH, spread: UI_SPREAD, strength: UI_STRENGTH });
+    }
   }
 
   /**
@@ -207,9 +230,7 @@ class Column {
 
     const height = Math.max(ROW_MIN_HEIGHT, description.y + description.height + ROW_PADDING - this.cursor);
     const background = new Graphics().roundRect(0, this.cursor, this.width, height, ROW_RADIUS);
-    if (locked) background.fill({ color: COLOR.panel, alpha: 0.3 });
-    else if (equipped) background.fill({ color: COLOR.panelEquipped, alpha: 0.95 }).stroke({ width: ROW_EDGE_WIDTH, color: COLOR.panelEdgeEquipped });
-    else background.fill({ color: COLOR.panel, alpha: 0.6 }).stroke({ width: ROW_EDGE_WIDTH, color: COLOR.panelEdge });
+    this.paintRow(background, height, locked ? 'locked' : equipped ? 'lit' : 'idle');
 
     this.root.addChild(background, name, description);
     if (tag) this.root.addChild(tag);
@@ -246,9 +267,7 @@ class Column {
     range.position.set(ROW_PADDING, name.y + name.height);
 
     const background = new Graphics().roundRect(0, this.cursor, this.width, LEVEL_ROW_HEIGHT, ROW_RADIUS);
-    if (locked) background.fill({ color: COLOR.panel, alpha: 0.3 });
-    else if (current) background.fill({ color: COLOR.panelEquipped, alpha: 0.95 }).stroke({ width: ROW_EDGE_WIDTH, color: COLOR.panelEdgeEquipped });
-    else background.fill({ color: COLOR.panel, alpha: 0.6 }).stroke({ width: ROW_EDGE_WIDTH, color: COLOR.panelEdge });
+    this.paintRow(background, LEVEL_ROW_HEIGHT, locked ? 'locked' : current ? 'lit' : 'idle');
 
     const shapes = new Graphics();
     const middle = this.cursor + LEVEL_ROW_HEIGHT / 2;
@@ -295,7 +314,7 @@ interface Layout {
 function buildTitle(profile: Profile, width: number, testMode: boolean): Layout {
   const upper = new Column(width);
   const progress = levelProgress(profile.xp);
-  upper.line('GRAPPIN', 56, COLOR.text, true);
+  upper.line('GRAPPIN', 56, COLOR.text, true, COLOR.tubeHalo);
   if (testMode) {
     upper.gap(6);
     upper.line(TEST_MODE_LINE, 15, COLOR.textDim);
@@ -350,7 +369,7 @@ function buildTitle(profile: Profile, width: number, testMode: boolean): Layout 
 function buildLevels(profile: Profile, width: number, testMode: boolean): Layout {
   const current = unlockedLevel(profile);
   const upper = new Column(width);
-  upper.line('Niveaux', 34, COLOR.text, true);
+  upper.line('Niveaux', 34, COLOR.text, true, COLOR.tubeHalo);
   if (testMode) {
     upper.gap(4);
     upper.line(TEST_MODE_LINE, 15, COLOR.textDim);
@@ -391,7 +410,7 @@ function describeOutcome(upper: Column, score: number, outcome: RunOutcome, news
   }
   if (outcome.levelAfter > outcome.levelBefore) {
     upper.gap(18);
-    upper.line(`Niveau ${outcome.levelAfter} !`, 30, COLOR.text, true);
+    upper.line(`Niveau ${outcome.levelAfter} !`, 30, COLOR.text, true, COLOR.tubeHalo);
     for (const talisman of outcome.unlocked) {
       upper.gap(6);
       upper.line(`Débloqué : ${talisman.name}`, 20, COLOR.text);
@@ -401,7 +420,7 @@ function describeOutcome(upper: Column, score: number, outcome: RunOutcome, news
 
 function buildDead(height: number, goal: number | null, score: number, cause: string, outcome: RunOutcome, width: number): Layout {
   const upper = new Column(width);
-  upper.line(`Perdu à ${Math.floor(height)} m`, 38, COLOR.text, true);
+  upper.line(`Perdu à ${Math.floor(height)} m`, 38, COLOR.text, true, COLOR.obstacleEdge);
   upper.gap(6);
   upper.line(cause, 22, COLOR.textDim);
   if (goal !== null) {
@@ -423,7 +442,7 @@ function buildDead(height: number, goal: number | null, score: number, cause: st
 function buildWon(score: number, outcome: LevelOutcome, result: LevelResult, width: number): Layout {
   const next = levelById(outcome.level.id + 1);
   const upper = new Column(width);
-  upper.line('Niveau terminé !', 38, COLOR.text, true);
+  upper.line('Niveau terminé !', 38, COLOR.text, true, COLOR.tubeHalo);
   upper.gap(6);
   upper.line(levelTitle(outcome.level), 22, COLOR.textDim);
   upper.gap(18);
@@ -448,7 +467,7 @@ function buildWon(score: number, outcome: LevelOutcome, result: LevelResult, wid
 function buildTalismans(profile: Profile, width: number): Layout {
   const level = levelFor(profile.xp);
   const upper = new Column(width);
-  upper.line('Talismans', 34, COLOR.text, true);
+  upper.line('Talismans', 34, COLOR.text, true, COLOR.tubeHalo);
   upper.gap(6);
   upper.line(slotsLine(slotsFor(level), profile.equipped.length), 16, COLOR.textDim);
   upper.gap(20);

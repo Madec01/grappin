@@ -46,7 +46,9 @@ src/
   render/style.ts       Palette, police, fabrique de textes, marges d'encoche
   render/labels.ts      Textes purs des écrans : avancement d'une mission, talismans équipés, emplacements
   render/screens.ts     Écrans titre, fin et talismans, voile, boutons et leurs rectangles
-  render/renderer.ts    Dessin PixiJS en formes grises, interface, délégation des écrans
+  render/renderer.ts    Dessin PixiJS en tubes de néon, interface, délégation des écrans
+  render/neon.ts        Les halos : une forme tracée trois fois, par lots de même couleur, sans filtre
+  render/city.ts        Silhouettes de ville pures, déterministes par bande de vingt mètres
   app/game.ts           Écrans, accumulateur de temps, réglages depuis l'adresse, état de débogage
   main.ts               Démarrage et point d'accès window.__grappin
 scripts/robot.ts        Mesure d'un réglage par les robots joueurs, en ligne de commande

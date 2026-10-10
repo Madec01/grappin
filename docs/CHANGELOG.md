@@ -2,6 +2,17 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.5.2] — 2026-10-10 — Style néon
+
+Décision du propriétaire : « on va garder ce style minimaliste et en faire un style néon ». Les formes restent, la lumière change.
+
+### Modifié
+
+- Palette néon sur fond nuit : tube blanc froid à halo cyan pour les points, la corde, le personnage et l'anneau de visée ; étoiles jaunes ; fragiles magenta qui grésillent ; propulseurs cyan à chevrons qui scintillent ; prises électriques orange, qui grésillent quand elles avertissent et passent au rouge quand elles sont chargées ; prises à éclipse violettes, réduites à une trace sombre quand elles sont éteintes ; obstacles sombres cernés de rouge-magenta ; brume bleu-violet à crête lumineuse ; câbles et traversières en rail cyan.
+- Halos sans filtre : chaque forme est tracée trois fois (deux halos puis le cœur), par lots de même couleur ; seuls les éléments à l'écran sont dessinés. Mesuré en rendu logiciel à parité avec l'ancien rendu sur les scènes de jeu ; à mesurer sur un vrai téléphone.
+- Nouveaux : bords de la ville à ± 14 m en tube rouge sombre, visibles au dézoom et pendant la bascule ; silhouettes de toits et d'antennes en contour fin sur les côtés, déterministes par bande de vingt mètres ; anneau de visée qui s'allume en se resserrant, anneau qui pulse sur le point tenu ; titres, bannières et boutons à halo.
+- Page HTML et couleur de thème au même fond nuit.
+
 ## [0.5.1] — 2026-10-10 — Prise électrique et prise à éclipse
 
 Les deux dernières idées de prises du propriétaire, validées le 10 octobre 2026.

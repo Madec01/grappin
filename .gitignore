@@ -9,6 +9,7 @@ dist/
 
 # Tests et rapports
 coverage/
+.vitest/
 playwright-report/
 test-results/
 

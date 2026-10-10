@@ -1,4 +1,5 @@
 import type { Vec2 } from '../core/math/vec2';
+import { isLit } from '../sim/cycles';
 import { freeFlightAt } from '../sim/physics';
 import { lightIsOff } from '../sim/events';
 import { releaseVelocity } from '../sim/rules';
@@ -7,8 +8,8 @@ import type { Tuning } from '../sim/tuning';
 
 /**
  * Repères visuels calculés à partir de l'état : l'ombre prédictive, l'usure
- * d'une accroche fragile, les lampadaires éteints par la panne et le côté du
- * vent. Fonctions pures, sans PixiJS ni temps réel : le rendu les lit, il ne
+ * d'une accroche fragile, les lampadaires éteints par la panne, les tubes
+ * éteints (panne ou éclipse) et le côté du vent. Fonctions pures, sans PixiJS ni temps réel : le rendu les lit, il ne
  * les décide pas.
  */
 
@@ -58,6 +59,16 @@ export function fragileGauge(state: SimState, tuning: Tuning): FragileGauge | nu
 /** Vrai si le lampadaire de l'accroche `anchorId` est éteint en ce moment : la panne est en cours et sa vague le tient dans le noir. */
 export function isDark(state: SimState, anchorId: number, tuning: Tuning): boolean {
   return state.lightsOff && lightIsOff(anchorId, state.step, tuning);
+}
+
+/**
+ * Le tube de cette accroche est-il éteint en ce moment ? Un lampadaire que la
+ * panne tient dans le noir, ou une prise à éclipse hors de son cycle : le rendu
+ * n'en laisse que la trace sombre d'un néon coupé. Éteint ne veut pas dire
+ * inaccrochable : la panne laisse le point accrochable, seule l'éclipse le refuse.
+ */
+export function isOff(state: SimState, anchor: Anchor, tuning: Tuning): boolean {
+  return isDark(state, anchor.id, tuning) || (anchor.kind === 'eclipse' && !isLit(anchor.id, state.step, tuning));
 }
 
 /**

@@ -7,8 +7,9 @@ import { formatDecimal } from './format';
 
 /**
  * Effets de temps réel : textes flottants, bannière (palier, intro d'un
- * niveau ou événement), animation du trait du grappin, traînées du vent et
- * horloge du clignotement de l'alerte.
+ * niveau ou événement), animation du trait du grappin, traînées du vent,
+ * horloge du clignotement de l'alerte, et les ondes qui font vivre les tubes
+ * de néon (pulsation, grésillement, scintillement).
  *
  * Tout ce qui dure un peu de temps réel à l'écran vit ici, jamais dans la
  * simulation. Le jeu y verse les événements de règles et le temps écoulé ; le
@@ -119,6 +120,39 @@ export function bannerAlpha(age: number, seconds = BANNER_SECONDS): number {
 export function alertAlpha(seconds: number): number {
   const wave = 0.5 + 0.5 * Math.sin(2 * Math.PI * ALERT_BLINK_HZ * seconds);
   return ALERT_ALPHA_MIN + (ALERT_ALPHA_MAX - ALERT_ALPHA_MIN) * wave;
+}
+
+/** Pulsation douce d'un halo : de `min` à 1, `hz` fois par seconde, à l'instant `seconds` de l'horloge des effets. */
+export function pulse(seconds: number, hz: number, min = 0.55): number {
+  const wave = 0.5 + 0.5 * Math.sin(2 * Math.PI * hz * seconds);
+  return min + (1 - min) * wave;
+}
+
+/** Bruit déterministe dans [0, 1) d'un entier : une empreinte, la même sur tout moteur, jamais `Math.random`. */
+export function noise(n: number): number {
+  let h = Math.imul(n | 0, 0x9e3779b1) ^ 0x85ebca6b;
+  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
+  h = Math.imul(h ^ (h >>> 12), 0x297a2d39);
+  return ((h ^ (h >>> 15)) >>> 0) / 4294967296;
+}
+
+/** Rapidité du grésillement et du scintillement des tubes : à-coups par seconde. */
+export const SIZZLE_HZ = 16;
+export const FLICKER_HZ = 20;
+/** Part du temps où un tube qui grésille est allumé. */
+const SIZZLE_ON = 0.6;
+
+/**
+ * Grésillement d'un tube qui avertit : allumé ou non, par à-coups irréguliers
+ * de 1/16 s. `seed` (le numéro de la prise) décale les prises les unes des autres.
+ */
+export function sizzle(seconds: number, seed: number): boolean {
+  return noise(Math.floor(seconds * SIZZLE_HZ) * 31 + seed * 7919) < SIZZLE_ON;
+}
+
+/** Scintillement d'un tube vivant : une opacité entre `min` et 1, qui saute `FLICKER_HZ` fois par seconde, décalée selon `seed`. */
+export function flicker(seconds: number, seed: number, min = 0.55): number {
+  return min + (1 - min) * noise(Math.floor(seconds * FLICKER_HZ) * 17 + seed * 104729);
 }
 
 /** Texte que ce que vient de dire la simulation fait flotter près du personnage, ou null s'il n'y en a pas. */
