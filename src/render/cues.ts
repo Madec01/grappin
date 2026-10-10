@@ -3,7 +3,7 @@ import { isLit } from '../sim/cycles';
 import { freeFlightAt } from '../sim/physics';
 import { lightIsOff } from '../sim/events';
 import { releaseVelocity } from '../sim/rules';
-import type { Anchor, SimState } from '../sim/state';
+import type { Anchor, AnchorKind, SimState } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
 
 /**
@@ -22,18 +22,23 @@ function heldAnchor(state: SimState): Anchor | undefined {
   return rope ? state.anchors.find((anchor) => anchor.id === rope.anchorId) : undefined;
 }
 
+/** Espèce du point tenu en ce moment, ou null sans corde : « lanceur » dit au jeu de lire la traction du doigt. */
+export function heldKind(state: SimState): AnchorKind | null {
+  return heldAnchor(state)?.kind ?? null;
+}
+
 /**
  * Ombre prédictive : positions, en mètres, où irait le personnage s'il lâchait
- * maintenant, de plus en plus loin jusqu'à `shadowSeconds` de vol libre. Vide
- * sans corde. La vitesse vient de la règle du lâcher elle-même, propulseur
- * compris : l'ombre dit vrai.
+ * maintenant, de plus en plus loin jusqu'à `seconds` de vol libre (par défaut
+ * `shadowSeconds`). Vide sans corde. La vitesse vient de la règle du lâcher
+ * elle-même, propulseur et lanceur compris : l'ombre dit vrai.
  */
-export function shadowPoints(state: SimState, tuning: Tuning): Vec2[] {
+export function shadowPoints(state: SimState, tuning: Tuning, seconds: number = tuning.shadowSeconds): Vec2[] {
   if (!state.rope) return [];
   const body = { pos: state.hero.pos, vel: releaseVelocity(state, tuning) };
   const points: Vec2[] = [];
   for (let i = 1; i <= SHADOW_POINTS; i += 1) {
-    points.push(freeFlightAt(body, (tuning.shadowSeconds * i) / SHADOW_POINTS, tuning, state.env));
+    points.push(freeFlightAt(body, (seconds * i) / SHADOW_POINTS, tuning, state.env));
   }
   return points;
 }

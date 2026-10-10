@@ -57,11 +57,17 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
   /** Pas où le robot a décidé d'agir, exécuté après son temps de réaction. */
   let plannedPress = -1;
   let plannedRelease = -1;
+  /** Après un lancer, on ne rattrape rien sous le lanceur pendant un moment : on monte. */
+  let launchedStep = -1_000_000;
+  let launchedY = -Infinity;
+  const launchWaitSteps = Math.round(1.5 / tuning.stepSeconds);
   const limit = Math.round(seconds / tuning.stepSeconds);
   while (sim.state.status === 'alive' && sim.state.step < limit) {
     const s = sim.state;
     if (!s.rope) {
-      if (s.targetId !== null && plannedPress < 0) plannedPress = s.step + reactionSteps;
+      const target = s.targetId === null ? null : s.anchors.find((a) => a.id === s.targetId);
+      const climbing = s.step - launchedStep > launchWaitSteps || (target !== null && target !== undefined && target.pos.y > launchedY + 1);
+      if (target && climbing && plannedPress < 0) plannedPress = s.step + reactionSteps;
       if (plannedPress >= 0 && s.step >= plannedPress) {
         plannedPress = -1;
         if (sim.press()) {
@@ -83,6 +89,8 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
         const dir = target ? { x: target.pos.x - launcher.pos.x, y: target.pos.y - launcher.pos.y } : { x: 0, y: 1 };
         const len = Math.hypot(dir.x, dir.y) || 1;
         sim.release({ x: (-dir.x / len) * PULL_MAX * 0.7, y: (-dir.y / len) * PULL_MAX * 0.7 });
+        launchedStep = s.step;
+        launchedY = launcher.pos.y;
       }
     } else if (s.step - attachStep > 10) {
       const held = (s.step - attachStep) * tuning.stepSeconds;

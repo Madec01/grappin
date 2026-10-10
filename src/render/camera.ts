@@ -150,6 +150,20 @@ export class Camera {
   }
 
   /**
+   * Déplacement dans le monde, en mètres (y vers le haut), qui correspond à un
+   * déplacement du doigt `dx`, `dy` en pixels CSS (y vers le bas) : l'inverse de
+   * `worldToDisplay` pour un écart, bascule comprise. C'est ainsi que la
+   * traction sur un lanceur suit le doigt à l'image près, monde tourné ou non.
+   */
+  screenToWorldDelta(dx: number, dy: number): Vec2 {
+    const cos = Math.cos(this.angle);
+    const sin = Math.sin(this.angle);
+    const scale = this.scale;
+    // `|| 0` : jamais de zéro négatif, qui ferait deux gestes « différents » d'un même geste immobile.
+    return { x: (dx * cos + dy * sin) / scale || 0, y: (dx * sin - dy * cos) / scale || 0 };
+  }
+
+  /**
    * Ce que l'écran couvre dans le repère du monde tourné : le rectangle à
    * remplir pour que les lignes, la brume et les traînées touchent tous les
    * bords, même quand le monde est de travers. Sans bascule, c'est l'écran.

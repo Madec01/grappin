@@ -1,4 +1,5 @@
-import { Game, readSettings, type DebugState } from './app/game';
+import { Game, readSettings, type DebugAnchor, type DebugState } from './app/game';
+import { Music, browserAudio } from './audio/music';
 import { trackPointer } from './input/pointer';
 import { STORAGE_KEY, TEST_STORAGE_KEY, browserStorage, type Profile } from './meta/profile';
 import type { TalismanId } from './meta/talismans';
@@ -18,7 +19,8 @@ declare global {
       state: () => DebugState;
       /** Le doigt se pose, à la position donnée en pixels CSS si on la connaît : sans position, aucun bouton n'est touché. */
       press: (x?: number, y?: number) => void;
-      release: () => void;
+      /** Le doigt se lève. Tenu à un lanceur, `pullX` et `pullY` sont la traction du lancer en mètres de monde (y vers le haut) : le personnage part à l'opposé. Sans eux, la traction du doigt, sinon la dernière visée. */
+      release: (pullX?: number, pullY?: number) => void;
       restart: (seed?: number) => void;
       /** Le profil du joueur tel que le jeu le tient. */
       profile: () => Profile;
@@ -34,6 +36,8 @@ declare global {
       playLevel: (id: number) => boolean;
       /** Joue la course libre tout de suite, sans appui d'accroche. */
       playFree: () => void;
+      /** Les points d'accroche encore là, en mètres de monde : de quoi viser un trou dans un mur. Pour les tests de bout en bout et le banc de captures. */
+      anchors: () => DebugAnchor[];
     };
   }
 }
@@ -42,16 +46,17 @@ async function start(): Promise<void> {
   const settings = readSettings(window.location.search);
   const renderer = await Renderer.create();
   // Le mode test joue sur son propre profil : la vraie progression n'en sait rien.
-  const game = new Game(renderer, settings, browserStorage(settings.testMode ? TEST_STORAGE_KEY : STORAGE_KEY));
+  // La musique vit dans public/musique, servie sous la base du site.
+  const game = new Game(renderer, settings, browserStorage(settings.testMode ? TEST_STORAGE_KEY : STORAGE_KEY), new Music(browserAudio(import.meta.env.BASE_URL)));
 
   renderer.onFrame((elapsedSeconds) => game.frame(elapsedSeconds));
-  trackPointer(renderer.canvas, { onPress: (x, y) => game.press(x, y), onRelease: () => game.release() });
+  trackPointer(renderer.canvas, { onPress: (x, y) => game.press(x, y), onMove: (x, y) => game.move(x, y), onRelease: () => game.release() });
 
   window.__grappin = {
     version: __APP_VERSION__,
     state: () => game.debugState(),
     press: (x?: number, y?: number) => game.press(x, y),
-    release: () => game.release(),
+    release: (pullX?: number, pullY?: number) => game.release(pullX === undefined && pullY === undefined ? undefined : { x: pullX ?? 0, y: pullY ?? 0 }),
     restart: (seed?: number) => game.restart(seed),
     profile: () => game.currentProfile(),
     equip: (id: TalismanId) => game.equip(id),
@@ -60,6 +65,7 @@ async function start(): Promise<void> {
     buttons: () => renderer.buttons(),
     playLevel: (id: number) => game.playLevel(id),
     playFree: () => game.playFree(),
+    anchors: () => game.anchors(),
   };
 }
 

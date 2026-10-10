@@ -59,6 +59,11 @@ export function browserAudio(base: string): AudioFactory {
   };
 }
 
+/** Un lecteur muet : les tests, et le jeu quand aucun son n'est branché. */
+export function silentAudio(): AudioFactory {
+  return () => ({ loop: false, volume: 1, paused: true, play: () => undefined, pause: () => undefined, release: () => undefined });
+}
+
 export class Music {
   private readonly factory: AudioFactory;
   private current: { readonly id: TrackId; readonly player: AudioPlayer } | null = null;

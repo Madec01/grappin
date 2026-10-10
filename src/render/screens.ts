@@ -5,8 +5,8 @@ import { missionById, type MissionDef } from '../meta/missions';
 import { showsHint, type LevelOutcome, type Profile, type RunOutcome } from '../meta/profile';
 import { TALISMANS, slotsFor, type Talisman } from '../meta/talismans';
 import { starsOf, unlockedLevel, type LevelResult } from '../meta/traversee';
-import { levelButton, type ButtonId, type ButtonRect } from './buttons';
-import { type StarLine, equippedLine, levelEvents, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, slotsLine, starLines } from './labels';
+import { levelButton, levelPageCount, levelsOfPage, type ButtonId, type ButtonRect } from './buttons';
+import { type StarLine, equippedLine, levelEvents, levelPageLabel, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, slotsLine, starLines } from './labels';
 import { neonBar, neonPoly, neonPolyline, neonRoundRect } from './neon';
 import { COLOR, makeText, readSafeInset, starPoints } from './style';
 
@@ -31,7 +31,8 @@ const TEST_MODE_LINE = 'Mode test · tous les niveaux ouverts';
 export type OverlayView =
   | { readonly kind: 'none' }
   | { readonly kind: 'title'; readonly profile: Profile; readonly testMode: boolean }
-  | { readonly kind: 'levels'; readonly profile: Profile; readonly testMode: boolean }
+  /** `page` : la page montrée de la liste des niveaux (dix par page), à partir de 0. */
+  | { readonly kind: 'levels'; readonly profile: Profile; readonly testMode: boolean; readonly page: number }
   | {
       readonly kind: 'dead';
       /** Hauteur atteinte, et hauteur à atteindre si la partie était un niveau (« Objectif »), sinon null. */
@@ -88,6 +89,9 @@ const LEVEL_ROW_GAP = 6;
 const STARS_PER_LEVEL = 3;
 const ROW_STAR_RADIUS = 9;
 const ROW_STAR_STEP = 26;
+/** Place que prennent les étoiles d'une ligne de niveau, marge comprise, et écart à leur garder devant le texte. */
+const LEVEL_STARS_WIDTH = STARS_PER_LEVEL * ROW_STAR_STEP + ROW_PADDING;
+const LEVEL_DETAIL_GAP = 8;
 /** Étoiles de l'écran de victoire : rayon, hauteur de ligne, et marge entre l'étoile et son texte. */
 const WIN_STAR_RADIUS = 12;
 const WIN_ROW_HEIGHT = 34;
@@ -198,6 +202,29 @@ class Column {
   }
 
   /**
+   * Plusieurs boutons côte à côte sur la largeur du bloc, séparés de `BUTTON_GAP`,
+   * chacun large selon son poids : de quoi garder « Retour » et le bouton d'une
+   * page sur une seule ligne.
+   */
+  buttonRow(items: readonly { readonly id: ButtonId; readonly label: string; readonly weight: number }[]): void {
+    const total = items.reduce((sum, item) => sum + item.weight, 0);
+    const room = this.width - BUTTON_GAP * (items.length - 1);
+    let x = 0;
+    for (const item of items) {
+      const width = (room * item.weight) / total;
+      const g = new Graphics().roundRect(x, this.cursor, width, BUTTON_HEIGHT, BUTTON_RADIUS).fill({ color: COLOR.panel, alpha: 0.9 });
+      neonRoundRect(g, x, this.cursor, width, BUTTON_HEIGHT, BUTTON_RADIUS, { color: COLOR.buttonEdge, halo: COLOR.tubeHalo, width: BUTTON_EDGE_WIDTH, spread: UI_SPREAD, strength: UI_STRENGTH });
+      const text = makeText(item.label, BUTTON_FONT_SIZE, COLOR.text, { bold: true });
+      text.anchor.set(0.5);
+      text.position.set(x + width / 2, this.cursor + BUTTON_HEIGHT / 2);
+      this.root.addChild(g, text);
+      this.buttons.push({ id: item.id, x, y: this.cursor, width, height: BUTTON_HEIGHT });
+      x += width + BUTTON_GAP;
+    }
+    this.cursor += BUTTON_HEIGHT;
+  }
+
+  /**
    * Fond d'une ligne : verrouillée, un voile à peine visible ; au repos, un
    * contour bleu sombre ; allumée (talisman équipé, niveau à jouer), un contour
    * de néon cyan. `g` porte déjà le rectangle arrondi de la ligne, posée au
@@ -265,6 +292,14 @@ class Column {
     name.position.set(ROW_PADDING, this.cursor + 6);
     const range = makeText(detail, 13, locked ? COLOR.textLocked : COLOR.textFaint, { align: 'left' });
     range.position.set(ROW_PADDING, name.y + name.height);
+    // La ligne du dessous s'arrête avant les étoiles : on lui retire des événements, du dernier au premier, jusqu'à ce qu'elle tienne.
+    const room = this.width - ROW_PADDING - LEVEL_STARS_WIDTH - LEVEL_DETAIL_GAP;
+    for (let text = detail; range.width > room && text.includes(' · '); ) {
+      const parts = text.replace(/ · …$/, '').split(' · ');
+      parts.pop();
+      text = [...parts, '…'].join(' · ');
+      range.text = text;
+    }
 
     const background = new Graphics().roundRect(0, this.cursor, this.width, LEVEL_ROW_HEIGHT, ROW_RADIUS);
     this.paintRow(background, LEVEL_ROW_HEIGHT, locked ? 'locked' : current ? 'lit' : 'idle');
@@ -357,6 +392,8 @@ function buildTitle(profile: Profile, width: number, testMode: boolean): Layout 
   lower.button('free', 'Course libre');
   lower.gap(BUTTON_GAP);
   lower.button('talismans', 'Talismans');
+  lower.gap(BUTTON_GAP);
+  lower.button('music', profile.music ? 'Musique : oui' : 'Musique : non');
   lower.gap(22);
   lower.line('Toucher pour jouer', 24, COLOR.textDim);
   if (showsHint(profile)) {
@@ -366,8 +403,15 @@ function buildTitle(profile: Profile, width: number, testMode: boolean): Layout 
   return { upper, lower, align: 'center' };
 }
 
-function buildLevels(profile: Profile, width: number, testMode: boolean): Layout {
+/**
+ * La liste des niveaux, dix par page. En bas, sur une ligne : « Retour » et le
+ * bouton de l'autre page (« Niveaux 11 à 20 » depuis la première, « Niveaux 1 à
+ * 10 » depuis la dernière).
+ */
+function buildLevels(profile: Profile, width: number, testMode: boolean, page: number): Layout {
   const current = unlockedLevel(profile);
+  const pages = levelPageCount();
+  const shown = Math.min(Math.max(0, page), pages - 1);
   const upper = new Column(width);
   upper.line('Niveaux', 34, COLOR.text, true, COLOR.tubeHalo);
   if (testMode) {
@@ -375,7 +419,7 @@ function buildLevels(profile: Profile, width: number, testMode: boolean): Layout
     upper.line(TEST_MODE_LINE, 15, COLOR.textDim);
   }
   upper.gap(testMode ? 12 : 16);
-  LEVELS.forEach((level, index) => {
+  levelsOfPage(shown).forEach((level, index) => {
     if (index > 0) upper.gap(LEVEL_ROW_GAP);
     // En mode test, rien n'est verrouillé et la ligne du dessous dit les événements du niveau, ce que l'on vient tester.
     const detail = testMode && level.events.length > 0 ? levelEvents(level) : levelRange(level);
@@ -383,7 +427,10 @@ function buildLevels(profile: Profile, width: number, testMode: boolean): Layout
   });
 
   const lower = new Column(width);
-  lower.button('back', 'Retour');
+  const row: { id: ButtonId; label: string; weight: number }[] = [{ id: 'back', label: 'Retour', weight: 1 }];
+  if (shown > 0) row.push({ id: 'precedents', label: levelPageLabel(levelsOfPage(shown - 1)), weight: 2 });
+  if (shown < pages - 1) row.push({ id: 'suite', label: levelPageLabel(levelsOfPage(shown + 1)), weight: 2 });
+  lower.buttonRow(row);
   return { upper, lower, align: 'top' };
 }
 
@@ -486,7 +533,7 @@ function buildLayout(view: Exclude<OverlayView, { kind: 'none' }>, width: number
     case 'title':
       return buildTitle(view.profile, width, view.testMode);
     case 'levels':
-      return buildLevels(view.profile, width, view.testMode);
+      return buildLevels(view.profile, width, view.testMode, view.page);
     case 'dead':
       return buildDead(view.height, view.goal, view.score, view.cause, view.outcome, width);
     case 'won':

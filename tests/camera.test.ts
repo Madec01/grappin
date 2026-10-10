@@ -289,3 +289,56 @@ describe('prises écartées : la caméra dézoome pour les montrer', () => {
     expect(camera.zoom).toBe(0.6);
   });
 });
+
+describe('du doigt au monde : la traction d\'un lanceur', () => {
+  it('sans bascule, un doigt qui descend de 39 px tire d\'un mètre vers le bas du monde, un doigt à droite vers la droite', () => {
+    const camera = new Camera(R, 390, 844);
+    camera.snap(REST, REST);
+    const pull = camera.screenToWorldDelta(39, 78);
+    expect(pull.x).toBeCloseTo(1, 9);
+    expect(pull.y).toBeCloseTo(-2, 9);
+  });
+
+  it('un doigt immobile ne tire pas, et ne donne jamais de zéro négatif', () => {
+    const camera = new Camera(R, 390, 844);
+    camera.snap(REST, REST);
+    const none = camera.screenToWorldDelta(0, 0);
+    expect(Object.is(none.x, 0)).toBe(true);
+    expect(Object.is(none.y, 0)).toBe(true);
+    const sideways = camera.screenToWorldDelta(20, 0);
+    expect(Object.is(sideways.y, 0)).toBe(true);
+  });
+
+  it('suit le zoom : à zoom réduit, le même geste tire plus loin', () => {
+    const wide = new Camera(R, 390, 844);
+    wide.snap(REST, { x: 0, y: 18 });
+    expect(wide.zoom).toBeLessThan(1);
+    const near = new Camera(R, 390, 844);
+    near.snap(REST, REST);
+    expect(wide.screenToWorldDelta(0, 40).y).toBeLessThan(near.screenToWorldDelta(0, 40).y);
+  });
+
+  it('réciproque de worldToDisplay pour un écart, au repos comme monde tourné', () => {
+    for (const env of [STILL, MID, RIGHT, LEFT]) {
+      const camera = new Camera(R, 390, 844);
+      camera.snap({ x: 1, y: 7 }, REST, env);
+      const anchor = { x: 1.5, y: 8 };
+      const shown = camera.worldToDisplay(anchor);
+      for (const pull of [{ x: 1, y: -2 }, { x: -2, y: 0.5 }, { x: 0.3, y: 1.7 }]) {
+        const moved = camera.worldToDisplay({ x: anchor.x + pull.x, y: anchor.y + pull.y });
+        const back = camera.screenToWorldDelta(moved.x - shown.x, moved.y - shown.y);
+        expect(back.x).toBeCloseTo(pull.x, 9);
+        expect(back.y).toBeCloseTo(pull.y, 9);
+      }
+    }
+  });
+
+  it('monde basculé à droite, tirer vers le bas de l\'écran tire vers la gravité du monde, pas vers son bas', () => {
+    const camera = new Camera(R, 390, 844);
+    camera.snap(REST, REST, RIGHT);
+    // Le bas de l'écran est le sens de la gravité : (1, 0) dans le monde.
+    const pull = camera.screenToWorldDelta(0, camera.scale);
+    expect(pull.x).toBeCloseTo(1, 9);
+    expect(pull.y).toBeCloseTo(0, 9);
+  });
+});

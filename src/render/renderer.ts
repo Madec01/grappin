@@ -2,6 +2,7 @@ import { Application, Container, Graphics, type Text } from 'pixi.js';
 import type { Vec2 } from '../core/math/vec2';
 import type { LevelOutcome, Profile, RunOutcome } from '../meta/profile';
 import type { LevelResult } from '../meta/traversee';
+import { PULL_MAX } from '../sim/launcher';
 import { WORLD_HALF_WIDTH, multiplier } from '../sim/rules';
 import type { Anchor, AnchorKind, RuleEvent, SimState } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
@@ -9,11 +10,12 @@ import type { ButtonId, ButtonRect } from './buttons';
 import type { Camera, ViewBounds } from './camera';
 import { bandsInView, cityBand } from './city';
 import { electricState, type ElectricState } from '../sim/cycles';
-import { fragileGauge, isDark, isOff, shadowPoints } from './cues';
+import { fragileGauge, heldKind, isDark, isOff, shadowPoints } from './cues';
 import { alertAlpha, bannerAlpha, flicker, floatAlpha, floatRise, pulse, sizzle, type Effects } from './effects';
 import { formatDecimal } from './format';
 import { neonCircle, neonDiscs, neonFill, neonLine, neonRects, neonStroke, type NeonStrokeStyle } from './neon';
 import { Screens, type OverlayView } from './screens';
+import { bandWidth, cupRadius, cupTips, mixColor, pullRatio, traceCup } from './sling';
 import { COLOR, makeText, readSafeInset, starPoints } from './style';
 
 /**
@@ -59,6 +61,8 @@ export interface GameFrame {
   readonly result: LevelResult | null;
   /** Mode test : un rappel discret pendant la partie, et les écrans le disent. */
   readonly testMode: boolean;
+  /** Page de la liste des niveaux montrée (dix niveaux par page), à partir de 0. */
+  readonly levelsPage: number;
 }
 
 const TAU = Math.PI * 2;
@@ -90,6 +94,8 @@ const ROOF_EDGE_WIDTH = 2;
  * de visée, même très dézoomé.
  */
 const KIND_RING_GAP = 4;
+/** Lanceur : épaisseur du trait de sa coupe, en pixels. */
+const CUP_WIDTH = 3;
 /** Portée du halo des anneaux, tirets et chevrons : plus courte que celle des disques, pour que leurs marques restent lisibles. */
 const MARK_SPREAD = 0.6;
 /** Accroche fragile tenue : l'anneau qui se vide entoure l'anneau de marque, de cet écart en pixels. */
@@ -168,6 +174,28 @@ const FINISH_FONT_SIZE = 14;
 /** Ombre prédictive : rayon d'un point en pixels, opacité. */
 const SHADOW_DOT_RADIUS = 1.8;
 const SHADOW_ALPHA = 0.55;
+/** Tenu à un lanceur, l'ombre est la visée elle-même : plus longue (secondes de vol), plus grosse et plus nette. */
+const LAUNCH_SHADOW_SECONDS = 0.6;
+const LAUNCH_SHADOW_DOT_RADIUS = 2.6;
+const LAUNCH_SHADOW_ALPHA = 0.9;
+
+/**
+ * Lanceur tenu : le cercle qui borne la traction (tireté, pâle, plus net quand
+ * on s'en approche), et la jauge de force, un anneau autour du personnage qui se
+ * remplit avec la traction. Tailles en pixels.
+ */
+const LIMIT_DASHES = 28;
+const LIMIT_DASH_FILL = 0.5;
+const LIMIT_WIDTH = 1.5;
+const LIMIT_ALPHA_MIN = 0.2;
+const LIMIT_ALPHA_MAX = 0.75;
+const GAUGE_GAP = 6;
+const GAUGE_WIDTH = 3;
+const GAUGE_TRACK_ALPHA = 0.3;
+/** Sous cette part de force, ni jauge ni anneau de la jauge : le personnage est encore dans la coupe. */
+const GAUGE_MIN_RATIO = 0.04;
+/** À pleine force, l'élastique et la jauge battent à ce rythme (Hz). */
+const FULL_PULL_HZ = 5;
 
 /** Anneau de visée : il s'allume en cette durée (secondes) en se resserrant sur le point, d'abord plus large de cette part. */
 const TARGET_IGNITE_SECONDS = 0.12;
@@ -217,8 +245,7 @@ const KIND_TUBE: Record<AnchorKind, { readonly color: number; readonly halo: num
   booster: { color: COLOR.booster, halo: COLOR.booster },
   electrique: { color: COLOR.electric, halo: COLOR.electric },
   eclipse: { color: COLOR.eclipse, halo: COLOR.eclipse },
-  // Provisoire : le lanceur prend le tube du propulseur en attendant son propre dessin.
-  lanceur: { color: COLOR.booster, halo: COLOR.booster },
+  lanceur: { color: COLOR.launcher, halo: COLOR.launcher },
 };
 const CHARGED_TUBE = { color: COLOR.electricCharged, halo: COLOR.electricCharged };
 /** Dans quel groupe tombe une prise électrique selon son cycle. */
@@ -451,7 +478,7 @@ export class Renderer {
     this.drawCables(state, camera);
     this.drawAnchors(state, camera, view, tuning, effects);
     this.drawTargetRing(state, camera, tuning, effects);
-    this.drawRope(state, camera, effects.ropeDrawn);
+    this.drawRope(state, camera, tuning, effects);
     this.drawFog(state, camera, view, effects);
     this.drawShadow(state, camera, tuning);
     this.drawHero(state, camera, tuning);
@@ -725,7 +752,13 @@ export class Renderer {
       // Le point tenu pulse : un anneau de plus, qui respire.
       const p = camera.worldToScreen(held.pos);
       const beat = pulse(paint.clock, HELD_PULSE_HZ, 0.3);
-      neonCircle(g, p.x, p.y, paint.ring + HELD_RING_GAP, { color: COLOR.tube, halo: COLOR.tubeHalo, width: 1.5, alpha: 0.4 + 0.6 * beat, strength: beat, spread: 1.2 });
+      if (held.kind === 'lanceur') {
+        // La coupe elle-même respire, un peu plus large : un anneau de plus la brouillerait.
+        const tube = { ...KIND_TUBE.lanceur, width: 1.5, alpha: 0.4 + 0.6 * beat, strength: beat, spread: 1.2, cap: 'round' as const, join: 'round' as const };
+        neonStroke(g, (target) => traceCup(target, p.x, p.y, cupRadius(paint.radius) + HELD_RING_GAP), tube);
+      } else {
+        neonCircle(g, p.x, p.y, paint.ring + HELD_RING_GAP, { color: COLOR.tube, halo: COLOR.tubeHalo, width: 1.5, alpha: 0.4 + 0.6 * beat, strength: beat, spread: 1.2 });
+      }
     }
 
     const gauge = fragileGauge(state, tuning);
@@ -757,9 +790,19 @@ export class Renderer {
     const core = pass === 'core';
 
     neonDiscs(g, groups.normal, radius, { ...KIND_TUBE.normal, pass });
-    // Provisoire : un lanceur est un disque de propulseur cerclé, en attendant son dessin.
-    neonDiscs(g, groups.lanceur, radius, { ...KIND_TUBE.lanceur, pass });
-    if (core) for (const spot of groups.lanceur) neonCircle(g, spot.x, spot.y, ring + 3, { ...KIND_TUBE.lanceur, width: KIND_MARK_WIDTH, pass: 'core' });
+
+    // Lanceur : un disque vert d'eau au creux d'une coupe en « Y » ouverte vers le haut, sur un court pied : une fronde. Rien d'un propulseur, qui est un anneau fermé à chevrons.
+    if (groups.lanceur.length > 0) {
+      const cup = cupRadius(radius);
+      neonDiscs(g, groups.lanceur, radius, { ...KIND_TUBE.lanceur, pass });
+      neonStroke(
+        g,
+        (target) => {
+          for (const spot of groups.lanceur) traceCup(target, spot.x, spot.y, cup);
+        },
+        { ...KIND_TUBE.lanceur, width: CUP_WIDTH, spread: MARK_SPREAD, cap: 'round', join: 'round', pass },
+      );
+    }
 
     // Fragile : le disque grésille, chacun à son rythme ; anneau en huit tirets ; fêlure sombre au cœur.
     if (groups.fragile.length > 0) {
@@ -868,17 +911,73 @@ export class Renderer {
     neonCircle(g, p.x, p.y, radius, { color: COLOR.tube, halo: COLOR.tubeHalo, width: TARGET_RING_WIDTH, alpha: 0.4 + 0.6 * lit, strength: lit * (0.8 + 0.2 * pulse(effects.clock, 3, 0)) });
   }
 
-  /** Le trait part du personnage et se dessine vers le point pendant les premiers centièmes de seconde : un tube blanc froid. */
-  private drawRope(state: SimState, camera: Camera, drawn: number): void {
+  /**
+   * Le trait part du personnage et se dessine vers le point pendant les
+   * premiers centièmes de seconde : un tube blanc froid. À un lanceur, il n'y a
+   * pas de corde : l'élastique de la fronde prend sa place.
+   */
+  private drawRope(state: SimState, camera: Camera, tuning: Tuning, effects: Effects): void {
     const g = this.rope.clear();
     if (!state.rope) return;
     const { anchorId } = state.rope;
     const anchor = state.anchors.find((a) => a.id === anchorId);
     if (!anchor) return;
+    if (anchor.kind === 'lanceur') {
+      this.drawSling(g, state, camera, tuning, anchor, effects.clock);
+      return;
+    }
     const from = camera.worldToScreen(state.hero.pos);
     const to = camera.worldToScreen(anchor.pos);
+    const drawn = effects.ropeDrawn;
     const tip = { x: from.x + (to.x - from.x) * drawn, y: from.y + (to.y - from.y) * drawn };
     neonLine(g, from, tip, { color: COLOR.tube, halo: COLOR.tubeHalo, width: ROPE_WIDTH, cap: 'round' });
+  }
+
+  /**
+   * La fronde du lanceur tenu : le cercle tireté qui borne la traction, un
+   * élastique de chaque pointe de la coupe au personnage tiré, qui s'épaissit,
+   * s'éclaircit et se tend avec la force, et un anneau de jauge autour du
+   * personnage qui se ferme à pleine force. Le lanceur est libre de tout autour
+   * de lui jusqu'à la limite de traction (voir `LANCEUR_CLEARANCE`) : rien de cela
+   * ne masque une accroche ni un danger.
+   */
+  private drawSling(g: Graphics, state: SimState, camera: Camera, tuning: Tuning, anchor: Anchor, clock: number): void {
+    const scale = camera.scale;
+    const center = camera.worldToScreen(anchor.pos);
+    const hero = camera.worldToScreen(state.hero.pos);
+    const ratio = pullRatio(state.pull);
+    const full = ratio >= 1;
+    const beat = full ? pulse(clock, FULL_PULL_HZ, 0.6) : 1;
+
+    // La limite de traction : un cercle de tirets pâles, de plus en plus net à mesure qu'on s'en approche.
+    const limit = PULL_MAX * scale;
+    for (let dash = 0; dash < LIMIT_DASHES; dash += 1) {
+      const start = (dash / LIMIT_DASHES) * TAU;
+      g.moveTo(center.x + limit * Math.cos(start), center.y + limit * Math.sin(start)).arc(center.x, center.y, limit, start, start + (LIMIT_DASH_FILL / LIMIT_DASHES) * TAU);
+    }
+    g.stroke({ width: LIMIT_WIDTH, color: COLOR.launcher, alpha: LIMIT_ALPHA_MIN + (LIMIT_ALPHA_MAX - LIMIT_ALPHA_MIN) * ratio * ratio });
+
+    // L'élastique : des pointes de la coupe au personnage, plus gras, plus blanc, plus lumineux avec la force.
+    const tips = cupTips(center.x, center.y, cupRadius(ANCHOR_RADIUS * scale));
+    neonStroke(
+      g,
+      (target) => {
+        target.moveTo(tips.left.x, tips.left.y).lineTo(hero.x, hero.y);
+        target.moveTo(tips.right.x, tips.right.y).lineTo(hero.x, hero.y);
+      },
+      { color: mixColor(COLOR.launcher, COLOR.tube, ratio), halo: COLOR.launcher, width: bandWidth(ratio), strength: (0.7 + 0.9 * ratio) * beat, spread: 0.8 + 0.5 * ratio, cap: 'round', join: 'round' },
+    );
+
+    // La jauge : un anneau autour du personnage, qui se remplit depuis le haut avec la traction.
+    if (ratio < GAUGE_MIN_RATIO) return;
+    const gaugeRadius = tuning.heroRadius * scale + GAUGE_GAP;
+    g.circle(hero.x, hero.y, gaugeRadius).stroke({ width: GAUGE_WIDTH, color: COLOR.launcher, alpha: GAUGE_TRACK_ALPHA });
+    neonStroke(g, (target) => target.moveTo(hero.x, hero.y - gaugeRadius).arc(hero.x, hero.y, gaugeRadius, -Math.PI / 2, -Math.PI / 2 + ratio * TAU), {
+      color: mixColor(COLOR.launcher, COLOR.tube, ratio * ratio),
+      halo: COLOR.launcher,
+      width: GAUGE_WIDTH + (full ? 1 : 0),
+      strength: full ? 1.6 * beat : 1,
+    });
   }
 
   /**
@@ -900,14 +999,19 @@ export class Renderer {
     neonLine(g, { x: view.left, y: top }, { x: view.right, y: top }, { color: COLOR.fogEdge, halo: COLOR.fogEdge, width: FOG_EDGE_WIDTH, alpha: blink, spread: 1.6 });
   }
 
-  /** Ombre prédictive : quelques points cyan pâle, discrets, qui montrent où irait le personnage s'il lâchait maintenant. */
+  /**
+   * Ombre prédictive : quelques points cyan pâle, discrets, qui montrent où irait
+   * le personnage s'il lâchait maintenant. Tenu à un lanceur, elle est la visée :
+   * plus longue, plus grosse, plus nette.
+   */
   private drawShadow(state: SimState, camera: Camera, tuning: Tuning): void {
     const g = this.shadow.clear();
-    for (const point of shadowPoints(state, tuning)) {
+    const aiming = heldKind(state) === 'lanceur';
+    for (const point of shadowPoints(state, tuning, aiming ? LAUNCH_SHADOW_SECONDS : tuning.shadowSeconds)) {
       const p = camera.worldToScreen(point);
-      g.circle(p.x, p.y, SHADOW_DOT_RADIUS);
+      g.circle(p.x, p.y, aiming ? LAUNCH_SHADOW_DOT_RADIUS : SHADOW_DOT_RADIUS);
     }
-    g.fill({ color: COLOR.shadow, alpha: SHADOW_ALPHA });
+    g.fill({ color: COLOR.shadow, alpha: aiming ? LAUNCH_SHADOW_ALPHA : SHADOW_ALPHA });
   }
 
   /** Le personnage : un disque blanc froid, le plus lumineux du jeu, au halo cyan plus large que celui des points. */
@@ -992,7 +1096,7 @@ export class Renderer {
       case 'title':
         return { kind: 'title', profile: frame.profile, testMode: frame.testMode };
       case 'levels':
-        return { kind: 'levels', profile: frame.profile, testMode: frame.testMode };
+        return { kind: 'levels', profile: frame.profile, testMode: frame.testMode, page: frame.levelsPage };
       case 'talismans':
         return { kind: 'talismans', profile: frame.profile };
       case 'dead':

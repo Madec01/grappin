@@ -199,3 +199,15 @@ describe('stockage du navigateur', () => {
     expect(() => saveProfile(broken, createProfile())).not.toThrow();
   });
 });
+
+describe('réglage musique', () => {
+  it('joue par défaut, se garde, et un profil d\'avant ce réglage joue aussi', () => {
+    expect(createProfile().music).toBe(true);
+    const off = memoryStorage();
+    saveProfile(off, { ...createProfile(), music: false });
+    expect(loadProfile(off).music).toBe(false);
+    const legacy = { ...createProfile() } as Record<string, unknown>;
+    delete legacy['music'];
+    expect(loadProfile(memoryStorage(JSON.stringify(legacy))).music).toBe(true);
+  });
+});

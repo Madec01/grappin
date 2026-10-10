@@ -42,6 +42,14 @@ export function levelRowTitle(level: LevelDef): string {
   return `${level.id} · ${level.name}`;
 }
 
+/** « Niveaux 11 à 20 » : le bouton qui mène à une page de la liste des niveaux. */
+export function levelPageLabel(levels: readonly LevelDef[]): string {
+  const first = levels[0];
+  const last = levels[levels.length - 1];
+  if (!first || !last) return 'Niveaux';
+  return first.id === last.id ? `Niveau ${first.id}` : `Niveaux ${first.id} à ${last.id}`;
+}
+
 /** « 130 → 200 m » : de quelle hauteur à quelle hauteur monte le niveau. */
 export function levelRange(level: LevelDef): string {
   return `${level.startY} → ${level.endY} m`;

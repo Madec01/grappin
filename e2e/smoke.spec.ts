@@ -1,15 +1,21 @@
 import { expect, test, type Page } from '@playwright/test';
+import { LEVELS, levelById } from '../src/data/levels';
 
 /**
  * Test de fumée sur écran de téléphone (390 × 844, tactile) : la page charge,
  * un doigt posé accroche le grappin, le relâcher libère le personnage, la
  * graine d'URL est respectée, un pilote automatique grimpe sans erreur, la
  * progression (expérience, sauvegarde, talismans, boutons, niveaux et étoiles)
- * tient d'une partie et d'un rechargement à l'autre, et la bascule du niveau 5
- * se joue sans erreur. Tout passe par `window.__grappin`.
+ * tient d'une partie et d'un rechargement à l'autre, la bascule du niveau 5
+ * se joue sans erreur, la liste des niveaux se tourne en deux pages, et le
+ * lanceur se tire au doigt (souris et toucher) puis se franchit au pilote
+ * automatique. Tout passe par `window.__grappin`.
  */
 
 const CENTER = { x: 195, y: 422 };
+
+/** Hauteur à gravir d'un niveau, depuis son toit de départ. */
+const goalOf = (id: number): number => levelById(id)!.endY - levelById(id)!.startY;
 
 /** Erreurs de console et de page, au fil de l'eau. */
 function watchErrors(page: Page): string[] {
@@ -107,25 +113,52 @@ test('?graine=7 fixe la graine et restart() la conserve', async ({ page }) => {
 /**
  * Pilote automatique injecté dans la page, même stratégie que `scripts/capture.ts` :
  * accroche dès qu'un point est visé, lâche dans la fenêtre du lâcher parfait,
- * jamais plus de 2,5 s tenu. Il rend la main quand le personnage dépasse
- * `targetHeight` mètres, meurt, gagne le niveau, ou après `limitMs`, avec ce qu'il a
- * vu passer : la plus grande inclinaison de la gravité (`gravityX` en valeur absolue). Passé en texte à
- * `page.evaluate` : tsx réécrit les fonctions avec un helper `__name` qui n'existe pas dans la page.
+ * jamais plus de 2,5 s tenu. Sur un lanceur, il vise le point normal le plus
+ * proche au-dessus et tire à l'opposé aux sept dixièmes de la force ; dans la
+ * seconde et demie qui suit, il n'attrape que ce qui est au-dessus de lui et à
+ * moins de quatre mètres, c'est-à-dire une fois le mur à trou passé. Il rend la
+ * main quand le personnage dépasse `targetHeight` mètres (absolus) ou
+ * `targetLevelHeight` mètres depuis le toit de départ, meurt, gagne le niveau,
+ * ou après `limitMs`, avec ce qu'il a vu passer : la plus grande inclinaison de
+ * la gravité (`gravityX` en valeur absolue), la plus grande hauteur de niveau
+ * et le nombre de lancers. Passé en texte à `page.evaluate` : tsx réécrit les
+ * fonctions avec un helper `__name` qui n'existe pas dans la page.
  */
-function autopilot(targetHeight: number, limitMs: number): string {
+function autopilot(targetHeight: number, limitMs: number, targetLevelHeight = Infinity): string {
   return `new Promise((done) => {
     const api = window.__grappin;
     const start = performance.now();
     let holdSince = 0;
+    let launchedAt = -1e9;
+    let launches = 0;
     let maxGravityX = 0;
+    let maxLevelHeight = 0;
+    const gap = (a, s) => Math.hypot(a.x - s.pos.x, a.y - s.pos.y);
     const tick = () => {
       const s = api.state();
       const now = performance.now();
       maxGravityX = Math.max(maxGravityX, Math.abs(s.gravityX));
-      if (s.screen === 'dead' || s.screen === 'won' || s.height > ${targetHeight} || now - start > ${limitMs}) { done({ maxGravityX }); return; }
+      maxLevelHeight = Math.max(maxLevelHeight, s.levelHeight);
+      if (s.screen === 'dead' || s.screen === 'won' || s.height > ${Number.isFinite(targetHeight) ? targetHeight : 'Infinity'} || s.levelHeight >= ${Number.isFinite(targetLevelHeight) ? targetLevelHeight : 'Infinity'} || now - start > ${limitMs}) { done({ maxGravityX, maxLevelHeight, launches }); return; }
       if (!s.attached && s.targetId !== null) {
-        api.press();
-        holdSince = now;
+        const target = now - launchedAt < 1500 ? api.anchors().find((a) => a.id === s.targetId) : undefined;
+        if (!target || (gap(target, s) <= 4 && target.y >= s.pos.y)) {
+          api.press();
+          holdSince = now;
+        }
+      } else if (s.attached && s.heldKind === 'lanceur') {
+        if (now - holdSince > 150) {
+          let best = null;
+          for (const a of api.anchors()) {
+            if (a.kind !== 'normal' || a.y < s.pos.y + 1) continue;
+            const d = gap(a, s);
+            if (!best || d < best.d) best = { x: a.x - s.pos.x, y: a.y - s.pos.y, d };
+          }
+          const dir = best || { x: 0, y: 1, d: 1 };
+          api.release((-dir.x / dir.d) * 1.75, (-dir.y / dir.d) * 1.75);
+          launchedAt = now;
+          launches += 1;
+        }
       } else if (s.attached && now - holdSince > 80) {
         const speed = Math.hypot(s.vel.x, s.vel.y);
         const ready = speed >= 8 || (s.ropeLength !== null && s.ropeLength <= 1.5 + 1e-9);
@@ -137,6 +170,12 @@ function autopilot(targetHeight: number, limitMs: number): string {
     };
     requestAnimationFrame(tick);
   })`;
+}
+
+interface PilotReport {
+  maxGravityX: number;
+  maxLevelHeight: number;
+  launches: number;
 }
 
 test('?test=1 : tous les niveaux se jouent, sur un profil à part', async ({ page }) => {
@@ -232,10 +271,10 @@ test('niveaux : la liste, un niveau verrouillé, le pilote gagne le niveau 1, le
   await open(page, '/');
   await page.evaluate(() => window.__grappin!.resetProfile());
 
-  // La liste : dix lignes, seul le niveau 1 est un bouton, et « Retour » ramène au titre.
+  // La liste : dix lignes par page, seul le niveau 1 est un bouton, avec « Retour » et le bouton de la page suivante, qui ramène au titre.
   await tapButton(page, 'levels');
   await expect.poll(async () => (await state(page)).screen).toBe('levels');
-  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual(['niveau-1', 'back']);
+  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual(['niveau-1', 'back', 'suite']);
   await tapButton(page, 'back');
   await expect.poll(async () => (await state(page)).screen).toBe('title');
 
@@ -244,12 +283,12 @@ test('niveaux : la liste, un niveau verrouillé, le pilote gagne le niveau 1, le
   await tapButton(page, 'levels');
   await tapButton(page, 'niveau-1');
   await expect.poll(async () => (await state(page)).screen).toBe('playing');
-  expect(await state(page)).toMatchObject({ mode: 'level', levelId: 1, goal: 60, unlockedLevel: 1 });
+  expect(await state(page)).toMatchObject({ mode: 'level', levelId: 1, goal: goalOf(1), unlockedLevel: 1 });
 
   await page.evaluate(autopilot(Infinity, 90_000));
   const won = await state(page);
   expect(won.screen).toBe('won');
-  expect(won.levelHeight).toBeGreaterThanOrEqual(60);
+  expect(won.levelHeight).toBeGreaterThanOrEqual(goalOf(1));
   expect(won.stars).toBeGreaterThanOrEqual(1);
   expect((await profile(page)).levels['1']!.stars).toBeGreaterThanOrEqual(1);
   expect(won.unlockedLevel).toBe(2);
@@ -259,7 +298,7 @@ test('niveaux : la liste, un niveau verrouillé, le pilote gagne le niveau 1, le
   expect((await buttons(page)).map((button) => button.id)).toEqual(['next', 'replay', 'levels']);
   await tapButton(page, 'next');
   await expect.poll(async () => (await state(page)).screen).toBe('playing');
-  expect(await state(page)).toMatchObject({ mode: 'level', levelId: 2, goal: 70 });
+  expect(await state(page)).toMatchObject({ mode: 'level', levelId: 2, goal: goalOf(2) });
 
   await page.reload();
   await page.waitForFunction(() => window.__grappin !== undefined);
@@ -277,19 +316,129 @@ test('la bascule du niveau 5 se joue sans erreur de console : la gravité tourne
   // Le niveau 5 est verrouillé tant que les quatre premiers ne sont pas franchis : `unlockAll` est fait pour cela.
   expect(await page.evaluate(() => window.__grappin!.playLevel(5))).toBe(false);
   await page.evaluate(() => window.__grappin!.unlockAll());
-  expect((await state(page)).unlockedLevel).toBe(10);
+  expect((await state(page)).unlockedLevel).toBe(LEVELS.length);
 
   let maxGravityX = 0;
   for (let attempt = 0; attempt < 4 && maxGravityX === 0; attempt += 1) {
     expect(await page.evaluate(() => window.__grappin!.playLevel(5))).toBe(true);
     await expect.poll(async () => (await state(page)).screen).toBe('playing');
     expect(await state(page)).toMatchObject({ mode: 'level', levelId: 5, gravityX: 0, gravityY: -1, windX: 0, lightsOff: false, fogFactor: 1 });
-    const report = (await page.evaluate(autopilot(Infinity, 45_000))) as { maxGravityX: number };
+    const report = (await page.evaluate(autopilot(Infinity, 45_000))) as PilotReport;
     maxGravityX = report.maxGravityX;
   }
   expect(maxGravityX).toBeGreaterThan(0);
+  // Le niveau 5 compte deux bascules, à des hauteurs différentes : la première a eu lieu, le calendrier est celui du niveau.
   const { events } = await state(page);
-  expect(events).toHaveLength(1);
+  expect(events).toHaveLength(levelById(5)!.events.length);
+  expect(events.every((event) => event.kind === 'bascule')).toBe(true);
   expect(events[0]).toMatchObject({ kind: 'bascule', started: true });
+  expect(errors).toEqual([]);
+});
+
+test('liste des niveaux : deux pages de dix, « Niveaux 11 à 20 » puis « Niveaux 1 à 10 », et un niveau de la seconde page se lance', async ({ page }) => {
+  const errors = watchErrors(page);
+  await open(page, '/');
+  await page.evaluate(() => window.__grappin!.resetProfile());
+  await page.evaluate(() => window.__grappin!.unlockAll());
+
+  // Tous les niveaux sont ouverts : la liste s'ouvre sur la page du niveau à jouer, le dernier, donc la seconde.
+  await tapButton(page, 'levels');
+  await expect.poll(async () => (await state(page)).screen).toBe('levels');
+  const second = Array.from({ length: 10 }, (_, i) => `niveau-${i + 11}`);
+  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual([...second, 'back', 'precedents']);
+
+  // La page précédente, puis la suivante : les dix premiers niveaux, puis les dix derniers.
+  await tapButton(page, 'precedents');
+  const first = Array.from({ length: 10 }, (_, i) => `niveau-${i + 1}`);
+  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual([...first, 'back', 'suite']);
+  await tapButton(page, 'suite');
+  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual([...second, 'back', 'precedents']);
+
+  await tapButton(page, 'niveau-14');
+  await expect.poll(async () => (await state(page)).screen).toBe('playing');
+  expect(await state(page)).toMatchObject({ mode: 'level', levelId: 14, goal: goalOf(14) });
+  expect(errors).toEqual([]);
+});
+
+/** Les deux façons de tirer : au toucher, par les événements du protocole, et à la souris. Chacune pose le doigt en `from`, le glisse en `to`, et rend de quoi le lever. */
+const draggers = [
+  {
+    name: 'toucher',
+    async hold(page: Page, from: { x: number; y: number }) {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [from] });
+      return {
+        async drag(to: { x: number; y: number }) {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [to] });
+        },
+        async lift() {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        },
+      };
+    },
+  },
+  {
+    name: 'souris',
+    async hold(page: Page, from: { x: number; y: number }) {
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      return {
+        async drag(to: { x: number; y: number }) {
+          await page.mouse.move(to.x, to.y, { steps: 4 });
+        },
+        async lift() {
+          await page.mouse.up();
+        },
+      };
+    },
+  },
+];
+
+for (const dragger of draggers) {
+  test(`lanceur : tirer le doigt règle la traction, relâcher lance à l'opposé (${dragger.name})`, async ({ page }) => {
+    const errors = watchErrors(page);
+    await open(page, '/?test=1');
+    // Le niveau 14 commence par un lanceur, à quatre mètres du toit : le doigt posé s'y accroche.
+    expect(await page.evaluate(() => window.__grappin!.playLevel(14))).toBe(true);
+    const finger = await dragger.hold(page, { x: 195, y: 500 });
+    await expect.poll(async () => (await state(page)).heldKind).toBe('lanceur');
+    expect(await state(page)).toMatchObject({ attached: true, pullX: 0, pullY: 0 });
+
+    // Le doigt descend de 80 px et glisse à gauche de 30 : la traction va vers le bas (y du monde négatif) et vers la gauche.
+    await finger.drag({ x: 165, y: 580 });
+    await expect.poll(async () => (await state(page)).pullY).toBeLessThan(-1);
+    const pulled = await state(page);
+    expect(pulled.pullX).toBeLessThan(-0.3);
+    expect(Math.hypot(pulled.pullX, pulled.pullY)).toBeLessThanOrEqual(2.5 + 1e-9);
+
+    // Le personnage est tenu au lanceur, reculé de la traction : sous lui et à gauche.
+    const launcher = (await page.evaluate(() => window.__grappin!.anchors())).find((anchor) => anchor.kind === 'lanceur')!;
+    expect(pulled.pos.y).toBeLessThan(launcher.y);
+    expect(pulled.pos.x).toBeLessThan(launcher.x);
+
+    // Relâché : il part à l'opposé, vers le haut et vers la droite.
+    await finger.lift();
+    const launched = await state(page);
+    expect(launched.attached).toBe(false);
+    expect(launched.heldKind).toBeNull();
+    expect(launched.vel.x).toBeGreaterThan(0);
+    expect(launched.vel.y).toBeGreaterThan(6);
+    expect(errors).toEqual([]);
+  });
+}
+
+test('lanceur : le pilote automatique franchit le mur à trou du niveau 14 sans erreur de console', async ({ page }) => {
+  // Le pilote joue en temps réel et peut mourir avant le mur sur une machine lente : on rejoue le niveau, quelques fois au plus.
+  test.setTimeout(120_000);
+  const errors = watchErrors(page);
+  await open(page, '/?test=1');
+  let report: PilotReport = { maxGravityX: 0, maxLevelHeight: 0, launches: 0 };
+  for (let attempt = 0; attempt < 4 && report.maxLevelHeight < 12; attempt += 1) {
+    expect(await page.evaluate(() => window.__grappin!.playLevel(14))).toBe(true);
+    report = (await page.evaluate(autopilot(Infinity, 30_000, 12))) as PilotReport;
+  }
+  // Le mur du niveau 14 est à 9,8 m au-dessus du toit de départ : plus de 12 m, c'est qu'on est passé par son trou.
+  expect(report.launches).toBeGreaterThanOrEqual(1);
+  expect(report.maxLevelHeight).toBeGreaterThanOrEqual(12);
   expect(errors).toEqual([]);
 });

@@ -5,10 +5,15 @@
  * premier tient est ignoré, et la fin du geste vient du premier doigt
  * seulement : levé, annulé par le système, ou perdu. Chaque gestionnaire reçoit
  * la position du pointeur en pixels CSS, dans le repère de l'élément.
+ *
+ * Le doigt qui glisse est suivi aussi (`onMove`) : le lanceur se bande en
+ * tirant, et la traction se mesure depuis l'appui.
  */
 
 export interface PointerHandlers {
   readonly onPress: (x: number, y: number) => void;
+  /** Le pointeur actif a bougé. Jamais appelé sans doigt posé, ni pour un autre pointeur que le premier. */
+  readonly onMove: (x: number, y: number) => void;
   readonly onRelease: (x: number, y: number) => void;
 }
 
@@ -38,6 +43,11 @@ export function trackPointer(target: HTMLElement, handlers: PointerHandlers): vo
     activeId = event.pointerId;
     const { x, y } = local(event);
     handlers.onPress(x, y);
+  });
+  target.addEventListener('pointermove', (event) => {
+    if (event.pointerId !== activeId) return;
+    const { x, y } = local(event);
+    handlers.onMove(x, y);
   });
   target.addEventListener('pointerup', end);
   target.addEventListener('pointercancel', end);

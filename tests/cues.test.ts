@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { levelById } from '../src/data/levels';
 import { levelPlan } from '../src/meta/traversee';
-import { SHADOW_POINTS, fragileGauge, isDark, isOff, shadowPoints, windSide } from '../src/render/cues';
+import { SHADOW_POINTS, fragileGauge, heldKind, isDark, isOff, shadowPoints, windSide } from '../src/render/cues';
 import { ECLIPSE_LIT_SECONDS, ECLIPSE_PERIOD_SECONDS, isLit } from '../src/sim/cycles';
 import { STILL } from '../src/sim/environment';
 import { LIGHT_OFF_SECONDS, LIGHT_PERIOD_SECONDS, lightIsOff } from '../src/sim/events';
+import { launchVelocity } from '../src/sim/launcher';
 import { freeFlightAt } from '../src/sim/physics';
 import { Simulation } from '../src/sim/simulation';
 import type { AnchorKind, SimState } from '../src/sim/state';
@@ -64,6 +65,48 @@ describe('ombre prédictive', () => {
     const state = flying(hold('booster'), { x: 20, y: 0 });
     const last = shadowPoints(state, DEFAULT_TUNING).at(-1)!;
     expect(last.x).toBeCloseTo(DEFAULT_TUNING.maxSpeed * DEFAULT_TUNING.shadowSeconds, 9);
+  });
+});
+
+describe('ombre prédictive, durée donnée', () => {
+  it('une durée donnée remplace shadowSeconds, toujours en six points', () => {
+    const state = flying(hold('normal'), { x: 10, y: 4 });
+    const points = shadowPoints(state, DEFAULT_TUNING, 0.6);
+    expect(points).toHaveLength(SHADOW_POINTS);
+    expect(points.at(-1)).toEqual(freeFlightAt({ pos: state.hero.pos, vel: state.hero.vel }, 0.6, DEFAULT_TUNING));
+  });
+});
+
+describe('point tenu', () => {
+  it('est null sans corde, et dit l\'espèce du point une fois accroché', () => {
+    expect(heldKind(new Simulation(3).state)).toBeNull();
+    for (const kind of ['normal', 'fragile', 'booster', 'lanceur'] as const) expect(heldKind(hold(kind).state)).toBe(kind);
+  });
+});
+
+describe('ombre prédictive d\'un lanceur', () => {
+  it('montre le lancer tel qu\'il sera : à l\'opposé de la traction, plus loin quand on tire plus', () => {
+    const state = hold('lanceur').state;
+    const origin = state.hero.pos;
+    state.pull = { x: 1, y: -1 };
+    const pointing = { pos: origin, vel: launchVelocity(state.pull, state.env) };
+    const last = shadowPoints(state, DEFAULT_TUNING).at(-1)!;
+    expect(last).toEqual(freeFlightAt(pointing, DEFAULT_TUNING.shadowSeconds, DEFAULT_TUNING, state.env));
+    // Tirée vers le bas à droite, la bille part vers le haut à gauche.
+    expect(last.x).toBeLessThan(origin.x);
+    expect(last.y).toBeGreaterThan(origin.y);
+
+    state.pull = { x: 2, y: -2 };
+    const farther = shadowPoints(state, DEFAULT_TUNING).at(-1)!;
+    expect(Math.hypot(farther.x - origin.x, farther.y - origin.y)).toBeGreaterThan(Math.hypot(last.x - origin.x, last.y - origin.y));
+  });
+
+  it('sans traction, part tout droit vers le haut', () => {
+    const state = hold('lanceur').state;
+    const origin = state.hero.pos;
+    const last = shadowPoints(state, DEFAULT_TUNING).at(-1)!;
+    expect(last.x).toBeCloseTo(origin.x, 9);
+    expect(last.y).toBeGreaterThan(origin.y);
   });
 });
 
@@ -197,13 +240,12 @@ describe('côté du vent', () => {
   /** Départ du niveau donné, hauteur et calendrier compris. */
   const levelState = (id: number) => new Simulation(1, DEFAULT_TUNING, levelPlan(levelById(id)!)).state;
 
-  it('se lit dans le calendrier, vers la gauche au niveau 6 et vers la droite au niveau 9', () => {
+  it('se lit dans le calendrier : le premier coup de vent souffle vers la gauche au niveau 6 et vers la droite au niveau 9', () => {
     for (const [id, side] of [[6, -1], [9, 1]] as const) {
       const state = levelState(id);
-      // Rien n'a commencé : le vent n'a pas encore de côté propre, on retombe sur la droite.
-      state.eventRuntimes.forEach((runtime, i) => {
-        if (state.schedule[i]!.kind === 'vent') runtime.startStep = 5;
-      });
+      // Seul le premier coup de vent a commencé (les niveaux en ont plusieurs, de côtés différents).
+      const first = state.schedule.findIndex((event) => event.kind === 'vent');
+      state.eventRuntimes[first]!.startStep = 5;
       expect(windSide(state)).toBe(side);
     }
   });

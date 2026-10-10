@@ -1,19 +1,22 @@
+import type { Vec2 } from '../core/math/vec2';
+import { Music, silentAudio } from '../audio/music';
 import { LEVELS, levelById, type LevelDef } from '../data/levels';
+import { TITLE_TRACK, levelTrack, type TrackId } from '../data/musique';
 import { levelFor } from '../meta/levels';
 import { createProfile, endLevel, endRun, loadProfile, saveProfile, toggleTalisman, type LevelOutcome, type Profile, type ProfileStorage, type RunOutcome } from '../meta/profile';
 import { RunTracker } from '../meta/runTracker';
 import { TALISMANS, applyTalismans, type TalismanId } from '../meta/talismans';
 import { freeRunStartY, isUnlocked, levelPlan, levelTuning, unlockedLevel, type LevelResult } from '../meta/traversee';
-import { levelOfButton, type ButtonId } from '../render/buttons';
+import { levelOfButton, levelPageCount, pageOfLevel, type ButtonId } from '../render/buttons';
 import { Camera } from '../render/camera';
-import { windSide } from '../render/cues';
+import { heldKind, windSide } from '../render/cues';
 import { Effects } from '../render/effects';
 import { eventAnnouncement, levelTitle } from '../render/labels';
 import type { DeathCause, GameScreen, Renderer } from '../render/renderer';
 import type { CoursePlan } from '../sim/course';
 import type { EventKind } from '../sim/events';
 import { Simulation } from '../sim/simulation';
-import type { SimState } from '../sim/state';
+import type { AnchorKind, SimState } from '../sim/state';
 import { DEFAULT_TUNING, withTuning, type Tuning } from '../sim/tuning';
 
 /**
@@ -100,6 +103,9 @@ export interface DebugState {
   readonly freeRunStartY: number;
   /** Mode test actif : tous les niveaux ouverts, profil à part. */
   readonly testMode: boolean;
+  /** Réglage « Musique » du profil, et piste en cours de lecture, ou null. */
+  readonly musicOn: boolean;
+  readonly track: TrackId | null;
   /** Direction unitaire de la gravité : (0, -1) d'ordinaire, qui tourne vers (±1, 0) pendant une bascule. */
   readonly gravityX: number;
   readonly gravityY: number;
@@ -111,6 +117,20 @@ export interface DebugState {
   readonly fogFactor: number;
   /** Événements du niveau, dans l'ordre du calendrier : commencés ou finis. Vide en course libre. */
   readonly events: { readonly kind: EventKind; readonly started: boolean; readonly ended: boolean }[];
+  /** Espèce du point tenu en ce moment, ou null sans corde : « lanceur » dit que la traction du doigt compte. */
+  readonly heldKind: AnchorKind | null;
+  /** Traction du doigt sur un lanceur tenu, en mètres de monde (y vers le haut), plafonnée ; nulle sinon. */
+  readonly pullX: number;
+  readonly pullY: number;
+}
+
+/** Un point d'accroche tel que le banc de test le voit : de quoi viser, rien de plus. */
+export interface DebugAnchor {
+  readonly id: number;
+  readonly kind: AnchorKind;
+  /** Position en mètres de monde, y vers le haut. */
+  readonly x: number;
+  readonly y: number;
 }
 
 /**
@@ -188,11 +208,23 @@ export class Game {
   private returnTo: 'title' | 'dead' = 'title';
   /** Temps réel écoulé depuis la fin de la partie, pour le verrou d'entrée des écrans de fin. */
   private endSeconds = 0;
+  /** Page de la liste des niveaux, à partir de 0 : à l'ouverture, celle du niveau à jouer. */
+  private levelsPage = 0;
+  /**
+   * Le doigt posé, ou null : où il s'est posé et où il est, en pixels CSS. La
+   * traction d'un lanceur se mesure de l'un à l'autre. Sans position à l'appui
+   * (le banc de test appuie sans doigt), pas de traction à lire.
+   */
+  private finger: { readonly from: Vec2; at: Vec2 } | null = null;
 
-  constructor(view: GameView, settings: GameSettings, storage: ProfileStorage) {
+  /** La musique : muette par défaut, branchée sur le navigateur par `main.ts`. */
+  private readonly music: Music;
+
+  constructor(view: GameView, settings: GameSettings, storage: ProfileStorage, music: Music = new Music(silentAudio())) {
     this.view = view;
     this.settings = settings;
     this.storage = storage;
+    this.music = music;
     this.profile = loadProfile(storage);
     this.run = this.newFreeRun(settings.seed ?? randomSeed());
   }
@@ -205,6 +237,9 @@ export class Game {
    * des talismans, seuls les boutons agissent.
    */
   press(x?: number, y?: number): void {
+    // Le premier geste du joueur : le navigateur permet enfin le son.
+    this.music.unlock();
+    this.finger = x === undefined || y === undefined ? null : { from: { x, y }, at: { x, y } };
     if (this.screen === 'playing') {
       this.run.sim.press();
       return;
@@ -226,9 +261,23 @@ export class Game {
     }
   }
 
-  /** Le doigt se lève : le personnage est libéré avec sa vitesse du moment. */
-  release(): void {
-    if (this.screen === 'playing') this.run.sim.release();
+  /** Le doigt glisse, à cette position en pixels CSS. Sans effet tant qu'aucun doigt n'est posé avec une position. */
+  move(x: number, y: number): void {
+    if (this.finger) this.finger.at = { x, y };
+  }
+
+  /**
+   * Le doigt se lève : le personnage est libéré avec sa vitesse du moment. Depuis
+   * un lanceur, il est lancé à l'opposé de la traction : `pull` (mètres de
+   * monde, y vers le haut) si on la donne, sinon celle du doigt, sinon la
+   * dernière visée. Ailleurs, la traction ne compte pas.
+   */
+  release(pull?: Vec2): void {
+    if (this.screen === 'playing') {
+      const { sim } = this.run;
+      sim.release(heldKind(sim.state) === 'lanceur' ? (pull ?? this.fingerPull()) : undefined);
+    }
+    this.finger = null;
   }
 
   /**
@@ -300,11 +349,17 @@ export class Game {
     const dt = Math.min(elapsedSeconds, MAX_FRAME_SECONDS);
     if (this.screen === 'dead' || this.screen === 'won') this.endSeconds += dt;
     const { sim, camera, effects, tracker } = this.run;
-    if (this.screen === 'playing') this.advance(dt);
-    const { hero, env } = sim.state;
     camera.resize(this.view.width, this.view.height);
+    if (this.screen === 'playing') {
+      this.aimLauncher();
+      this.advance(dt);
+    }
+    const { hero, env } = sim.state;
     camera.update(dt, hero.pos, hero.vel, env, visibleExtent(sim.state));
     effects.update(dt, env.wind.x);
+    this.music.setEnabled(this.profile.music);
+    this.music.play(this.wantedTrack());
+    this.music.update(dt);
     // Le monde tourné pendant une bascule : les textes flottent là où le personnage est affiché, pas là où il est dans le repère du monde.
     const heroOnScreen = camera.worldToDisplay(hero.pos);
     for (const event of sim.drain()) {
@@ -325,7 +380,13 @@ export class Game {
       outcome: this.run.outcome,
       result: this.run.result,
       testMode: this.settings.testMode,
+      levelsPage: this.levelsPage,
     });
+  }
+
+  /** Les points d'accroche encore là, pour un pilote de test qui doit viser (un lanceur, un trou dans un mur). */
+  anchors(): DebugAnchor[] {
+    return this.run.sim.state.anchors.filter((anchor) => !anchor.broken).map((anchor) => ({ id: anchor.id, kind: anchor.kind, x: anchor.pos.x, y: anchor.pos.y }));
   }
 
   debugState(): DebugState {
@@ -361,13 +422,36 @@ export class Game {
       stars: this.run.outcome && 'level' in this.run.outcome ? this.run.outcome.stars : 0,
       freeRunStartY: freeRunStartY(this.profile),
       testMode: this.settings.testMode,
+      musicOn: this.profile.music,
+      track: this.music.playing,
       gravityX: state.env.gravityDir.x,
       gravityY: state.env.gravityDir.y,
       windX: state.env.wind.x,
       lightsOff: state.lightsOff,
       fogFactor: state.fogFactor,
       events: state.schedule.map((event, index) => ({ kind: event.kind, started: state.eventRuntimes[index]!.startStep !== null, ended: state.eventRuntimes[index]!.endStep !== null })),
+      heldKind: heldKind(state),
+      pullX: state.pull.x,
+      pullY: state.pull.y,
     };
+  }
+
+  /**
+   * Traction du doigt posé, en mètres de monde : son déplacement depuis l'appui,
+   * converti avec l'échelle et la rotation de la caméra du moment (y de l'écran
+   * vers le bas, y du monde vers le haut). Indéfinie sans doigt à suivre.
+   */
+  private fingerPull(): Vec2 | undefined {
+    if (!this.finger) return undefined;
+    return this.run.camera.screenToWorldDelta(this.finger.at.x - this.finger.from.x, this.finger.at.y - this.finger.from.y);
+  }
+
+  /** Tenu à un lanceur, le doigt qui tire règle la traction à chaque image. */
+  private aimLauncher(): void {
+    const { sim } = this.run;
+    if (heldKind(sim.state) !== 'lanceur') return;
+    const pull = this.fingerPull();
+    if (pull) sim.aim(pull);
   }
 
   /** Bannière d'un événement de niveau qui commence ou finit, quand il y a quelque chose à dire. */
@@ -431,13 +515,37 @@ export class Game {
     if (button === 'talismans') this.openTalismans('title');
     else if (button === 'levels') this.openLevels();
     else if (button === 'free') this.playFree();
+    else if (button === 'music') this.toggleMusic();
     else this.startLevel(unlockedLevel(this.profile), true);
   }
 
-  /** Liste des niveaux : « Retour » ramène au titre, un niveau débloqué se lance. Un niveau verrouillé ne réagit pas, même si le rendu le signalait. */
+  /** Le réglage « Musique » du titre : coupe ou remet la musique, et s'en souvient dans le profil. */
+  private toggleMusic(): void {
+    this.profile = { ...this.profile, music: !this.profile.music };
+    saveProfile(this.storage, this.profile);
+    this.music.setEnabled(this.profile.music);
+  }
+
+  /** La piste à jouer : celle du menu hors partie, celle du niveau en partie, et en course libre celle du niveau qui couvre la hauteur du moment. */
+  private wantedTrack(): TrackId {
+    if (this.screen !== 'playing' && this.screen !== 'dead' && this.screen !== 'won') return TITLE_TRACK;
+    const { level, sim } = this.run;
+    if (level) return levelTrack(level.id);
+    const y = sim.state.hero.pos.y;
+    const covering = LEVELS.find((candidate) => y >= candidate.startY && y < candidate.endY) ?? LEVELS[LEVELS.length - 1]!;
+    return levelTrack(covering.id);
+  }
+
+  /**
+   * Liste des niveaux : « Retour » ramène au titre, les boutons de page tournent
+   * la liste, un niveau débloqué se lance. Un niveau verrouillé ne réagit pas,
+   * même si le rendu le signalait.
+   */
   private pressLevels(button: ButtonId | null): void {
     const id = levelOfButton(button);
     if (button === 'back') this.screen = 'title';
+    else if (button === 'suite') this.levelsPage = Math.min(levelPageCount() - 1, this.levelsPage + 1);
+    else if (button === 'precedents') this.levelsPage = Math.max(0, this.levelsPage - 1);
     else if (id !== null) this.startLevel(id, false);
   }
 
@@ -462,9 +570,14 @@ export class Game {
     this.screen = 'talismans';
   }
 
-  /** Ouvre la liste des niveaux. Depuis un écran de fin, la partie finie est rendue au titre : « Retour » y retrouve une course libre neuve. */
+  /**
+   * Ouvre la liste des niveaux, à la page du niveau à jouer. Depuis un écran de
+   * fin, la partie finie est rendue au titre : « Retour » y retrouve une course
+   * libre neuve.
+   */
   private openLevels(): void {
     if (this.screen !== 'title') this.run = this.newFreeRun(this.freeSeed());
+    this.levelsPage = pageOfLevel(unlockedLevel(this.profile));
     this.screen = 'levels';
   }
 

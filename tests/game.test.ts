@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Game, readSettings } from '../src/app/game';
+import { Music, type AudioPlayer } from '../src/audio/music';
+import { loadProfile as loadSavedProfile } from '../src/meta/profile';
 import { LEVELS, levelById } from '../src/data/levels';
 import { createProfile, loadProfile, memoryStorage, saveProfile, type LevelOutcome, type Profile, type ProfileStorage, type RunOutcome } from '../src/meta/profile';
 import type { TalismanId } from '../src/meta/talismans';
@@ -7,6 +9,7 @@ import { FIRST_CLEAR_XP, STAR_XP, freeRunStartY, unlockedLevel, type LevelResult
 import type { ButtonId } from '../src/render/buttons';
 import type { Camera } from '../src/render/camera';
 import type { DeathCause, GameFrame, GameScreen } from '../src/render/renderer';
+import { PULL_MAX } from '../src/sim/launcher';
 import type { SimState } from '../src/sim/state';
 import { DEFAULT_TUNING, type Tuning } from '../src/sim/tuning';
 
@@ -37,6 +40,8 @@ interface Seen {
   lastTextAt: { x: number; y: number }[];
   /** Le bouton que le faux rendu trouve sous un point : aucun tant que le test n'en pose pas. */
   hit: (x: number, y: number) => ButtonId | null;
+  /** Page de la liste des niveaux telle que la dernière image l'a reçue. */
+  lastLevelsPage: number;
 }
 
 /** Profil d'un joueur déjà avancé : de l'expérience et des talismans équipés. */
@@ -45,7 +50,7 @@ function profileWith(xp: number, equipped: TalismanId[] = []): Profile {
 }
 
 /** Jeu relié à un faux rendu qui note ce qu'on lui demande de dessiner, et à un stockage mémoire, vide ou garni d'un profil. */
-function makeGame(search = '', saved?: Profile): { game: Game; seen: Seen; storage: ProfileStorage } {
+function makeGame(search = '', saved?: Profile, music?: Music): { game: Game; seen: Seen; storage: ProfileStorage } {
   const seen: Seen = {
     screens: [],
     lastCause: null,
@@ -64,6 +69,7 @@ function makeGame(search = '', saved?: Profile): { game: Game; seen: Seen; stora
     lastStreaksX: [],
     lastTextAt: [],
     hit: () => null,
+    lastLevelsPage: 0,
   };
   const view = {
     width: 390,
@@ -80,6 +86,7 @@ function makeGame(search = '', saved?: Profile): { game: Game; seen: Seen; stora
       seen.lastBannerDetail = frame.effects.banner?.detail ?? null;
       seen.lastTuning = frame.tuning;
       seen.lastTestMode = frame.testMode;
+      seen.lastLevelsPage = frame.levelsPage;
       seen.lastProfile = frame.profile;
       seen.lastOutcome = frame.outcome;
       seen.lastResult = frame.result;
@@ -90,7 +97,7 @@ function makeGame(search = '', saved?: Profile): { game: Game; seen: Seen; stora
   };
   const storage = memoryStorage();
   if (saved) saveProfile(storage, saved);
-  return { game: new Game(view, readSettings(search), storage), seen, storage };
+  return { game: new Game(view, readSettings(search), storage, music), seen, storage };
 }
 
 /** Comme `makeGame`, mais la course libre est déjà lancée, sans appui d'accroche : l'URL (brume, hauteur des paliers, graine) y règne, ce qu'un niveau ne permet pas. */
@@ -303,6 +310,7 @@ describe('jeu', () => {
         'goal',
         'gravityX',
         'gravityY',
+        'heldKind',
         'height',
         'level',
         'levelHeight',
@@ -313,6 +321,8 @@ describe('jeu', () => {
         'obstacles',
         'pickups',
         'pos',
+        'pullX',
+        'pullY',
         'ropeLength',
         'runs',
         'score',
@@ -323,6 +333,8 @@ describe('jeu', () => {
         'targetId',
         'tier',
         'testMode',
+        'musicOn',
+        'track',
         'unlockedLevel',
         'vel',
         'windX',
@@ -1274,5 +1286,373 @@ describe('ouvrir tous les niveaux', () => {
     const { game } = makeGame('', saved);
     game.unlockAll();
     expect(game.currentProfile().levels['2']).toEqual({ stars: 1, bestScore: 40 });
+  });
+});
+
+/** Le niveau 14, en mode test : son premier point est un lanceur à 4 m du toit, accroché dès l'appui. */
+function launcherGame(): ReturnType<typeof makeGame> {
+  const made = makeGame('?test=1');
+  expect(made.game.playLevel(14)).toBe(true);
+  made.game.frame(0.001);
+  return made;
+}
+
+/** Pose le doigt en (100, 300) : accroche le lanceur. */
+const FINGER = { x: 100, y: 300 };
+function grabLauncher(made: ReturnType<typeof makeGame>): void {
+  made.game.press(FINGER.x, FINGER.y);
+  expect(made.game.debugState()).toMatchObject({ attached: true, heldKind: 'lanceur', pullX: 0, pullY: 0 });
+}
+
+describe('lanceur : le doigt tire', () => {
+  it('le doigt qui descend tire le personnage vers le bas du monde : mètres de monde, y inversé, à l\'échelle de la caméra', () => {
+    const made = launcherGame();
+    const { game, seen } = made;
+    grabLauncher(made);
+    const scale = seen.camera!.scale;
+    game.move(FINGER.x + 1 * scale, FINGER.y + 2 * scale);
+    game.frame(0.001);
+    const state = game.debugState();
+    expect(state.pullX).toBeCloseTo(1, 9);
+    expect(state.pullY).toBeCloseTo(-2, 9);
+    // Une fois les pas passés, le personnage est affiché reculé de la traction, sous le lanceur.
+    game.frame(0.05);
+    const launcher = seen.state!.anchors.find((anchor) => anchor.kind === 'lanceur')!;
+    expect(seen.state!.hero.pos.x).toBeCloseTo(launcher.pos.x + 1, 9);
+    expect(seen.state!.hero.pos.y).toBeCloseTo(launcher.pos.y - 2, 9);
+  });
+
+  it('un doigt qui monte pousse le personnage au-dessus du lanceur, un doigt à gauche à gauche', () => {
+    const made = launcherGame();
+    const { game, seen } = made;
+    grabLauncher(made);
+    const scale = seen.camera!.scale;
+    game.move(FINGER.x - 0.5 * scale, FINGER.y - 1 * scale);
+    game.frame(0.001);
+    expect(game.debugState().pullX).toBeCloseTo(-0.5, 9);
+    expect(game.debugState().pullY).toBeCloseTo(1, 9);
+  });
+
+  it('la traction est plafonnée à 2,5 m, et un doigt qui revient à l\'appui détend tout', () => {
+    const made = launcherGame();
+    const { game } = made;
+    grabLauncher(made);
+    game.move(FINGER.x + 900, FINGER.y);
+    game.frame(0.001);
+    expect(game.debugState().pullX).toBeCloseTo(PULL_MAX, 9);
+    expect(game.debugState().pullY).toBeCloseTo(0, 9);
+    game.move(FINGER.x, FINGER.y);
+    game.frame(0.001);
+    expect(game.debugState()).toMatchObject({ pullX: 0, pullY: 0 });
+  });
+
+  it('relâcher lance à l\'opposé de la traction, avec la même traction que l\'image, et le journal la garde', () => {
+    const made = launcherGame();
+    const { game, seen } = made;
+    grabLauncher(made);
+    const scale = seen.camera!.scale;
+    game.move(FINGER.x + 1 * scale, FINGER.y + 2 * scale);
+    game.frame(0.05);
+    game.release();
+    const state = game.debugState();
+    expect(state.attached).toBe(false);
+    expect(state.heldKind).toBeNull();
+    expect(state.pullX).toBe(0);
+    // À l'opposé de (1, -2) : vers la gauche et vers le haut, à la vitesse de la traction de 2,24 m.
+    const speed = 6 + 9 * (Math.hypot(1, 2) / PULL_MAX);
+    expect(state.vel.x).toBeCloseTo((-1 / Math.hypot(1, 2)) * speed, 6);
+    expect(state.vel.y).toBeCloseTo((2 / Math.hypot(1, 2)) * speed, 6);
+    const last = seen.state!.inputs.at(-1)!;
+    expect(last.kind).toBe('release');
+    expect(last.pull!.x).toBeCloseTo(1, 6);
+    expect(last.pull!.y).toBeCloseTo(-2, 6);
+  });
+
+  it('relâcher sans glisser lance tout droit vers le haut, doucement', () => {
+    const made = launcherGame();
+    const { game } = made;
+    grabLauncher(made);
+    game.frame(0.05);
+    game.release();
+    const { vel } = game.debugState();
+    expect(vel.x).toBe(0);
+    expect(vel.y).toBeCloseTo(6, 9);
+  });
+
+  it('release(pull) donne la traction en mètres de monde, sans doigt', () => {
+    const made = launcherGame();
+    const { game, seen } = made;
+    made.game.press();
+    expect(game.debugState().heldKind).toBe('lanceur');
+    game.frame(0.05);
+    game.release({ x: 0, y: -2.5 });
+    expect(game.debugState().vel.y).toBeCloseTo(15, 9);
+    expect(seen.state!.inputs.at(-1)).toMatchObject({ kind: 'release', pull: { x: 0, y: -2.5 } });
+  });
+
+  it('sans position de doigt, relâcher reprend la dernière visée', () => {
+    const made = launcherGame();
+    const { game, seen } = made;
+    made.game.press();
+    seen.state!.pull = { x: 0, y: -1 };
+    game.release();
+    expect(game.debugState().vel.y).toBeCloseTo(6 + 9 * (1 / PULL_MAX), 9);
+  });
+
+  it('monde basculé, tirer vers le bas de l\'écran tire dans le sens de la gravité du monde', () => {
+    const made = launcherGame();
+    const { game, seen } = made;
+    grabLauncher(made);
+    seen.state!.env = { gravityDir: { x: 1, y: 0 }, wind: { x: 0, y: 0 } };
+    // Une image sans pas de simulation : la caméra prend l'angle de la gravité.
+    game.frame(0.001);
+    expect(seen.camera!.angle).toBeCloseTo(Math.PI / 2, 9);
+    const scale = seen.camera!.scale;
+    game.move(FINGER.x, FINGER.y + 1.5 * scale);
+    game.frame(0.001);
+    expect(game.debugState().pullX).toBeCloseTo(1.5, 9);
+    expect(game.debugState().pullY).toBeCloseTo(0, 9);
+  });
+
+  it('hors lanceur, rien ne change : le doigt qui glisse ne tire rien et le journal n\'a pas de traction', () => {
+    const { game, seen } = makeGame('?graine=3');
+    game.press(FINGER.x, FINGER.y);
+    expect(game.debugState()).toMatchObject({ attached: true, heldKind: 'normal' });
+    game.move(FINGER.x + 80, FINGER.y + 120);
+    game.frame(0.05);
+    expect(game.debugState()).toMatchObject({ pullX: 0, pullY: 0 });
+    game.release({ x: 1, y: -1 });
+    expect(game.debugState().heldKind).toBeNull();
+    const last = seen.state!.inputs.at(-1)!;
+    expect(last).toEqual({ step: last.step, kind: 'release' });
+    expect(seen.state!.pull).toEqual({ x: 0, y: 0 });
+  });
+
+  it('un mouvement sans doigt posé, ou après le relâché, n\'a aucun effet', () => {
+    const made = launcherGame();
+    const { game } = made;
+    game.move(500, 500);
+    grabLauncher(made);
+    game.frame(0.05);
+    game.release();
+    game.move(400, 400);
+    game.frame(0.05);
+    expect(game.debugState()).toMatchObject({ pullX: 0, pullY: 0 });
+  });
+
+  it('un appui sur l\'écran titre qui accroche un lanceur mesure la traction depuis cet appui', () => {
+    // Le niveau 14 débloqué : l'appui du titre joue le niveau le plus avancé, premier point : le lanceur.
+    const { game, seen } = makeGame('', clearedProfile(13));
+    expect(game.debugState().unlockedLevel).toBe(14);
+    game.press(FINGER.x, FINGER.y);
+    expect(game.debugState()).toMatchObject({ screen: 'playing', levelId: 14, heldKind: 'lanceur' });
+    const scale = seen.camera?.scale ?? 39;
+    game.move(FINGER.x, FINGER.y + 1 * scale);
+    game.frame(0.001);
+    expect(game.debugState().pullY).toBeCloseTo(-1, 6);
+  });
+});
+
+describe('lanceur : un pilote franchit un mur à trou', () => {
+  /**
+   * Un pilote qui sait lancer : sur un lanceur, il vise le point normal le plus
+   * proche au-dessus et tire à l'opposé, aux sept dixièmes de la force ; dans la
+   * seconde et demie qui suit, il n'attrape que ce qui est au-dessus de lui et
+   * à moins de quatre mètres, c'est-à-dire une fois le mur passé. Le reste est le
+   * pilote ordinaire. Renvoie une fonction qui joue une image de 1/60 s.
+   */
+  function launcherPilot(game: Game): { frame: () => void; launches: () => number } {
+    const dt = 1 / 60;
+    let time = 0;
+    let holdSince = 0;
+    let launchedAt = -Infinity;
+    let launches = 0;
+    const frame = (): void => {
+      game.frame(dt);
+      time += dt;
+      const s = game.debugState();
+      if (s.screen !== 'playing') return;
+      if (!s.attached && s.targetId !== null) {
+        const target = time - launchedAt < 1.5 ? game.anchors().find((anchor) => anchor.id === s.targetId) : undefined;
+        if (target && (Math.hypot(target.x - s.pos.x, target.y - s.pos.y) > 4 || target.y < s.pos.y)) return;
+        game.press();
+        holdSince = time;
+      } else if (s.heldKind === 'lanceur') {
+        if (time - holdSince > 0.15 && aimAtNextAnchor(game)) {
+          launchedAt = time;
+          launches += 1;
+        }
+      } else if (s.attached && time - holdSince > 0.08) {
+        const speed = Math.hypot(s.vel.x, s.vel.y);
+        const ready = speed >= 8 || (s.ropeLength !== null && s.ropeLength <= 1.5 + 1e-9);
+        const ax = Math.abs(s.vel.x);
+        const slope = ax > 0 ? s.vel.y / ax : Infinity;
+        if ((ready && s.vel.y > 1 && slope > 0.6 && slope < 1.8) || time - holdSince > 2.5) game.release();
+      }
+    };
+    return { frame, launches: () => launches };
+  }
+
+  it('vise le point au-dessus en tirant à l\'opposé, passe le trou du mur et reprend la chaîne', () => {
+    const { game, seen } = makeGame('?test=1');
+    expect(game.playLevel(14)).toBe(true);
+    // Le mur du niveau 14 est à 9,8 m au-dessus du toit de départ, son trou décalé du lanceur : tout droit, le lancer le heurterait.
+    const pilot = launcherPilot(game);
+    for (let frames = 0; frames < 60 * 20 && game.debugState().screen === 'playing' && game.debugState().levelHeight < 16; frames += 1) pilot.frame();
+    expect(pilot.launches()).toBe(1);
+    expect(game.debugState().screen).toBe('playing');
+    expect(game.debugState().levelHeight).toBeGreaterThanOrEqual(16);
+    // Le journal garde la traction du lancer : tirée vers le bas, et un peu à gauche pour passer à droite.
+    const release = seen.state!.inputs.find((input) => input.kind === 'release' && input.pull);
+    expect(release!.pull!.y).toBeLessThan(0);
+    expect(release!.pull!.x).toBeLessThan(0);
+  });
+
+  it('tout droit, le même lancer heurte le mur : la visée compte', () => {
+    const { game } = makeGame('?test=1');
+    game.playLevel(14);
+    game.frame(0.001);
+    game.press();
+    game.frame(0.05);
+    game.release({ x: 0, y: -1.8 });
+    for (let frames = 0; frames < 120 && game.debugState().screen === 'playing'; frames += 1) game.frame(1 / 60);
+    expect(game.debugState()).toMatchObject({ screen: 'dead', cause: 'obstacle' });
+  });
+});
+
+/** Relâche le lanceur tenu en visant le point normal le plus proche au-dessus, aux sept dixièmes de la force. Faux sans lanceur tenu. */
+function aimAtNextAnchor(game: Game): boolean {
+  const s = game.debugState();
+  if (s.heldKind !== 'lanceur') return false;
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const anchor of game.anchors()) {
+    if (anchor.kind !== 'normal' || anchor.y < s.pos.y + 1) continue;
+    const d = Math.hypot(anchor.x - s.pos.x, anchor.y - s.pos.y);
+    if (!best || d < best.d) best = { x: anchor.x - s.pos.x, y: anchor.y - s.pos.y, d };
+  }
+  const dir = best ?? { x: 0, y: 1, d: 1 };
+  game.release({ x: (-dir.x / dir.d) * PULL_MAX * 0.7, y: (-dir.y / dir.d) * PULL_MAX * 0.7 });
+  return true;
+}
+
+describe('liste des niveaux : deux pages de dix', () => {
+  const BUTTON = { x: 195, y: 500 };
+
+  function tapping(seen: Seen, id: ButtonId): void {
+    seen.hit = (x, y) => (x === BUTTON.x && y === BUTTON.y ? id : null);
+  }
+  function tap(game: Game, seen: Seen, id: ButtonId): void {
+    tapping(seen, id);
+    game.press(BUTTON.x, BUTTON.y);
+    game.release();
+  }
+
+  it('s\'ouvre sur la page du niveau à jouer : la première pour un nouveau joueur, la seconde dès le niveau 11', () => {
+    const fresh = makeGame('?graine=3');
+    tap(fresh.game, fresh.seen, 'levels');
+    fresh.game.frame(0.016);
+    expect(fresh.seen.lastLevelsPage).toBe(0);
+
+    const advanced = makeGame('?graine=3', clearedProfile(10));
+    expect(advanced.game.debugState().unlockedLevel).toBe(11);
+    tap(advanced.game, advanced.seen, 'levels');
+    advanced.game.frame(0.016);
+    expect(advanced.seen.lastLevelsPage).toBe(1);
+
+    const middle = makeGame('?graine=3', clearedProfile(9));
+    tap(middle.game, middle.seen, 'levels');
+    middle.game.frame(0.016);
+    expect(middle.seen.lastLevelsPage).toBe(0);
+  });
+
+  it('« suite » et « precedents » tournent les pages sans jamais sortir de la liste', () => {
+    const { game, seen } = makeGame('?graine=3');
+    tap(game, seen, 'levels');
+    tap(game, seen, 'precedents');
+    game.frame(0.016);
+    expect(seen.lastLevelsPage).toBe(0);
+    tap(game, seen, 'suite');
+    game.frame(0.016);
+    expect(seen.lastLevelsPage).toBe(1);
+    tap(game, seen, 'suite');
+    game.frame(0.016);
+    expect(seen.lastLevelsPage).toBe(1);
+    tap(game, seen, 'precedents');
+    game.frame(0.016);
+    expect(seen.lastLevelsPage).toBe(0);
+    expect(game.debugState()).toMatchObject({ screen: 'levels', step: 0 });
+  });
+
+  it('un niveau de la seconde page se lance depuis elle, « Retour » ramène au titre, et la liste rouvre sur la page du niveau à jouer', () => {
+    const { game, seen } = makeGame('?graine=3', clearedProfile(10));
+    tap(game, seen, 'levels');
+    tap(game, seen, 'precedents');
+    tap(game, seen, 'back');
+    expect(game.debugState().screen).toBe('title');
+    tap(game, seen, 'levels');
+    game.frame(0.016);
+    expect(seen.lastLevelsPage).toBe(1);
+    tap(game, seen, 'niveau-11');
+    expect(game.debugState()).toMatchObject({ screen: 'playing', mode: 'level', levelId: 11 });
+    // Un niveau verrouillé de la même page ne réagit pas.
+    game.restart();
+    tap(game, seen, 'levels');
+    tap(game, seen, 'niveau-12');
+    expect(game.debugState().screen).toBe('levels');
+  });
+
+  it('depuis l\'écran de fin, la liste s\'ouvre aussi sur la page du niveau à jouer', () => {
+    const { game, seen } = makeGame('?graine=3&test=1', clearedProfile(10));
+    game.playLevel(11);
+    game.frame(0.001);
+    seen.state!.hero = { pos: { x: 0, y: seen.state!.finishY! - 0.5 }, vel: { x: 0, y: 8 }, grounded: false };
+    for (let frames = 0; frames < 20 && game.debugState().screen === 'playing'; frames += 1) game.frame(0.05);
+    expect(game.debugState().screen).toBe('won');
+    settle(game);
+    tap(game, seen, 'levels');
+    game.frame(0.016);
+    expect(game.debugState().screen).toBe('levels');
+    expect(seen.lastLevelsPage).toBe(1);
+  });
+});
+
+describe('musique', () => {
+  /** Un faux lecteur : il suffit de savoir ce qui joue. */
+  function fakeAudio(): (src: string) => AudioPlayer {
+    return () => ({ loop: false, volume: 1, paused: true, play: () => undefined, pause: () => undefined, release: () => undefined });
+  }
+
+  it('rien avant le premier appui ; puis la piste du niveau, celle du menu sur le titre, et en course libre celle du niveau qui couvre la hauteur', () => {
+    const music = new Music(fakeAudio());
+    const { game, seen } = makeGame('', clearedProfile(2), music);
+    game.frame(0.016);
+    expect(music.playing).toBeNull();
+    expect(game.debugState()).toMatchObject({ musicOn: true, track: null });
+    // L'appui du titre joue le niveau 3 : c'est aussi le premier geste, le son est permis.
+    game.press(10, 10);
+    game.frame(0.016);
+    expect(game.debugState()).toMatchObject({ screen: 'playing', levelId: 3, track: 'biome2-1' });
+    game.restart();
+    game.frame(0.016);
+    expect(game.debugState().track).toBe('menu');
+    game.playFree();
+    game.frame(0.016);
+    // La course libre part du départ du niveau 3 : sa piste.
+    expect(game.debugState().track).toBe('biome2-1');
+    expect(seen.state?.hero.pos.y).toBeGreaterThanOrEqual(levelOf(3).startY);
+  });
+
+  it('le bouton « Musique » du titre coupe et remet la musique, et le réglage survit dans le profil', () => {
+    const music = new Music(fakeAudio());
+    const { game, seen, storage } = makeGame('', undefined, music);
+    seen.hit = () => 'music';
+    game.press(1, 1);
+    game.frame(0.016);
+    expect(game.debugState()).toMatchObject({ screen: 'title', musicOn: false, track: null });
+    expect(loadSavedProfile(storage).music).toBe(false);
+    game.press(1, 1);
+    game.frame(0.016);
+    expect(game.debugState()).toMatchObject({ musicOn: true, track: 'menu' });
+    expect(loadSavedProfile(storage).music).toBe(true);
   });
 });

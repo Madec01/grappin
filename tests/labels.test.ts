@@ -3,7 +3,8 @@ import { levelById } from '../src/data/levels';
 import { MISSIONS, missionById } from '../src/meta/missions';
 import { PERFECT_STREAK_STAR } from '../src/meta/traversee';
 import type { EventKind } from '../src/sim/events';
-import { equippedLine, eventAnnouncement, levelEvents, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, slotsLine, starLines } from '../src/render/labels';
+import { levelsOfPage } from '../src/render/buttons';
+import { equippedLine, eventAnnouncement, levelEvents, levelPageLabel, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, slotsLine, starLines } from '../src/render/labels';
 
 const mission = (id: string) => {
   const def = missionById(id);
@@ -127,5 +128,17 @@ describe('liste des niveaux du mode test', () => {
     const all = levelById(9);
     if (!all) throw new Error('Niveau 9 attendu');
     expect(levelEvents(all)).toBe('vent 10 m · pluie 40 m · câbles 62 m · …');
+  });
+});
+
+describe('bouton d\'une page de la liste des niveaux', () => {
+  it('annonce les niveaux de la page : « Niveaux 11 à 20 », « Niveaux 1 à 10 »', () => {
+    expect(levelPageLabel(levelsOfPage(1))).toBe('Niveaux 11 à 20');
+    expect(levelPageLabel(levelsOfPage(0))).toBe('Niveaux 1 à 10');
+  });
+
+  it('un niveau seul s\'écrit au singulier, une page vide reste « Niveaux »', () => {
+    expect(levelPageLabel(levelsOfPage(1).slice(0, 1))).toBe('Niveau 11');
+    expect(levelPageLabel([])).toBe('Niveaux');
   });
 });

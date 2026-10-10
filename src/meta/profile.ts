@@ -35,6 +35,8 @@ export interface Profile {
   readonly completedMissions: string[];
   /** Niveaux, par numéro en texte pour le JSON. */
   readonly levels: Record<string, LevelRecord>;
+  /** Réglage : la musique joue. Vrai par défaut. */
+  readonly music: boolean;
 }
 
 /** Lecture et écriture d'un texte : `localStorage` dans le navigateur, une mémoire dans les tests. */
@@ -58,6 +60,7 @@ export function createProfile(): Profile {
     missions: nextMissions([], [], ACTIVE_MISSIONS).map((id) => ({ id, progress: 0 })),
     completedMissions: [],
     levels: {},
+    music: true,
   };
 }
 
@@ -121,6 +124,8 @@ export function loadProfile(storage: ProfileStorage): Profile {
       missions: missions.length > 0 ? missions : fresh.missions,
       completedMissions,
       levels,
+      // Un profil d'avant ce réglage n'a pas la clé : la musique joue.
+      music: raw.music !== false,
     };
     return refillMissions(profile);
   } catch {

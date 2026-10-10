@@ -29,6 +29,7 @@ function track() {
   const calls: string[] = [];
   trackPointer(element, {
     onPress: (x, y) => calls.push(`press ${x},${y}`),
+    onMove: (x, y) => calls.push(`move ${x},${y}`),
     onRelease: (x, y) => calls.push(`release ${x},${y}`),
   });
   return { fire, captured, calls };
@@ -69,6 +70,26 @@ describe('suivi du pointeur', () => {
       fire(type, { clientX: 10, clientY: 20 });
       expect(calls).toEqual(['press 0,0', 'release 0,0']);
     }
+  });
+
+  it('suit le doigt qui glisse, en pixels CSS dans le repère de l\'élément', () => {
+    const { fire, calls } = track();
+    fire('pointerdown', { clientX: 110, clientY: 320 });
+    fire('pointermove', { clientX: 120, clientY: 360 });
+    fire('pointermove', { clientX: 90, clientY: 420 });
+    fire('pointerup', { clientX: 90, clientY: 420 });
+    expect(calls).toEqual(['press 100,300', 'move 110,340', 'move 80,400', 'release 80,400']);
+  });
+
+  it('ignore un mouvement sans doigt posé, après le relâchement, ou d\'un autre pointeur', () => {
+    const { fire, calls } = track();
+    fire('pointermove', { clientX: 50, clientY: 50 });
+    fire('pointerdown', { pointerId: 1, clientX: 20, clientY: 30 });
+    fire('pointermove', { pointerId: 2, clientX: 200, clientY: 300 });
+    expect(calls).toEqual(['press 10,10']);
+    fire('pointerup', { pointerId: 1, clientX: 20, clientY: 30 });
+    fire('pointermove', { pointerId: 1, clientX: 60, clientY: 70 });
+    expect(calls).toEqual(['press 10,10', 'release 10,10']);
   });
 
   it('ignore les boutons autres que le principal', () => {

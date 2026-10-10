@@ -49,12 +49,24 @@ function startPreview(): ChildProcess {
   return spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' });
 }
 
+/** Touche le centre du bouton `id` de l'écran affiché, sitôt qu'une image l'a dessiné. */
+async function tapButton(page: Page, id: string): Promise<void> {
+  await page.waitForFunction((target) => window.__grappin?.buttons().some((b) => b.id === target), id);
+  const button = (await page.evaluate(() => window.__grappin!.buttons())).find((b) => b.id === id)!;
+  await page.evaluate(({ x, y }) => window.__grappin!.press(x, y), { x: button.x + button.width / 2, y: button.y + button.height / 2 });
+  await page.evaluate(() => window.__grappin!.release());
+}
+
 /**
  * Pilote automatique injecté dans la page, même stratégie que `scripts/robot.ts` :
  * accroche dès qu'un point est visé, garde le doigt posé jusqu'à une vitesse
  * cible ou une corde au plus court, lâche dans la fenêtre du lâcher parfait,
- * jamais plus de deux secondes et demie pendu. Il passe par la même API que
- * les tests de fumée, jusqu'à la mort ou la fin du temps imparti.
+ * jamais plus de deux secondes et demie pendu. Sur un lanceur, il vise le point
+ * normal le plus proche au-dessus et tire à l'opposé aux sept dixièmes de la
+ * force (`release(pullX, pullY)`, en mètres de monde) ; dans la seconde et demie
+ * qui suit, il n'attrape que ce qui est au-dessus de lui et à moins de quatre
+ * mètres, c'est-à-dire une fois le mur à trou passé. Il passe par la même API
+ * que les tests de fumée, jusqu'à la mort ou la fin du temps imparti.
  */
 async function autoplay(page: Page, seconds: number, untilHeight = Infinity, untilLevelHeight = Infinity): Promise<void> {
   // Le pilote est passé en texte : tsx réécrit les fonctions avec un helper `__name` qui n'existe pas dans la page.
@@ -65,13 +77,30 @@ async function autoplay(page: Page, seconds: number, untilHeight = Infinity, unt
     const untilLevelHeight = ${Number.isFinite(untilLevelHeight) ? untilLevelHeight : 'Infinity'};
     const start = performance.now();
     let holdSince = 0;
+    let launchedAt = -1e9;
+    const gap = (a, s) => Math.hypot(a.x - s.pos.x, a.y - s.pos.y);
     const tick = () => {
       const s = api.state();
       const now = performance.now();
       if (s.screen === 'dead' || s.screen === 'won' || now - start > limitMs || s.height >= untilHeight || s.levelHeight >= untilLevelHeight) { done(); return; }
       if (!s.attached && s.targetId !== null) {
-        api.press();
-        holdSince = now;
+        const target = now - launchedAt < 1500 ? api.anchors().find((a) => a.id === s.targetId) : undefined;
+        if (!target || (gap(target, s) <= 4 && target.y >= s.pos.y)) {
+          api.press();
+          holdSince = now;
+        }
+      } else if (s.attached && s.heldKind === 'lanceur') {
+        if (now - holdSince > 150) {
+          let best = null;
+          for (const a of api.anchors()) {
+            if (a.kind !== 'normal' || a.y < s.pos.y + 1) continue;
+            const d = gap(a, s);
+            if (!best || d < best.d) best = { x: a.x - s.pos.x, y: a.y - s.pos.y, d };
+          }
+          const dir = best || { x: 0, y: 1, d: 1 };
+          api.release((-dir.x / dir.d) * 1.75, (-dir.y / dir.d) * 1.75);
+          launchedAt = now;
+        }
       } else if (s.attached && now - holdSince > 80) {
         const speed = Math.hypot(s.vel.x, s.vel.y);
         const ready = speed >= 8 || (s.ropeLength !== null && s.ropeLength <= 1.5 + 1e-9);
@@ -204,6 +233,12 @@ async function main(): Promise<void> {
       await testPage.evaluate(() => window.__grappin!.release());
       await testPage.waitForTimeout(300);
       await testPage.screenshot({ path: join(outDir, '18-mode-test-niveaux.png') });
+      // La seconde page de la liste (niveaux 11 à 20), puis retour à la première pour la suite du scénario.
+      await tapButton(testPage, 'suite');
+      await testPage.waitForTimeout(300);
+      await testPage.screenshot({ path: join(outDir, '18-mode-test-niveaux-suite.png') });
+      await tapButton(testPage, 'precedents');
+      await testPage.waitForTimeout(300);
       // Un niveau lointain lancé depuis la liste : le rappel « MODE TEST » pendant la partie.
       const row = (await testPage.evaluate(() => window.__grappin!.buttons())).find((b) => b.id === 'niveau-8');
       if (row) {
@@ -214,17 +249,41 @@ async function main(): Promise<void> {
         await testPage.screenshot({ path: join(outDir, '19-mode-test-partie.png') });
       }
     }
-    // Le lanceur : le niveau 11 en mode test, le pilote s'y tient sans savoir lancer, le temps d'une image.
-    await testPage.evaluate(() => window.__grappin!.restart());
-    await testPage.waitForFunction(() => window.__grappin?.state().screen === 'title');
+    // Le lanceur : le niveau 14 en mode test commence par un lanceur, à quatre mètres du toit. Le doigt posé s'y accroche, puis tire
+    // vers le bas et à gauche (le trou du mur est à droite) : la fronde se bande, l'ombre montre le vol. Relâché, le personnage part à l'opposé.
+    // La brume rattrape celui qui s'attarde : chaque image repart d'un niveau neuf, pour ne jamais photographier un écran de fin.
     await testPage.evaluate(() => {
+      window.__grappin!.restart();
       window.__grappin!.unlockAll();
-      window.__grappin!.playLevel(11);
     });
+    const pullShot = async (name: string, to: { x: number; y: number } | null, lift = false): Promise<void> => {
+      await testPage.evaluate(() => window.__grappin!.playLevel(14));
+      await testPage.waitForFunction(() => window.__grappin?.state().screen === 'playing');
+      await testPage.mouse.move(250, 640);
+      await testPage.mouse.down();
+      await testPage.waitForFunction(() => window.__grappin?.state().heldKind === 'lanceur');
+      if (to) await testPage.mouse.move(to.x, to.y, { steps: 4 });
+      await testPage.waitForTimeout(250);
+      if (lift) {
+        await testPage.mouse.up();
+        await testPage.waitForTimeout(150);
+      }
+      await testPage.screenshot({ path: join(outDir, `${name}.png`) });
+      const state = await testPage.evaluate(() => window.__grappin!.state());
+      console.log(`${name} : traction (${state.pullX.toFixed(2)}, ${state.pullY.toFixed(2)}) m, personnage en (${state.pos.x.toFixed(2)}, ${state.pos.y.toFixed(2)}), écran ${state.screen}`);
+      if (!lift) await testPage.mouse.up();
+      await testPage.evaluate(() => window.__grappin!.restart());
+    };
+    await pullShot('22-lanceur-tenu', null);
+    await pullShot('22-lanceur', { x: 225, y: 705 });
+    await pullShot('22-lanceur-plein', { x: 205, y: 760 });
+    await pullShot('23-lancer', { x: 215, y: 735 }, true);
+    // Le pilote qui sait lancer, sur le même niveau : il vise le point au-dessus et passe le trou du mur.
+    await testPage.evaluate(() => window.__grappin!.playLevel(14));
     await testPage.waitForFunction(() => window.__grappin?.state().screen === 'playing');
-    await autoplay(testPage, 40, Number.POSITIVE_INFINITY, 14);
-    await testPage.waitForTimeout(500);
-    await testPage.screenshot({ path: join(outDir, '22-lanceur.png') });
+    await autoplay(testPage, 40, Number.POSITIVE_INFINITY, 18);
+    const launched = await testPage.evaluate(() => window.__grappin!.state());
+    console.log(`Niveau 14 du pilote : ${launched.levelHeight.toFixed(1)} m, écran ${launched.screen}`);
 
     // Les prises à cycles : la course libre du mode test part de la zone la plus haute, où elles abondent.
     await testPage.evaluate(() => window.__grappin!.restart());

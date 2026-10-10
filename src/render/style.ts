@@ -37,6 +37,8 @@ export const COLOR = {
   wear: 0xffd6f4,
   /** Propulseur : cyan vif, chevrons. */
   booster: 0x3cf0ff,
+  /** Lanceur : tube vert d'eau, un cyan qui tire sur le vert pour ne pas passer pour un propulseur. Sa coupe, son élastique et sa jauge de force ont cette couleur. */
+  launcher: 0x3dffc0,
   /** Prise électrique : tube orange au calme, rouge vif quand elle est chargée (ne pas toucher). */
   electric: 0xffb547,
   electricCharged: 0xff4d4d,
