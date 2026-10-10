@@ -125,6 +125,6 @@ describe('liste des niveaux du mode test', () => {
     expect(levelEvents(busy)).toBe('bascule 20 m · panne 55 m');
     const all = levelById(9);
     if (!all) throw new Error('Niveau 9 attendu');
-    expect(levelEvents(all)).toBe('vent 10 m · pluie d\'étoiles 40 m · câbles 62 m');
+    expect(levelEvents(all)).toBe('vent 10 m · pluie 40 m · câbles 62 m');
   });
 });

@@ -52,7 +52,7 @@ const EVENT_NAMES: Record<EventKind, string> = {
   bascule: 'bascule',
   vent: 'vent',
   panne: 'panne',
-  pluie: 'pluie d\'étoiles',
+  pluie: 'pluie',
   alerte: 'alerte',
   cable: 'câbles',
 };

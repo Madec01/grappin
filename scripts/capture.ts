@@ -203,6 +203,15 @@ async function main(): Promise<void> {
       await testPage.evaluate(() => window.__grappin!.release());
       await testPage.waitForTimeout(300);
       await testPage.screenshot({ path: join(outDir, '18-mode-test-niveaux.png') });
+      // Un niveau lointain lancé depuis la liste : le rappel « MODE TEST » pendant la partie.
+      const row = (await testPage.evaluate(() => window.__grappin!.buttons())).find((b) => b.id === 'niveau-8');
+      if (row) {
+        await testPage.evaluate(({ x, y }) => window.__grappin!.press(x, y), { x: row.x + row.width / 2, y: row.y + row.height / 2 });
+        await testPage.evaluate(() => window.__grappin!.release());
+        await testPage.waitForFunction(() => window.__grappin?.state().screen === 'playing');
+        await testPage.waitForTimeout(600);
+        await testPage.screenshot({ path: join(outDir, '19-mode-test-partie.png') });
+      }
     }
     await testPage.close();
 

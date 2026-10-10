@@ -23,7 +23,7 @@ import { COLOR, makeText, readSafeInset, starPoints } from './style';
 
 /** Ce que les écrans ont à montrer. `none` : la partie est en cours, rien n'est posé sur le jeu. */
 /** Ce que le mode test dit de lui-même, sur le titre et la liste des niveaux. */
-const TEST_MODE_LINE = 'Mode test · tous les niveaux ouverts, progression à part';
+const TEST_MODE_LINE = 'Mode test · tous les niveaux ouverts';
 
 export type OverlayView =
   | { readonly kind: 'none' }
