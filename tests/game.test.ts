@@ -356,17 +356,17 @@ describe('mort et cause', () => {
     expect(seen.lastCause).toBe('fog');
   });
 
-  it('un obstacle tue : cause « obstacle », sur l\'état et sur ce que reçoit le rendu', () => {
+  it('un obstacle ne tue pas : on rebondit avec « Boum », et seule la brume finit la partie', () => {
     // Paliers de 4 m : obstacles, fragiles et propulseurs apparaissent tout près du toit.
     for (let seed = 1; seed <= 10; seed += 1) {
       const { game, seen } = makeFreeGame(`?graine=${seed}&tierHeight=4`);
       playPilot(game, 60);
-      if (game.debugState().cause !== 'obstacle') continue;
-      expect(game.debugState().screen).toBe('dead');
-      expect(seen.lastCause).toBe('obstacle');
+      if (!seen.texts.has('Boum')) continue;
+      const state = game.debugState();
+      expect(state.cause === null || state.cause === 'fog').toBe(true);
       return;
     }
-    expect.unreachable('aucune des dix graines n\'a fini sur un obstacle');
+    expect.unreachable('aucune des dix graines n\'a heurté un obstacle');
   });
 
   it('une nouvelle partie efface le palier, la cause et les effets en cours', () => {
@@ -1508,15 +1508,16 @@ describe('lanceur : un pilote franchit un mur à trou', () => {
     expect(release!.pull!.x).toBeLessThan(0);
   });
 
-  it('tout droit, le même lancer heurte le mur : la visée compte', () => {
-    const { game } = makeGame('?test=1');
+  it('tout droit, le même lancer heurte le mur et rebondit : la visée compte', () => {
+    const { game, seen } = makeGame('?test=1');
     game.playLevel(14);
     game.frame(0.001);
     game.press();
     game.frame(0.05);
     game.release({ x: 0, y: -1.8 });
-    for (let frames = 0; frames < 120 && game.debugState().screen === 'playing'; frames += 1) game.frame(1 / 60);
-    expect(game.debugState()).toMatchObject({ screen: 'dead', cause: 'obstacle' });
+    for (let frames = 0; frames < 120 && !seen.texts.has('Boum'); frames += 1) game.frame(1 / 60);
+    expect(seen.texts.has('Boum')).toBe(true);
+    expect(game.debugState().screen).toBe('playing');
   });
 });
 

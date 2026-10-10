@@ -24,7 +24,7 @@ const seeds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 const reports = seeds.map((seed) => playRobot(seed, tuning, 60, profile));
 console.log(`profil ${profile.name}`);
 for (const [i, r] of reports.entries()) {
-  const end = r.alive ? 'vivant' : r.cause === 'obstacle' ? 'obstacle' : 'brume';
+  const end = r.alive ? 'vivant' : r.cause === 'fall' ? 'chute' : 'brume';
   console.log(
     `graine ${String(seeds[i]).padStart(2)} : ${r.height.toFixed(1).padStart(6)} m en ${r.seconds.toFixed(1).padStart(5)} s, ${String(r.catches).padStart(3)} accroches, ${String(r.perfect).padStart(3)} parfaits, vitesse max ${r.maxSpeed.toFixed(1)} m/s, tenue ${r.hold.toFixed(2)} s, ${end}`,
   );

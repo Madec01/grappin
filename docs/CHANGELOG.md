@@ -2,6 +2,15 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.6.2] — 2026-10-10 — Les obstacles ne tuent plus
+
+Retour du propriétaire : « les obstacles qui tuent d'un coup, c'est aussi trop fort ».
+
+### Modifié
+
+- Toucher un obstacle ne tue plus : c'est un choc. Le personnage est repoussé hors de l'obstacle, rebondit en ne gardant qu'un tiers de son élan dans la direction du choc et six dixièmes le long de la surface, lâche sa corde, perd sa série de parfaits et reste étourdi 0,45 s sans viser ni attraper ; « Boum » flotte. Sur le dessus d'une corniche, il peut se poser. La brume et la chute hors de la ville restent les seules fins de partie.
+- Le frôlement rapporte toujours ; le robot vérificateur reste prudent : il ne compte jamais un vol qui traverse un obstacle.
+
 ## [0.6.1] — 2026-10-10 — La brume ralentit
 
 Retour du propriétaire : « la brume monte trop vite ».

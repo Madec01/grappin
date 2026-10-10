@@ -81,7 +81,7 @@ describe('accroches spéciales', () => {
 });
 
 describe('obstacles, étoiles et paliers', () => {
-  it('toucher un obstacle tue, le frôler rapporte une fois par corde', () => {
+  it('toucher un obstacle fait rebondir sans tuer, et le frôler rapporte une fois par corde', () => {
     const sim = bare();
     sim.state.obstacles = [{ id: 7, x0: -3, y0: 5, x1: 3, y1: 5.4 }];
     sim.state.hero = { pos: { x: 0, y: 6.2 }, vel: { x: 0, y: 0 }, grounded: false };
@@ -92,9 +92,29 @@ describe('obstacles, étoiles et paliers', () => {
     expect(sim.state.score).toBeGreaterThan(0);
     sim.run(3);
     expect(sim.drain().filter((e) => e.type === 'graze')).toHaveLength(0);
+    // Il tombe sur la corniche : un choc, la série à zéro, et il s'y pose, vivant, jamais dedans.
     sim.run(SECOND);
-    expect(sim.state.status).toBe('dead');
-    expect(sim.drain().find((e) => e.type === 'death')).toMatchObject({ type: 'death', cause: 'obstacle' });
+    expect(sim.state.status).toBe('alive');
+    const events = sim.drain();
+    expect(events.some((e) => e.type === 'bump' && e.obstacleId === 7)).toBe(true);
+    expect(events.some((e) => e.type === 'death')).toBe(false);
+    expect(sim.state.combo).toBe(0);
+    expect(sim.state.hero.pos.y).toBeGreaterThanOrEqual(5.4 + T.heroRadius - 1e-6);
+    expect(Math.abs(sim.state.hero.vel.y)).toBeLessThan(0.5);
+  });
+
+  it('un choc de côté renvoie le personnage en arrière, moins vite, et le laisse étourdi un instant', () => {
+    const sim = bare();
+    sim.state.obstacles = [{ id: 8, x0: 1, y0: 0, x1: 2, y1: 40 }];
+    sim.state.hero = { pos: { x: 0.2, y: 20 }, vel: { x: 6, y: 2 }, grounded: false };
+    sim.run(Math.round(0.2 * SECOND));
+    const events = sim.drain();
+    expect(events.some((e) => e.type === 'bump' && e.obstacleId === 8)).toBe(true);
+    expect(sim.state.hero.vel.x).toBeLessThan(0);
+    expect(Math.abs(sim.state.hero.vel.x)).toBeLessThan(6 * 0.5);
+    expect(sim.state.hero.pos.x).toBeLessThanOrEqual(1 - T.heroRadius + 1e-6);
+    expect(sim.state.stunUntilStep).toBeGreaterThan(0);
+    expect(sim.state.status).toBe('alive');
   });
 
   it('une étoile ramassée disparaît et rapporte', () => {

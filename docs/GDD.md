@@ -64,7 +64,7 @@ Le héros, son nom, et le détail du décor restent à proposer au propriétaire
 ## 7. Dangers [VALIDÉ]
 
 - La brume qui monte.
-- Obstacles fixes : corniches accrochées aux bords et dalles flottantes. Les toucher termine la partie ; passer à moins d'un demi-mètre sans toucher rapporte le bonus « Frôlé », une fois par obstacle et par corde.
+- Obstacles fixes : corniches accrochées aux bords et dalles flottantes. Les toucher est un choc, pas une mort (décision du propriétaire du 10 octobre 2026) : repoussé, rebond amorti, corde lâchée, série à zéro, étourdi 0,45 s ; on peut se poser sur le dessus d'une corniche. Passer à moins d'un demi-mètre sans toucher rapporte le bonus « Frôlé », une fois par obstacle et par corde.
 - Obstacles mobiles, introduits en phase 4.
 
 ## 8. Parcours [VALIDÉ]

@@ -234,7 +234,6 @@ const GOAL_GAP = 8;
 
 const DEATH_MESSAGES: Record<DeathCause, string> = {
   fog: "La brume t'a rattrapé",
-  obstacle: "Un obstacle t'a arrêté",
   fall: 'Tombé hors de la ville',
 };
 

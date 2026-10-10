@@ -81,7 +81,9 @@ export type RuleEvent =
   | { readonly type: 'graze'; readonly obstacleId: number }
   | { readonly type: 'pickup'; readonly pickupId: number }
   | { readonly type: 'tier'; readonly tier: number; readonly name: string }
-  | { readonly type: 'death'; readonly height: number; readonly cause: 'fog' | 'obstacle' | 'fall' }
+  | { readonly type: 'death'; readonly height: number; readonly cause: 'fog' | 'fall' }
+  /** Choc contre un obstacle : rebond, corde lâchée, série à zéro, étourdi un instant. */
+  | { readonly type: 'bump'; readonly obstacleId: number }
   /** Décharge d'une prise électrique tenue quand elle se charge : corde lâchée, personnage repoussé et étourdi. */
   | { readonly type: 'shock'; readonly anchorId: number };
 

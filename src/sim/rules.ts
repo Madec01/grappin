@@ -5,7 +5,7 @@ import { STILL, isUpright, upOf, type Environment } from './environment';
 import { launchVelocity } from './launcher';
 import { circleBoxGap } from './geometry';
 import { constrainVelocity } from './physics';
-import type { Anchor, RuleEvent, SimState } from './state';
+import type { Anchor, RuleEvent, SimState, Obstacle } from './state';
 import type { Tuning } from './tuning';
 
 /**
@@ -231,15 +231,60 @@ export function applyCycles(state: SimState, tuning: Tuning, events: RuleEvent[]
 }
 
 /** Obstacles fixes : les toucher tue, les frôler rapporte une fois par obstacle et par corde. */
+/** Rebond sur un obstacle : part de la vitesse rendue dans la direction du choc, et part gardée le long de la surface. */
+export const BUMP_RESTITUTION = 0.35;
+export const BUMP_FRICTION = 0.6;
+/** Après un choc, on ne vise ni n'attrape rien pendant ce temps. */
+export const BUMP_STUN_SECONDS = 0.45;
+/** Sous cette vitesse de rebond, le personnage s'arrête contre l'obstacle : il peut s'y poser. */
+const BUMP_REST_SPEED = 0.8;
+
+/**
+ * Choc contre un obstacle. Retour du propriétaire : mourir d'un coup était trop
+ * fort. Le personnage est repoussé hors de la boîte, rebondit en perdant
+ * l'essentiel de son élan, lâche sa corde, perd sa série de parfaits et reste
+ * étourdi un instant ; sur le dessus d'une corniche, il peut se poser. La
+ * brume reste le seul juge.
+ */
+function bump(state: SimState, box: Obstacle, tuning: Tuning, events: RuleEvent[]): void {
+  const { pos } = state.hero;
+  // Le point de la boîte le plus proche du centre ; la normale va de ce point vers le personnage.
+  const nearest = { x: Math.min(box.x1, Math.max(box.x0, pos.x)), y: Math.min(box.y1, Math.max(box.y0, pos.y)) };
+  let n = { x: pos.x - nearest.x, y: pos.y - nearest.y };
+  const len = Math.hypot(n.x, n.y);
+  if (len > 1e-9) n = { x: n.x / len, y: n.y / len };
+  else {
+    // Le centre est dans la boîte : on sort par la face la plus proche.
+    const faces = [
+      { d: pos.x - box.x0, n: { x: -1, y: 0 } },
+      { d: box.x1 - pos.x, n: { x: 1, y: 0 } },
+      { d: pos.y - box.y0, n: { x: 0, y: -1 } },
+      { d: box.y1 - pos.y, n: { x: 0, y: 1 } },
+    ];
+    n = faces.reduce((best, face) => (face.d < best.d ? face : best)).n;
+  }
+  const depth = tuning.heroRadius - len;
+  state.hero.pos = { x: pos.x + n.x * (depth + 1e-3), y: pos.y + n.y * (depth + 1e-3) };
+  if (state.rope) release(state, tuning, events, true);
+  const { vel } = state.hero;
+  const along = vel.x * n.x + vel.y * n.y;
+  const tangent = { x: vel.x - along * n.x, y: vel.y - along * n.y };
+  const bounced = along < 0 ? -along * BUMP_RESTITUTION : Math.max(0, along);
+  let next = { x: tangent.x * BUMP_FRICTION + n.x * bounced, y: tangent.y * BUMP_FRICTION + n.y * bounced };
+  if (Math.hypot(next.x, next.y) < BUMP_REST_SPEED) next = { x: 0, y: 0 };
+  state.hero.vel = { x: next.x || 0, y: next.y || 0 };
+  state.combo = 0;
+  state.stunUntilStep = Math.max(state.stunUntilStep, state.step + Math.round(BUMP_STUN_SECONDS / tuning.stepSeconds));
+  events.push({ type: 'bump', obstacleId: box.id });
+}
+
 export function applyObstacles(state: SimState, tuning: Tuning, events: RuleEvent[]): void {
   if (state.status !== 'alive') return;
   for (const box of state.obstacles) {
     const gap = circleBoxGap(state.hero.pos, tuning.heroRadius, box);
     if (gap <= 0) {
-      state.status = 'dead';
-      state.rope = null;
-      events.push({ type: 'death', height: state.height, cause: 'obstacle' });
-      return;
+      bump(state, box, tuning, events);
+      continue;
     }
     if (gap <= tuning.grazeDistance && !state.grazed.includes(box.id)) {
       state.grazed.push(box.id);
