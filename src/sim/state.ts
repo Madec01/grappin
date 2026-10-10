@@ -1,5 +1,7 @@
 import type { Vec2 } from '../core/math/vec2';
 import type { CourseState } from './course';
+import type { Environment } from './environment';
+import type { EventKind, EventRuntime, ScheduledEvent } from './events';
 
 /**
  * État complet de la simulation, en données simples.
@@ -14,10 +16,13 @@ export type AnchorKind = 'normal' | 'fragile' | 'booster';
 
 export interface Anchor {
   readonly id: number;
-  readonly pos: Vec2;
+  /** Position du moment : fixe, sauf pour un point sur câble qui glisse. */
+  pos: Vec2;
   readonly kind: AnchorKind;
   /** Vrai une fois cassée : ni visée, ni dessinée. */
   broken: boolean;
+  /** Point sur câble : il va et vient entre ces deux positions. */
+  readonly cable?: { readonly from: Vec2; readonly to: Vec2 };
 }
 
 /** Obstacle fixe : boîte alignée sur les axes, en mètres, Y vers le haut. Le toucher tue, le frôler rapporte. */
@@ -29,11 +34,12 @@ export interface Obstacle {
   readonly y1: number;
 }
 
-/** Étoile de la route haute : ramassée au passage. */
+/** Étoile de la route haute, ou étoile de pluie qui tombe : ramassée au passage. */
 export interface Pickup {
   readonly id: number;
-  readonly pos: Vec2;
+  pos: Vec2;
   taken: boolean;
+  readonly vel?: Vec2;
 }
 
 export interface Rope {
@@ -67,13 +73,14 @@ export type RuleEvent =
     }
   | { readonly type: 'rescue'; readonly chancesLeft: number }
   | { readonly type: 'finish'; readonly height: number }
+  | { readonly type: 'event'; readonly kind: EventKind; readonly phase: 'start' | 'end' }
   | { readonly type: 'kick' }
   | { readonly type: 'boost' }
   | { readonly type: 'break'; readonly anchorId: number }
   | { readonly type: 'graze'; readonly obstacleId: number }
   | { readonly type: 'pickup'; readonly pickupId: number }
   | { readonly type: 'tier'; readonly tier: number; readonly name: string }
-  | { readonly type: 'death'; readonly height: number; readonly cause: 'fog' | 'obstacle' };
+  | { readonly type: 'death'; readonly height: number; readonly cause: 'fog' | 'obstacle' | 'fall' };
 
 export interface SimState {
   /** Numéro du pas courant. */
@@ -112,6 +119,14 @@ export interface SimState {
   groundY: number;
   /** Ligne d'arrivée d'un niveau, ou null en course libre. */
   finishY: number | null;
+  /** Événements planifiés et ce qu'on en retient ; conditions physiques du moment. */
+  schedule: ScheduledEvent[];
+  eventRuntimes: EventRuntime[];
+  env: Environment;
+  /** Facteur de vitesse de la brume (alerte), lampadaires éteints (panne), générateur de la pluie d'étoiles. */
+  fogFactor: number;
+  lightsOff: boolean;
+  rainRng: number;
   /** Hauteur maximale atteinte, en mètres. */
   height: number;
   score: number;

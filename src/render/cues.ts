@@ -1,13 +1,15 @@
 import type { Vec2 } from '../core/math/vec2';
 import { freeFlightAt } from '../sim/physics';
+import { lightIsOff } from '../sim/events';
 import { releaseVelocity } from '../sim/rules';
 import type { Anchor, SimState } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
 
 /**
- * Repères visuels calculés à partir de l'état : l'ombre prédictive et l'usure
- * d'une accroche fragile. Fonctions pures, sans PixiJS ni temps réel : le
- * rendu les lit, il ne les décide pas.
+ * Repères visuels calculés à partir de l'état : l'ombre prédictive, l'usure
+ * d'une accroche fragile, les lampadaires éteints par la panne et le côté du
+ * vent. Fonctions pures, sans PixiJS ni temps réel : le rendu les lit, il ne
+ * les décide pas.
  */
 
 /** Nombre de points de l'ombre prédictive. */
@@ -30,7 +32,7 @@ export function shadowPoints(state: SimState, tuning: Tuning): Vec2[] {
   const body = { pos: state.hero.pos, vel: releaseVelocity(state, tuning) };
   const points: Vec2[] = [];
   for (let i = 1; i <= SHADOW_POINTS; i += 1) {
-    points.push(freeFlightAt(body, (tuning.shadowSeconds * i) / SHADOW_POINTS, tuning));
+    points.push(freeFlightAt(body, (tuning.shadowSeconds * i) / SHADOW_POINTS, tuning, state.env));
   }
   return points;
 }
@@ -51,4 +53,26 @@ export function fragileGauge(state: SimState, tuning: Tuning): FragileGauge | nu
   if (anchor?.kind !== 'fragile') return null;
   const held = (state.step - state.attachStep) * tuning.stepSeconds;
   return { pos: anchor.pos, wear: held >= tuning.fragileSeconds ? 1 : held / tuning.fragileSeconds };
+}
+
+/** Vrai si le lampadaire de l'accroche `anchorId` est éteint en ce moment : la panne est en cours et sa vague le tient dans le noir. */
+export function isDark(state: SimState, anchorId: number, tuning: Tuning): boolean {
+  return state.lightsOff && lightIsOff(anchorId, state.step, tuning);
+}
+
+/**
+ * Côté vers lequel souffle le dernier coup de vent commencé, -1 vers la gauche
+ * et 1 vers la droite. Lu dans le calendrier du niveau et non dans
+ * `state.env.wind`, qui part de zéro et ne dit rien au premier pas.
+ */
+export function windSide(state: SimState): -1 | 1 {
+  let side: -1 | 1 = 1;
+  let latest = -1;
+  state.schedule.forEach((event, index) => {
+    const started = state.eventRuntimes[index]?.startStep ?? null;
+    if (event.kind !== 'vent' || started === null || started < latest) return;
+    latest = started;
+    side = event.side ?? 1;
+  });
+  return side;
 }

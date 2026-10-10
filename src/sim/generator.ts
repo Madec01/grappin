@@ -1,5 +1,7 @@
 import type { Rng } from '../core/math/rng';
 import type { Vec2 } from '../core/math/vec2';
+import { STILL, type Environment } from './environment';
+import { CABLE_HALF_LENGTH } from './events';
 import { circleBoxGap } from './geometry';
 import type { Anchor, Obstacle, Pickup } from './state';
 
@@ -56,15 +58,31 @@ const OBSTACLE_THICKNESS = 0.4;
 /** Dégagement minimal entre un obstacle et le centre d'un point ou d'une étoile. */
 const OBSTACLE_CLEARANCE = 1.4;
 const PICKUP_CLEARANCE = 0.8;
-/** Sous un point, là où l'on pend après l'avoir attrapé, rien jusqu'à cette profondeur et cette demi-largeur. */
+/**
+ * Sous un point, là où l'on pend et se balance après l'avoir attrapé, rien
+ * jusqu'à cette profondeur et cette demi-largeur : un balancement sur trois
+ * mètres de corde balaie près de trois mètres de chaque côté.
+ */
 const HANG_DEPTH = 3.8;
-const HANG_HALF_WIDTH = 1.3;
+const HANG_HALF_WIDTH = 2.6;
 /** Aucun obstacle dans les premiers mètres au-dessus du toit de départ : on prend son élan tranquille. */
 const GRACE_ABOVE_ORIGIN = 8;
 
-/** Vrai si la boîte empiète sur la zone de pendaison sous un point. */
-function underAnchor(anchor: Vec2, box: Obstacle): boolean {
-  return box.y1 < anchor.y && box.y1 > anchor.y - HANG_DEPTH && box.x1 > anchor.x - HANG_HALF_WIDTH && box.x0 < anchor.x + HANG_HALF_WIDTH;
+/**
+ * Vrai si la boîte empiète sur la zone de pendaison d'un point : là où tire la
+ * gravité, sur `HANG_DEPTH`, large de deux fois `HANG_HALF_WIDTH`. Sous
+ * gravité tournée, la zone est de côté.
+ */
+function underAnchor(anchor: Vec2, box: Obstacle, env: Environment): boolean {
+  const g = env.gravityDir;
+  if (g.x === 0) {
+    const low = g.y < 0 ? anchor.y - HANG_DEPTH : anchor.y;
+    const high = g.y < 0 ? anchor.y : anchor.y + HANG_DEPTH;
+    return box.y1 > low && box.y0 < high && box.x1 > anchor.x - HANG_HALF_WIDTH && box.x0 < anchor.x + HANG_HALF_WIDTH;
+  }
+  const left = g.x > 0 ? anchor.x : anchor.x - HANG_DEPTH;
+  const right = g.x > 0 ? anchor.x + HANG_DEPTH : anchor.x;
+  return box.x1 > left && box.x0 < right && box.y1 > anchor.y - HANG_HALF_WIDTH && box.y0 < anchor.y + HANG_HALF_WIDTH;
 }
 
 /** Profil de la course libre selon le palier : les motifs s'ouvrent avec les contraintes. */
@@ -126,7 +144,31 @@ const SHAPES: Record<Archetype, { dy: readonly [number, number]; dx: readonly [n
  * toit de départ `origin` si `from` est null. Le segment monte jusqu'à environ
  * `16 à 24 m` au-dessus de son départ, selon le motif demandé.
  */
-export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origin: Vec2, profile: TierProfile, archetype: Archetype): Segment {
+export interface SegmentContext {
+  /** Conditions physiques pleines de l'événement en cours à cette hauteur. */
+  readonly env: Environment;
+  /** Conditions dans lesquelles on arrive au point d'entrée, parfois autres : rien non plus là où l'on y pend. */
+  readonly entryEnv: Environment;
+  /** Un câble couvre ce segment : deux points du milieu glissent. */
+  readonly cable: boolean;
+  /**
+   * Aucun point au-dessus de cette hauteur : un événement commence ou finit un
+   * mètre plus haut. Le segment s'arrête alors entre un et trois mètres sous
+   * elle, pour que le suivant soit engendré et prouvé dans les nouvelles
+   * conditions. `Infinity` sans frontière.
+   */
+  readonly maxY: number;
+}
+
+export const PLAIN_CONTEXT: SegmentContext = { env: STILL, entryEnv: STILL, cable: false, maxY: Infinity };
+
+/** Longueur visée d'un segment : de 16 à 24 m, ou jusqu'à la frontière proche d'un événement, à 28 m au plus. */
+function targetHeight(rng: Rng, startY: number, maxY: number): number {
+  const natural = startY + 16 + 8 * rng.next();
+  return maxY - 2 <= natural + 4 ? maxY - 2 : natural;
+}
+
+export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origin: Vec2, profile: TierProfile, archetype: Archetype, context: SegmentContext = PLAIN_CONTEXT): Segment {
   const anchors: Anchor[] = [];
   const pickups: Pickup[] = [];
   let junctionId: number | null = null;
@@ -134,7 +176,7 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
   const shape = SHAPES[archetype];
   const spacing = archetype === 'escalier' ? Math.max(2.6, profile.spacing * 0.85) : profile.spacing;
   const startY = from?.y ?? origin.y;
-  const targetY = startY + 16 + 8 * rng.next();
+  const targetY = targetHeight(rng, startY, context.maxY);
   let cur: Vec2 = from ?? { x: origin.x + FIRST_ANCHOR_OFFSET.x, y: origin.y + FIRST_ANCHOR_OFFSET.y };
   if (!from) anchors.push(makeAnchor(ids, cur));
   const wantsSplit = archetype === 'chaine' && profile.split && rng.next() < 0.8;
@@ -171,6 +213,8 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
     }
     const prev = cur;
     cur = chainStep(rng, cur, spacing, shape.dy, shape.dx);
+    // Jamais au-dessus de la frontière : le dernier pas se raccourcit pour finir deux mètres sous elle.
+    if (cur.y > context.maxY) cur = { x: cur.x, y: context.maxY - 1 };
     anchors.push(makeAnchor(ids, cur));
     // Couloir d'étoiles : une étoile entre deux points sur deux, légèrement décalée.
     if (archetype === 'couloir' && anchors.length % 2 === 0) {
@@ -187,14 +231,27 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
     pickups.push(makePickup(ids, { x: clampX(beside.pos.x + side * 1.3), y: beside.pos.y + 0.8 }));
   }
   assignKinds(rng, anchors, profile, archetype, junctionId, branchIds);
+  if (context.cable) hangCables(anchors, junctionId, branchIds);
   const obstacleCount = archetype === 'dalles' ? Math.min(4, profile.obstacles + 2) : profile.obstacles;
-  const obstacles = placeObstacles(rng, ids, anchors, pickups, Math.max(startY, origin.y + GRACE_ABOVE_ORIGIN - 2), cur.y, obstacleCount, from, archetype === 'dalles');
+  const obstacles = placeObstacles(rng, ids, anchors, pickups, Math.max(startY, origin.y + GRACE_ABOVE_ORIGIN - 2), cur.y, obstacleCount, from, archetype === 'dalles', context);
   return { anchors, obstacles, pickups, junctionId, branchIds };
 }
 
+/** Deux points normaux du milieu du segment deviennent des points sur câble, qui vont et viennent de côté. */
+function hangCables(anchors: Anchor[], junctionId: number | null, branchIds: readonly number[]): void {
+  const protectedIds = new Set<number>([...branchIds, junctionId ?? -1, anchors.at(-1)?.id ?? -1, anchors[0]?.id ?? -1]);
+  const candidates = anchors.map((a, i) => ({ a, i })).filter(({ a }) => !protectedIds.has(a.id) && a.kind === 'normal');
+  const picks = [candidates[Math.floor(candidates.length / 3)], candidates[Math.floor((2 * candidates.length) / 3)]].filter((c): c is { a: Anchor; i: number } => c !== undefined);
+  for (const { a, i } of picks) {
+    const from = { x: clampX(a.pos.x - CABLE_HALF_LENGTH), y: a.pos.y };
+    const to = { x: clampX(a.pos.x + CABLE_HALF_LENGTH), y: a.pos.y };
+    anchors[i] = { ...a, pos: { x: (from.x + to.x) / 2, y: a.pos.y }, cable: { from, to } };
+  }
+}
+
 /** Segment de repli : une chaîne serrée, sans rien d'autre. Toujours franchissable. */
-export function buildPlainSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origin: Vec2): Segment {
-  return buildSegment(rng, ids, from, origin, { spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine'] }, 'chaine');
+export function buildPlainSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origin: Vec2, context: SegmentContext = PLAIN_CONTEXT): Segment {
+  return buildSegment(rng, ids, from, origin, { spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine'] }, 'chaine', { ...context, cable: false });
 }
 
 /**
@@ -237,12 +294,14 @@ function placeObstacles(
   count: number,
   from: Vec2 | null,
   slabsOnly: boolean,
+  context: SegmentContext,
 ): Obstacle[] {
   const obstacles: Obstacle[] = [];
+  const { env, entryEnv } = context;
   const keepAway = (box: Obstacle): boolean =>
-    anchors.every((a) => circleBoxGap(a.pos, 0, box) >= OBSTACLE_CLEARANCE && !underAnchor(a.pos, box)) &&
+    anchors.every((a) => circleBoxGap(a.pos, 0, box) >= OBSTACLE_CLEARANCE && !underAnchor(a.pos, box, env)) &&
     pickups.every((p) => circleBoxGap(p.pos, 0, box) >= PICKUP_CLEARANCE) &&
-    (from === null || (circleBoxGap(from, 0, box) >= OBSTACLE_CLEARANCE && !underAnchor(from, box))) &&
+    (from === null || (circleBoxGap(from, 0, box) >= OBSTACLE_CLEARANCE && !underAnchor(from, box, env) && !underAnchor(from, box, entryEnv))) &&
     obstacles.every((o) => box.y1 < o.y0 - 1 || box.y0 > o.y1 + 1);
   for (let i = 0; i < count; i += 1) {
     for (let attempt = 0; attempt < 6; attempt += 1) {

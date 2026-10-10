@@ -3,10 +3,10 @@ import { expect, test, type Page } from '@playwright/test';
 /**
  * Test de fumée sur écran de téléphone (390 × 844, tactile) : la page charge,
  * un doigt posé accroche le grappin, le relâcher libère le personnage, la
- * graine d'URL est respectée, un pilote automatique grimpe sans erreur, et la
+ * graine d'URL est respectée, un pilote automatique grimpe sans erreur, la
  * progression (expérience, sauvegarde, talismans, boutons, niveaux et étoiles)
- * tient d'une partie et d'un rechargement à l'autre. Tout passe par
- * `window.__grappin`.
+ * tient d'une partie et d'un rechargement à l'autre, et la bascule du niveau 5
+ * se joue sans erreur. Tout passe par `window.__grappin`.
  */
 
 const CENTER = { x: 195, y: 422 };
@@ -108,7 +108,8 @@ test('?graine=7 fixe la graine et restart() la conserve', async ({ page }) => {
  * Pilote automatique injecté dans la page, même stratégie que `scripts/capture.ts` :
  * accroche dès qu'un point est visé, lâche dans la fenêtre du lâcher parfait,
  * jamais plus de 2,5 s tenu. Il rend la main quand le personnage dépasse
- * `targetHeight` mètres, meurt, gagne le niveau, ou après `limitMs`. Passé en texte à
+ * `targetHeight` mètres, meurt, gagne le niveau, ou après `limitMs`, avec ce qu'il a
+ * vu passer : la plus grande inclinaison de la gravité (`gravityX` en valeur absolue). Passé en texte à
  * `page.evaluate` : tsx réécrit les fonctions avec un helper `__name` qui n'existe pas dans la page.
  */
 function autopilot(targetHeight: number, limitMs: number): string {
@@ -116,10 +117,12 @@ function autopilot(targetHeight: number, limitMs: number): string {
     const api = window.__grappin;
     const start = performance.now();
     let holdSince = 0;
+    let maxGravityX = 0;
     const tick = () => {
       const s = api.state();
       const now = performance.now();
-      if (s.screen === 'dead' || s.screen === 'won' || s.height > ${targetHeight} || now - start > ${limitMs}) { done(); return; }
+      maxGravityX = Math.max(maxGravityX, Math.abs(s.gravityX));
+      if (s.screen === 'dead' || s.screen === 'won' || s.height > ${targetHeight} || now - start > ${limitMs}) { done({ maxGravityX }); return; }
       if (!s.attached && s.targetId !== null) {
         api.press();
         holdSince = now;
@@ -244,5 +247,31 @@ test('niveaux : la liste, un niveau verrouillé, le pilote gagne le niveau 1, le
   await page.waitForFunction(() => window.__grappin !== undefined);
   expect((await state(page)).unlockedLevel).toBe(2);
   expect((await profile(page)).levels['1']!.stars).toBeGreaterThanOrEqual(1);
+  expect(errors).toEqual([]);
+});
+
+test('la bascule du niveau 5 se joue sans erreur de console : la gravité tourne', async ({ page }) => {
+  // Le pilote joue en temps réel : il peut mourir avant la bascule sur une machine lente, on le relance alors.
+  test.setTimeout(240_000);
+  const errors = watchErrors(page);
+  await open(page, '/');
+  await page.evaluate(() => window.__grappin!.resetProfile());
+  // Le niveau 5 est verrouillé tant que les quatre premiers ne sont pas franchis : `unlockAll` est fait pour cela.
+  expect(await page.evaluate(() => window.__grappin!.playLevel(5))).toBe(false);
+  await page.evaluate(() => window.__grappin!.unlockAll());
+  expect((await state(page)).unlockedLevel).toBe(10);
+
+  let maxGravityX = 0;
+  for (let attempt = 0; attempt < 4 && maxGravityX === 0; attempt += 1) {
+    expect(await page.evaluate(() => window.__grappin!.playLevel(5))).toBe(true);
+    await expect.poll(async () => (await state(page)).screen).toBe('playing');
+    expect(await state(page)).toMatchObject({ mode: 'level', levelId: 5, gravityX: 0, gravityY: -1, windX: 0, lightsOff: false, fogFactor: 1 });
+    const report = (await page.evaluate(autopilot(Infinity, 45_000))) as { maxGravityX: number };
+    maxGravityX = report.maxGravityX;
+  }
+  expect(maxGravityX).toBeGreaterThan(0);
+  const { events } = await state(page);
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({ kind: 'bascule', started: true });
   expect(errors).toEqual([]);
 });

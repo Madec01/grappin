@@ -1,4 +1,5 @@
 import { add, clampLength, dot, length, lengthSq, normalize, scale, sub, type Vec2 } from '../core/math/vec2';
+import { STILL, acceleration, type Environment } from './environment';
 import type { Tuning } from './tuning';
 
 /**
@@ -42,9 +43,10 @@ export function constrainVelocity(pos: Vec2, vel: Vec2, anchor: Vec2, ropeLength
  * est ramené sur le cercle et sa vitesse est contrainte une seconde fois,
  * afin que la corde garde exactement sa longueur à chaque pas.
  */
-export function integrate(body: Body, anchor: Vec2 | null, ropeLength: number, tuning: Tuning): Body {
+export function integrate(body: Body, anchor: Vec2 | null, ropeLength: number, tuning: Tuning, env: Environment = STILL): Body {
   const dt = tuning.stepSeconds;
-  let vel: Vec2 = { x: body.vel.x, y: body.vel.y - tuning.gravity * dt };
+  const a = acceleration(env, tuning);
+  let vel: Vec2 = { x: body.vel.x + a.x * dt, y: body.vel.y + a.y * dt };
   if (anchor) vel = constrainVelocity(body.pos, vel, anchor, ropeLength);
   let pos = add(body.pos, scale(vel, dt));
   if (anchor) {
@@ -93,10 +95,12 @@ export function reelIn(body: Body, anchor: Vec2, oldLength: number, newLength: n
  * vitesse plancher reste bien sous ce qu'un joueur obtient par ses lâchers :
  * le jeu ne joue pas à sa place.
  */
-export function swingAssist(body: Body, anchor: Vec2, ropeLength: number, tuning: Tuning): Body {
+export function swingAssist(body: Body, anchor: Vec2, ropeLength: number, tuning: Tuning, env: Environment = STILL): Body {
   if (tuning.swingAssistAccel <= 0) return body;
-  const bottomY = anchor.y - ropeLength;
-  const bottomSpeedSq = lengthSq(body.vel) + 2 * tuning.gravity * (body.pos.y - bottomY);
+  // Le point bas du cercle est du côté où tire la gravité ; l'élan se mesure par rapport à lui.
+  const bottom = add(anchor, scale(env.gravityDir, ropeLength));
+  const lift = -dot(sub(body.pos, bottom), env.gravityDir);
+  const bottomSpeedSq = lengthSq(body.vel) + 2 * tuning.gravity * lift;
   if (bottomSpeedSq >= tuning.swingAssistSpeed * tuning.swingAssistSpeed) return body;
   const n = normalize(sub(body.pos, anchor));
   if (n.x === 0 && n.y === 0) return body;
@@ -112,17 +116,18 @@ export function swingAssist(body: Body, anchor: Vec2, ropeLength: number, tuning
  * corps déplacé et la nouvelle longueur de corde. Partagé par la simulation et
  * le vérificateur de parcours, qui jouent ainsi exactement la même physique.
  */
-export function swingStep(body: Body, anchor: Vec2, ropeLength: number, tuning: Tuning): { body: Body; ropeLength: number } {
-  const assisted = swingAssist(body, anchor, ropeLength, tuning);
+export function swingStep(body: Body, anchor: Vec2, ropeLength: number, tuning: Tuning, env: Environment = STILL): { body: Body; ropeLength: number } {
+  const assisted = swingAssist(body, anchor, ropeLength, tuning, env);
   const shorter = Math.max(tuning.ropeMin, ropeLength - tuning.reelSpeed * tuning.stepSeconds);
   const pulled = reelIn(assisted, anchor, ropeLength, shorter, tuning.reelSpin, tuning.stepSeconds);
-  return { body: integrate(pulled, anchor, shorter, tuning), ropeLength: shorter };
+  return { body: integrate(pulled, anchor, shorter, tuning, env), ropeLength: shorter };
 }
 
 /** Position en vol libre après `t` secondes, sans corde ni plafond : sert à viser. */
-export function freeFlightAt(body: Body, t: number, tuning: Tuning): Vec2 {
+export function freeFlightAt(body: Body, t: number, tuning: Tuning, env: Environment = STILL): Vec2 {
+  const a = acceleration(env, tuning);
   return {
-    x: body.pos.x + body.vel.x * t,
-    y: body.pos.y + body.vel.y * t - 0.5 * tuning.gravity * t * t,
+    x: body.pos.x + body.vel.x * t + 0.5 * a.x * t * t,
+    y: body.pos.y + body.vel.y * t + 0.5 * a.y * t * t,
   };
 }

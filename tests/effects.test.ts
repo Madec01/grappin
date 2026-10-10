@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ALERT_BLINK_HZ,
   BANNER_SECONDS,
+  EVENT_SECONDS,
   Effects,
   FLOAT_SECONDS,
   INTRO_SECONDS,
   ROPE_DRAW_SECONDS,
+  WIND_STREAKS,
+  alertAlpha,
   bannerAlpha,
   floatAlpha,
   floatRise,
@@ -231,5 +235,146 @@ describe('trait du grappin', () => {
     expect(effects.ropeDrawn).toBeCloseTo(0.5, 9);
     effects.update(0.1);
     expect(effects.ropeDrawn).toBe(1);
+  });
+});
+
+describe('annonce d\'un événement de niveau', () => {
+  it('affiche un titre et une phrase, 2,5 s de temps réel, puis disparaît', () => {
+    expect(EVENT_SECONDS).toBe(2.5);
+    const effects = new Effects(DEFAULT_TUNING);
+    effects.announce('La bascule !', 'Le niveau tourne');
+    expect(effects.banner).toMatchObject({ text: 'La bascule !', detail: 'Le niveau tourne', seconds: EVENT_SECONDS, age: 0 });
+
+    effects.update(2.49);
+    expect(effects.banner).not.toBeNull();
+    effects.update(0.02);
+    expect(effects.banner).toBeNull();
+  });
+
+  it('peut n\'avoir qu\'un titre, et remplace la bannière en cours', () => {
+    const effects = new Effects(DEFAULT_TUNING);
+    effects.intro('Niveau 5 · Les antennes', 'Attention.');
+    effects.update(1);
+    effects.announce('Retour au calme', null);
+    expect(effects.banner).toMatchObject({ text: 'Retour au calme', detail: null, age: 0 });
+  });
+
+  it('les événements de règles, eux, ne font ni texte flottant ni bannière à eux seuls', () => {
+    const effects = new Effects(DEFAULT_TUNING);
+    effects.handle({ type: 'event', kind: 'vent', phase: 'start' }, HERO);
+    expect(effects.banner).toBeNull();
+    expect(effects.texts).toHaveLength(0);
+  });
+});
+
+describe('clignotement de l\'alerte', () => {
+  it('oscille deux fois par seconde entre 0,3 et 1', () => {
+    expect(ALERT_BLINK_HZ).toBe(2);
+    let low = 1;
+    let high = 0;
+    for (let t = 0; t < 1; t += 0.001) {
+      const alpha = alertAlpha(t);
+      low = Math.min(low, alpha);
+      high = Math.max(high, alpha);
+      expect(alertAlpha(t + 0.5)).toBeCloseTo(alpha, 9);
+    }
+    expect(low).toBeCloseTo(0.3, 3);
+    expect(high).toBeCloseTo(1, 3);
+    // Deux creux par seconde : au quart et aux trois quarts de seconde.
+    expect(alertAlpha(0.125)).toBeCloseTo(1, 9);
+    expect(alertAlpha(0.375)).toBeCloseTo(0.3, 9);
+    expect(alertAlpha(0.625)).toBeCloseTo(1, 9);
+  });
+
+  it('l\'horloge des effets compte le temps réel écoulé', () => {
+    const effects = new Effects(DEFAULT_TUNING);
+    expect(effects.clock).toBe(0);
+    effects.update(0.25);
+    effects.update(0.5);
+    expect(effects.clock).toBeCloseTo(0.75, 9);
+  });
+});
+
+describe('traînées du coup de vent', () => {
+  const positions = (effects: Effects): number[] => effects.windStreaks.map((streak) => streak.x);
+
+  it('sont une vingtaine, dans la vue, de longueurs et de rapidités variées', () => {
+    const effects = new Effects(DEFAULT_TUNING);
+    expect(WIND_STREAKS).toBeGreaterThanOrEqual(15);
+    expect(WIND_STREAKS).toBeLessThanOrEqual(25);
+    expect(effects.windStreaks).toHaveLength(WIND_STREAKS);
+    for (const streak of effects.windStreaks) {
+      expect(streak.x).toBeGreaterThanOrEqual(0);
+      expect(streak.x).toBeLessThan(1);
+      expect(streak.y).toBeGreaterThanOrEqual(0);
+      expect(streak.y).toBeLessThan(1);
+      expect(streak.length).toBeGreaterThan(0);
+      expect(streak.length).toBeLessThan(0.2);
+    }
+    expect(new Set(effects.windStreaks.map((streak) => streak.length)).size).toBeGreaterThan(5);
+    expect(new Set(effects.windStreaks.map((streak) => streak.pace)).size).toBeGreaterThan(5);
+  });
+
+  it('sont les mêmes à chaque partie, et ne bougent pas sans vent', () => {
+    const a = new Effects(DEFAULT_TUNING);
+    const b = new Effects(DEFAULT_TUNING);
+    expect(positions(a)).toEqual(positions(b));
+    const before = positions(a);
+    a.update(1);
+    a.update(1, 0);
+    expect(positions(a)).toEqual(before);
+  });
+
+  it('filent dans le sens du vent', () => {
+    const toRight = new Effects(DEFAULT_TUNING);
+    const toLeft = new Effects(DEFAULT_TUNING);
+    const start = positions(toRight);
+    toRight.update(0.05, 3);
+    toLeft.update(0.05, -3);
+    positions(toRight).forEach((x, i) => expect(x).toBeGreaterThan(start[i]!));
+    positions(toLeft).forEach((x, i) => expect(x).toBeLessThan(start[i]!));
+  });
+
+  it('vont d\'autant plus vite que le vent est fort, à vitesse proportionnelle', () => {
+    const weak = new Effects(DEFAULT_TUNING);
+    const strong = new Effects(DEFAULT_TUNING);
+    const start = positions(weak);
+    weak.update(0.05, 2);
+    strong.update(0.05, 4);
+    positions(weak).forEach((x, i) => {
+      const slow = x - start[i]!;
+      const fast = positions(strong)[i]! - start[i]!;
+      expect(fast).toBeCloseTo(2 * slow, 9);
+    });
+  });
+
+  it('renaissent du côté d\'où vient le vent quand elles sortent de la vue, sans jamais disparaître du compte', () => {
+    for (const wind of [3, -3]) {
+      const effects = new Effects(DEFAULT_TUNING);
+      const entered = new Set<number>();
+      for (let frame = 0; frame < 600; frame += 1) {
+        const before = positions(effects);
+        effects.update(1 / 60, wind);
+        effects.windStreaks.forEach((streak, i) => {
+          // Un saut dans le sens opposé au vent est une naissance : elle se fait juste hors de la vue.
+          if (Math.sign(streak.x - before[i]!) === -Math.sign(wind)) {
+            entered.add(i);
+            expect(wind > 0 ? streak.x + streak.length / 2 : 1 - streak.x + streak.length / 2).toBeCloseTo(0, 9);
+          }
+        });
+        expect(effects.windStreaks).toHaveLength(WIND_STREAKS);
+      }
+      // Dix secondes de vent : toutes ont traversé la vue au moins une fois.
+      expect(entered.size).toBe(WIND_STREAKS);
+    }
+  });
+
+  it('renaissent à une nouvelle hauteur', () => {
+    const effects = new Effects(DEFAULT_TUNING);
+    const heights = new Set(effects.windStreaks.map((streak) => streak.y));
+    // Dix secondes de vent : toutes ont renouvelé leur hauteur.
+    for (let frame = 0; frame < 600; frame += 1) effects.update(1 / 60, 3);
+    for (const streak of effects.windStreaks) heights.add(streak.y);
+    expect(heights.size).toBe(2 * WIND_STREAKS);
   });
 });

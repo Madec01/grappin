@@ -1,7 +1,9 @@
 import { chooseTarget } from './aim';
 import { FREE_RUN, createCourse, extendCourse, pruneCourse, type CoursePlan } from './course';
+import { STILL } from './environment';
+import { applyEvents } from './events';
 import { integrate, swingStep } from './physics';
-import { applyBufferedPress, applyFinish, applyFog, applyFragile, applyGround, applyHang, applyObstacles, applyPickups, applyScore, applyTier, press, release } from './rules';
+import { applyBufferedPress, applyFall, applyFinish, applyFog, applyFragile, applyGround, applyHang, applyObstacles, applyPickups, applyScore, applyTier, press, release } from './rules';
 import type { RuleEvent, SimState } from './state';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 
@@ -36,6 +38,12 @@ export function createState(seed: number, tuning: Tuning, plan: CoursePlan = FRE
     fogY: plan.startY + tuning.fogStart,
     groundY: plan.startY,
     finishY: plan.kind === 'level' ? plan.endY : null,
+    schedule: plan.kind === 'level' ? [...plan.events] : [],
+    eventRuntimes: plan.kind === 'level' ? plan.events.map(() => ({ startStep: null, endStep: null })) : [],
+    env: STILL,
+    fogFactor: 1,
+    lightsOff: false,
+    rainRng: (seed ^ 0x9e3779b9) >>> 0,
     // La hauteur part du centre du personnage posé sur le toit : les premiers centimètres ne comptent pas.
     height: plan.startY + tuning.heroRadius,
     score: 0,
@@ -76,26 +84,28 @@ export class Simulation {
   }
 
   /**
-   * Avance d'un pas. Ordre fixe : casse fragile, treuil et mouvement, sol,
-   * obstacles, étoiles, pendaison, score, palier, brume, parcours, visée, appui en mémoire.
+   * Avance d'un pas. Ordre fixe : événements, casse fragile, treuil et mouvement,
+   * sol, chute, obstacles, étoiles, pendaison, score, palier, arrivée, brume, parcours, visée, appui en mémoire.
    */
   step(): void {
     const s = this.state;
     if (s.status !== 'alive') return;
+    applyEvents(s, this.tuning, this.events);
     applyFragile(s, this.tuning, this.events);
     const anchor = s.rope ? (s.anchors.find((a) => a.id === s.rope!.anchorId)?.pos ?? null) : null;
     if (s.rope && anchor) {
-      const swung = swingStep(s.hero, anchor, s.rope.length, this.tuning);
+      const swung = swingStep(s.hero, anchor, s.rope.length, this.tuning, s.env);
       s.hero.pos = swung.body.pos;
       s.hero.vel = swung.body.vel;
       s.rope.length = swung.ropeLength;
     } else {
-      const moved = integrate(s.hero, null, 0, this.tuning);
+      const moved = integrate(s.hero, null, 0, this.tuning, s.env);
       s.hero.pos = moved.pos;
       s.hero.vel = moved.vel;
     }
     s.step += 1;
     applyGround(s, this.tuning);
+    applyFall(s, this.events);
     applyObstacles(s, this.tuning, this.events);
     applyPickups(s, this.tuning, this.events);
     applyHang(s, this.tuning, this.events);

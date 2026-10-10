@@ -56,18 +56,19 @@ function startPreview(): ChildProcess {
  * jamais plus de deux secondes et demie pendu. Il passe par la même API que
  * les tests de fumée, jusqu'à la mort ou la fin du temps imparti.
  */
-async function autoplay(page: Page, seconds: number, untilHeight = Infinity): Promise<void> {
+async function autoplay(page: Page, seconds: number, untilHeight = Infinity, untilLevelHeight = Infinity): Promise<void> {
   // Le pilote est passé en texte : tsx réécrit les fonctions avec un helper `__name` qui n'existe pas dans la page.
   const script = `new Promise((done) => {
     const api = window.__grappin;
     const limitMs = ${seconds * 1000};
     const untilHeight = ${Number.isFinite(untilHeight) ? untilHeight : 'Infinity'};
+    const untilLevelHeight = ${Number.isFinite(untilLevelHeight) ? untilLevelHeight : 'Infinity'};
     const start = performance.now();
     let holdSince = 0;
     const tick = () => {
       const s = api.state();
       const now = performance.now();
-      if (s.screen === 'dead' || s.screen === 'won' || now - start > limitMs || s.height >= untilHeight) { done(); return; }
+      if (s.screen === 'dead' || s.screen === 'won' || now - start > limitMs || s.height >= untilHeight || s.levelHeight >= untilLevelHeight) { done(); return; }
       if (!s.attached && s.targetId !== null) {
         api.press();
         holdSince = now;
@@ -189,6 +190,39 @@ async function main(): Promise<void> {
     await levelPage.waitForFunction(() => window.__grappin?.state().screen === 'title');
     await levelPage.waitForTimeout(300);
     await levelPage.screenshot({ path: join(outDir, '10-titre-apres-niveau.png') });
+
+    // Les événements : tous les niveaux ouverts, puis chaque événement attrapé à sa hauteur.
+    await levelPage.evaluate(() => window.__grappin!.unlockAll());
+    const shots: Array<[number, number, string]> = [
+      [5, 25, '11-bascule'],
+      [6, 20, '12-vent'],
+      [4, 25, '13-panne'],
+      [3, 20, '14-pluie'],
+      [7, 15, '15-alerte'],
+      [7, 45, '16-cables'],
+    ];
+    const ATTEMPTS = 5;
+    for (const [id, at, name] of shots) {
+      // Le pilote meurt parfois avant la hauteur voulue : on rejoue le niveau, quelques fois au plus.
+      for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
+        await levelPage.evaluate((levelId) => window.__grappin!.playLevel(levelId), id);
+        await levelPage.waitForFunction(() => window.__grappin?.state().screen === 'playing');
+        await autoplay(levelPage, 60, Number.POSITIVE_INFINITY, at + 3);
+        const reached = await levelPage.evaluate(() => window.__grappin!.state());
+        if ((reached.screen === 'playing' && reached.levelHeight >= at) || attempt === ATTEMPTS) break;
+        await levelPage.evaluate(() => window.__grappin!.restart());
+        await levelPage.waitForFunction(() => window.__grappin?.state().screen === 'title');
+      }
+      // Deux images : la bannière d'annonce encore affichée, puis l'événement installé, bannière effacée.
+      await levelPage.waitForTimeout(800);
+      await levelPage.screenshot({ path: join(outDir, `${name}-annonce.png`) });
+      await levelPage.waitForTimeout(1800);
+      await levelPage.screenshot({ path: join(outDir, `${name}.png`) });
+      const st = await levelPage.evaluate(() => window.__grappin!.state());
+      console.log(`Niveau ${id} : écran ${st.screen}, ${st.levelHeight.toFixed(1)} m, gravité x ${st.gravityX.toFixed(2)}, vent ${st.windX.toFixed(1)}`);
+      await levelPage.evaluate(() => window.__grappin!.restart());
+      await levelPage.waitForFunction(() => window.__grappin?.state().screen === 'title');
+    }
 
     // Écran de fin : une partie à brume rapide où personne ne joue, pour montrer « Perdu ».
     const ending = await context.newPage();

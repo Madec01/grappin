@@ -26,6 +26,8 @@ declare global {
       equip: (id: TalismanId) => Profile;
       /** Efface la progression et revient à l'écran titre. */
       resetProfile: () => void;
+      /** Ouvre tous les niveaux (une étoile sur chacun, sauvegardée). Réservé aux tests de bout en bout et au banc de captures. */
+      unlockAll: () => void;
       /** Boutons de l'écran affiché, tels que la dernière image les a dessinés. */
       buttons: () => readonly ButtonRect[];
       /** Joue un niveau tout de suite, sans appui d'accroche. Faux, sans rien changer, s'il n'existe pas ou n'est pas débloqué. */
@@ -53,6 +55,7 @@ async function start(): Promise<void> {
     profile: () => game.currentProfile(),
     equip: (id: TalismanId) => game.equip(id),
     resetProfile: () => game.resetProfile(),
+    unlockAll: () => game.unlockAll(),
     buttons: () => renderer.buttons(),
     playLevel: (id: number) => game.playLevel(id),
     playFree: () => game.playFree(),

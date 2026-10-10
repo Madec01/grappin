@@ -60,7 +60,7 @@ export function freeRunStartY(profile: Profile): number {
 }
 
 export function levelPlan(level: LevelDef): CoursePlan {
-  return { kind: 'level', levelId: level.id, startY: level.startY, endY: level.endY, profile: level.profile };
+  return { kind: 'level', levelId: level.id, startY: level.startY, endY: level.endY, profile: level.profile, events: level.events };
 }
 
 /** Réglages d'un niveau : ceux de la partie, avec la brume du niveau. */

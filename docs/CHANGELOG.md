@@ -2,6 +2,17 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.4.1] — 2026-10-10 — Six événements
+
+Décision du propriétaire : les six événements proposés, dont la bascule du niveau.
+
+### Ajouté
+
+- Conditions physiques du moment : la gravité est un vecteur qui peut tourner, le vent une poussée ; vol, balancement, pompage, lâcher parfait, visée, ombre et vérificateur les suivent.
+- Événements planifiés par hauteur dans chaque niveau, et tirés au sort en course libre dès le palier 2 : bascule, coup de vent, panne, pluie d'étoiles, alerte, câble ; bannières d'annonce ; chute hors de la ville pendant une bascule.
+- Le vérificateur prouve chaque segment dans les conditions de son événement, les points sur câble aux deux bouts et au milieu, et le point d'entrée dans ses propres conditions ; la zone sans obstacle sous un point couvre tout le balancement. Les segments s'arrêtent aux frontières des événements, pour qu'aucun ne soit joué dans d'autres conditions que celles où il a été prouvé.
+- Rendu : le niveau tourne à l'écran pendant la bascule, traînées de vent, lampadaires éteints, étoiles qui tombent, brume qui clignote, câbles dessinés.
+
 ## [0.4.0] — 2026-10-10 — Niveaux et variété
 
 Décision du propriétaire : les niveaux fixes deviennent le mode principal, pour ne plus repartir de zéro et casser la répétition.

@@ -1,4 +1,4 @@
-import { levelById, type LevelDef } from '../data/levels';
+import { LEVELS, levelById, type LevelDef } from '../data/levels';
 import { levelFor } from '../meta/levels';
 import { createProfile, endLevel, endRun, loadProfile, saveProfile, toggleTalisman, type LevelOutcome, type Profile, type ProfileStorage, type RunOutcome } from '../meta/profile';
 import { RunTracker } from '../meta/runTracker';
@@ -6,10 +6,12 @@ import { TALISMANS, applyTalismans, type TalismanId } from '../meta/talismans';
 import { freeRunStartY, isUnlocked, levelPlan, levelTuning, unlockedLevel, type LevelResult } from '../meta/traversee';
 import { levelOfButton, type ButtonId } from '../render/buttons';
 import { Camera } from '../render/camera';
+import { windSide } from '../render/cues';
 import { Effects } from '../render/effects';
-import { levelTitle } from '../render/labels';
+import { eventAnnouncement, levelTitle } from '../render/labels';
 import type { DeathCause, GameScreen, Renderer } from '../render/renderer';
 import type { CoursePlan } from '../sim/course';
+import type { EventKind } from '../sim/events';
 import { Simulation } from '../sim/simulation';
 import { DEFAULT_TUNING, withTuning, type Tuning } from '../sim/tuning';
 
@@ -89,6 +91,17 @@ export interface DebugState {
   readonly stars: number;
   /** Hauteur de départ de la prochaine course libre. */
   readonly freeRunStartY: number;
+  /** Direction unitaire de la gravité : (0, -1) d'ordinaire, qui tourne vers (±1, 0) pendant une bascule. */
+  readonly gravityX: number;
+  readonly gravityY: number;
+  /** Poussée du vent en m/s², négative vers la gauche. */
+  readonly windX: number;
+  /** Panne de lampadaires en cours. */
+  readonly lightsOff: boolean;
+  /** Facteur de vitesse de la brume : 2 pendant l'alerte, 1 sinon. */
+  readonly fogFactor: number;
+  /** Événements du niveau, dans l'ordre du calendrier : commencés ou finis. Vide en course libre. */
+  readonly events: { readonly kind: EventKind; readonly started: boolean; readonly ended: boolean }[];
 }
 
 /**
@@ -233,6 +246,21 @@ export class Game {
     this.restart();
   }
 
+  /**
+   * Ouvre tous les niveaux : une étoile sur chacun, sauvegardée. Réservé aux
+   * tests de bout en bout et au banc de captures, qui doivent atteindre un niveau
+   * lointain sans le jouer en entier ; le jeu ne l'appelle jamais.
+   */
+  unlockAll(): void {
+    const levels = { ...this.profile.levels };
+    for (const { id } of LEVELS) {
+      const before = levels[String(id)] ?? { stars: 0, bestScore: 0 };
+      levels[String(id)] = { ...before, stars: Math.max(1, before.stars) };
+    }
+    this.profile = { ...this.profile, levels };
+    saveProfile(this.storage, this.profile);
+  }
+
   currentProfile(): Profile {
     return this.profile;
   }
@@ -247,16 +275,18 @@ export class Game {
     if (this.screen === 'dead' || this.screen === 'won') this.endSeconds += dt;
     const { sim, camera, effects, tracker } = this.run;
     if (this.screen === 'playing') this.advance(dt);
-    const { hero } = sim.state;
+    const { hero, env } = sim.state;
     camera.resize(this.view.width, this.view.height);
-    camera.update(dt, hero.pos, hero.vel);
-    effects.update(dt);
-    const heroOnScreen = camera.worldToScreen(hero.pos);
+    camera.update(dt, hero.pos, hero.vel, env);
+    effects.update(dt, env.wind.x);
+    // Le monde tourné pendant une bascule : les textes flottent là où le personnage est affiché, pas là où il est dans le repère du monde.
+    const heroOnScreen = camera.worldToDisplay(hero.pos);
     for (const event of sim.drain()) {
       tracker.handle(event);
       if (event.type === 'death') this.conclude(event.cause);
       if (event.type === 'finish') this.conclude(null);
       if (event.type === 'pickup') this.run.pickupsTaken += 1;
+      if (event.type === 'event') this.announce(event.kind, event.phase);
       // Un niveau porte déjà son nom : pas de bannière de palier.
       if (event.type !== 'tier' || this.run.level === null) effects.handle(event, heroOnScreen);
     }
@@ -303,7 +333,19 @@ export class Game {
       unlockedLevel: unlockedLevel(this.profile),
       stars: this.run.outcome && 'level' in this.run.outcome ? this.run.outcome.stars : 0,
       freeRunStartY: freeRunStartY(this.profile),
+      gravityX: state.env.gravityDir.x,
+      gravityY: state.env.gravityDir.y,
+      windX: state.env.wind.x,
+      lightsOff: state.lightsOff,
+      fogFactor: state.fogFactor,
+      events: state.schedule.map((event, index) => ({ kind: event.kind, started: state.eventRuntimes[index]!.startStep !== null, ended: state.eventRuntimes[index]!.endStep !== null })),
     };
+  }
+
+  /** Bannière d'un événement de niveau qui commence ou finit, quand il y a quelque chose à dire. */
+  private announce(kind: EventKind, phase: 'start' | 'end'): void {
+    const announcement = eventAnnouncement(kind, phase, windSide(this.run.sim.state));
+    if (announcement) this.run.effects.announce(announcement.title, announcement.detail);
   }
 
   /** Course libre neuve sur une graine, depuis la zone la plus haute franchie, avec les talismans équipés. */
@@ -321,7 +363,7 @@ export class Game {
   private buildRun(level: LevelDef | null, seed: number, tuning: Tuning, plan: CoursePlan): Run {
     const sim = new Simulation(seed, tuning, plan);
     const camera = new Camera(tuning.heroRadius, this.view.width, this.view.height);
-    camera.snap(sim.state.hero.pos, sim.state.hero.vel);
+    camera.snap(sim.state.hero.pos, sim.state.hero.vel, sim.state.env);
     return { sim, level, tuning, camera, effects: new Effects(tuning), tracker: new RunTracker(), accumulator: 0, deathCause: null, outcome: null, result: null, pickupsTaken: 0 };
   }
 

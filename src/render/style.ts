@@ -22,6 +22,10 @@ export const COLOR = {
   /** Ligne d'arrivée d'un niveau. */
   finish: 0xe8eefc,
   rope: 0xc9d1e3,
+  /** Câble d'une accroche qui glisse : un trait discret sous elle. */
+  cable: 0x8a94a6,
+  /** Traînées du coup de vent. */
+  wind: 0xc9d1e3,
   shadow: 0xc9d1e3,
   star: 0xf4f6fb,
   fog: 0x5b6b9a,

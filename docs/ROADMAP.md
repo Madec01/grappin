@@ -75,7 +75,7 @@ Critère de sortie : le propriétaire rejoue pour une mission ou un talisman, et
 Décision du propriétaire du 10 octobre 2026 : les traversées en niveaux fixes deviennent le mode principal. Conception en section 9 du GDD.
 
 - 0.4.0 : dix niveaux fixes et enchaînés, ligne d'arrivée, trois étoiles, course libre à départ avancé, sept motifs de segments, écrans des niveaux et de victoire.
-- 0.4.1 : événements pendant les niveaux, dont la bascule du niveau à l'horizontale proposée par le propriétaire, après validation du catalogue.
+- 0.4.1 : les six événements validés par le propriétaire : bascule, coup de vent, panne, pluie d'étoiles, alerte, câble. Conception en section 9 ter du GDD.
 
 Critère de sortie : le propriétaire enchaîne plusieurs niveaux sans sentiment de répétition, et un niveau perdu se rejoue sans agacement.
 

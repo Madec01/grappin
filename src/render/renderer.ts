@@ -3,12 +3,12 @@ import type { Vec2 } from '../core/math/vec2';
 import type { LevelOutcome, Profile, RunOutcome } from '../meta/profile';
 import type { LevelResult } from '../meta/traversee';
 import { multiplier } from '../sim/rules';
-import type { AnchorKind, RuleEvent, SimState } from '../sim/state';
+import type { Anchor, AnchorKind, RuleEvent, SimState } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
 import type { ButtonId, ButtonRect } from './buttons';
-import type { Camera } from './camera';
-import { fragileGauge, shadowPoints } from './cues';
-import { bannerAlpha, floatAlpha, floatRise, type Effects } from './effects';
+import type { Camera, ViewBounds } from './camera';
+import { fragileGauge, isDark, shadowPoints } from './cues';
+import { alertAlpha, bannerAlpha, floatAlpha, floatRise, type Effects } from './effects';
 import { formatDecimal } from './format';
 import { Screens, type OverlayView } from './screens';
 import { COLOR, makeText, readSafeInset, starPoints } from './style';
@@ -17,10 +17,16 @@ import { COLOR, makeText, readSafeInset, starPoints } from './style';
  * Rendu PixiJS du prototype gris : formes et textes, aucun asset.
  *
  * Le rendu lit l'état de la simulation et la caméra, il ne décide rien. Toutes
- * les formes sont redessinées à chaque image à partir de coordonnées d'écran
- * déjà calculées par la caméra ; leur nombre reste de l'ordre de la
- * cinquantaine, ce qui ne coûte presque rien. Règle de lisibilité : rien de ce
- * qui est dessiné ici ne masque jamais une accroche ni un danger.
+ * les formes sont redessinées à chaque image à partir de coordonnées déjà
+ * calculées par la caméra ; leur nombre reste de l'ordre de la cinquantaine,
+ * ce qui ne coûte presque rien. Règle de lisibilité : rien de ce qui est
+ * dessiné ici ne masque jamais une accroche ni un danger.
+ *
+ * Tout le décor vit dans un conteneur, `world`, que la bascule fait tourner
+ * autour du centre de l'écran : on y dessine donc en coordonnées de la caméra,
+ * sur le rectangle `ViewBounds` qui déborde de l'écran quand le monde est de
+ * travers. L'interface, les textes flottants, la bannière et les écrans restent
+ * à l'écran, hors du conteneur.
  */
 
 /** Écran du jeu à habiller : le rendu ne sait que l'afficher, c'est le jeu qui le choisit. */
@@ -64,6 +70,8 @@ const OBSTACLE_EDGE_WIDTH = 3;
 const KIND_MARK_WIDTH = 2;
 const WEAR_RING_WIDTH = 3;
 const CHEVRON_WIDTH = 2;
+const CABLE_WIDTH = 1.5;
+const WIND_WIDTH = 1.5;
 
 /**
  * Marques des accroches spéciales, en pixels CSS. L'anneau de marque entoure
@@ -91,10 +99,27 @@ const CHEVRON_MIN_HALF_WIDTH = 4;
 const CHEVRON_COUNT = 2;
 const CHEVRON_GAP = 2;
 
+/** Panne : un point dont le lampadaire est éteint se devine à peine. */
+const DARK_ALPHA = 0.12;
+/** Câble : tirets et blancs en pixels, et opacité du trait. */
+const CABLE_DASH = 6;
+const CABLE_GAP = 5;
+const CABLE_ALPHA = 0.7;
+/** Coup de vent : opacité des traînées. */
+const WIND_ALPHA = 0.35;
+
 /** Étoile à quatre branches : rayon d'une pointe au moins en pixels. */
 const STAR_MIN_RADIUS = 5;
 /** Rayon dessiné d'une étoile, en mètres : constant, quel que soit le rayon de ramassage. */
 const STAR_RADIUS = 0.35;
+/** Étoile de la pluie : trois points de plus en plus petits et pâles la suivent, le premier à cet écart de sa pointe puis de cet écart entre eux, en pixels. */
+const TRAIL: readonly { readonly radius: number; readonly alpha: number }[] = [
+  { radius: 2.4, alpha: 0.5 },
+  { radius: 1.9, alpha: 0.32 },
+  { radius: 1.4, alpha: 0.18 },
+];
+const TRAIL_GAP = 6;
+const TRAIL_STEP = 8;
 
 /** Ligne d'arrivée d'un niveau : épaisseur, longueur d'un tiret et d'un blanc, en pixels CSS. */
 const FINISH_WIDTH = 2;
@@ -126,6 +151,7 @@ const GOAL_GAP = 8;
 const DEATH_MESSAGES: Record<DeathCause, string> = {
   fog: "La brume t'a rattrapé",
   obstacle: "Un obstacle t'a arrêté",
+  fall: 'Tombé hors de la ville',
 };
 
 /** Hauteur à afficher : depuis le toit de départ dans un niveau, absolue en course libre. */
@@ -137,22 +163,41 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+/** Ajoute au tracé une ligne pointillée de `from` à `to`, en tirets de `dash` pixels séparés de `gap`. */
+function dashedLine(g: Graphics, from: Vec2, to: Vec2, dash: number, gap: number): void {
+  const length = Math.hypot(to.x - from.x, to.y - from.y);
+  if (length === 0) return;
+  const ux = (to.x - from.x) / length;
+  const uy = (to.y - from.y) / length;
+  for (let start = 0; start < length; start += dash + gap) {
+    const end = Math.min(start + dash, length);
+    g.moveTo(from.x + ux * start, from.y + uy * start).lineTo(from.x + ux * end, from.y + uy * end);
+  }
+}
+
 export class Renderer {
   private readonly app: Application;
 
-  // Couches, du fond vers l'avant. L'ordre d'ajout à la scène dans le constructeur fait foi.
+  /** Le décor, que la bascule fait tourner autour du centre de l'écran. */
+  private readonly world = new Container();
+
+  // Couches du décor, du fond vers l'avant. L'ordre d'ajout au conteneur dans le constructeur fait foi.
   private readonly altitudeLines = new Graphics();
   private readonly altitudeLabelLayer = new Container();
+  private readonly windStreaks = new Graphics();
   private readonly finishLine = new Graphics();
   private readonly obstacles = new Graphics();
   private readonly pickups = new Graphics();
   private readonly roof = new Graphics();
+  private readonly cables = new Graphics();
   private readonly anchors = new Graphics();
   private readonly targetRing = new Graphics();
   private readonly rope = new Graphics();
   private readonly fog = new Graphics();
   private readonly shadow = new Graphics();
   private readonly hero = new Graphics();
+
+  // Par-dessus le décor, à l'écran.
   private readonly floatLayer = new Container();
 
   private readonly altitudeLabels: Text[] = [];
@@ -187,20 +232,25 @@ export class Renderer {
     this.bannerText.anchor.set(0.5, 0);
     this.bannerDetail.anchor.set(0.5, 0);
     this.finishLabel.anchor.set(1, 1);
-    app.stage.addChild(
+    this.world.addChild(
       this.altitudeLines,
       this.altitudeLabelLayer,
+      this.windStreaks,
       this.finishLine,
       this.finishLabel,
       this.obstacles,
       this.pickups,
       this.roof,
+      this.cables,
       this.anchors,
       this.targetRing,
       this.rope,
       this.fog,
       this.shadow,
       this.hero,
+    );
+    app.stage.addChild(
+      this.world,
       this.floatLayer,
       this.hud,
       this.bannerText,
@@ -257,21 +307,25 @@ export class Renderer {
   /** Met la scène à jour pour l'état donné ; PixiJS la rend juste après. */
   draw(state: SimState, camera: Camera, frame: GameFrame): void {
     if (this.width !== this.laidOutWidth || this.height !== this.laidOutHeight) this.layout();
-    const { tuning } = frame;
-    this.drawAltitude(state, camera);
-    this.drawFinish(state, camera);
+    const { tuning, effects } = frame;
+    const view = camera.viewBounds();
+    this.world.rotation = camera.angle;
+    this.drawAltitude(state, camera, view);
+    this.drawWind(effects, state.env.wind.x, view);
+    this.drawFinish(state, camera, view);
     this.drawObstacles(state, camera);
     this.drawPickups(state, camera, tuning);
     this.drawRoof(state, camera);
+    this.drawCables(state, camera);
     this.drawAnchors(state, camera, tuning);
-    this.drawTargetRing(state, camera);
-    this.drawRope(state, camera, frame.effects.ropeDrawn);
-    this.drawFog(state, camera);
+    this.drawTargetRing(state, camera, tuning);
+    this.drawRope(state, camera, effects.ropeDrawn);
+    this.drawFog(state, camera, view, effects);
     this.drawShadow(state, camera, tuning);
     this.drawHero(state, camera, tuning);
-    this.drawFloatingTexts(frame.effects);
+    this.drawFloatingTexts(effects);
     this.drawHud(state, frame.screen, tuning);
-    this.drawBanner(frame.effects);
+    this.drawBanner(effects);
     this.drawOverlay(state, frame);
   }
 
@@ -280,6 +334,8 @@ export class Renderer {
     const { width, height } = this;
     this.laidOutWidth = width;
     this.laidOutHeight = height;
+    this.world.pivot.set(width / 2, height / 2);
+    this.world.position.set(width / 2, height / 2);
 
     const top = Math.max(HUD_MIN_TOP, readSafeInset('top') + HUD_SAFE_GAP);
     this.heightText.position.set(HUD_SIDE_MARGIN, top);
@@ -293,13 +349,13 @@ export class Renderer {
   /**
    * Lignes fines tous les 10 m, avec leur altitude en petit texte à gauche. Un
    * niveau les compte depuis son toit de départ, comme l'interface ; la course
-   * libre depuis le sol.
+   * libre depuis le sol. Les textes tournent avec le monde pendant une bascule.
    */
-  private drawAltitude(state: SimState, camera: Camera): void {
+  private drawAltitude(state: SimState, camera: Camera, view: ViewBounds): void {
     const lines = this.altitudeLines.clear();
     const origin = state.finishY === null ? 0 : state.groundY;
-    const first = Math.max(1, Math.ceil((camera.worldYAt(this.height) - origin) / ALTITUDE_STEP));
-    const last = Math.floor((camera.worldYAt(0) - origin) / ALTITUDE_STEP);
+    const first = Math.max(1, Math.ceil((camera.worldYAt(view.bottom) - origin) / ALTITUDE_STEP));
+    const last = Math.floor((camera.worldYAt(view.top) - origin) / ALTITUDE_STEP);
 
     for (let slot = 0; slot < Math.max(this.altitudeLabels.length, last - first + 1); slot += 1) {
       const level = first + slot;
@@ -307,9 +363,9 @@ export class Renderer {
       label.visible = level <= last;
       if (!label.visible) continue;
       const y = camera.worldToScreen({ x: 0, y: origin + level * ALTITUDE_STEP }).y;
-      lines.moveTo(0, y).lineTo(this.width, y);
+      lines.moveTo(view.left, y).lineTo(view.right, y);
       label.text = `${level * ALTITUDE_STEP} m`;
-      label.position.set(HUD_SIDE_MARGIN / 2, y - 2);
+      label.position.set(view.left + HUD_SIDE_MARGIN / 2, y - 2);
     }
     lines.stroke({ width: 1, color: COLOR.altitudeLine });
   }
@@ -319,14 +375,32 @@ export class Renderer {
    * « Arrivée » à droite. Elle est dessinée sous les accroches et les dangers,
    * qu'elle ne masque jamais. Rien en course libre.
    */
-  private drawFinish(state: SimState, camera: Camera): void {
+  private drawFinish(state: SimState, camera: Camera, view: ViewBounds): void {
     const g = this.finishLine.clear();
     const y = state.finishY === null ? null : camera.worldToScreen({ x: 0, y: state.finishY }).y;
-    this.finishLabel.visible = y !== null && y >= 0 && y <= this.height;
+    this.finishLabel.visible = y !== null && y >= view.top && y <= view.bottom;
     if (y === null || !this.finishLabel.visible) return;
-    for (let x = 0; x < this.width; x += FINISH_DASH + FINISH_GAP) g.moveTo(x, y).lineTo(Math.min(x + FINISH_DASH, this.width), y);
+    dashedLine(g, { x: view.left, y }, { x: view.right, y }, FINISH_DASH, FINISH_GAP);
     g.stroke({ width: FINISH_WIDTH, color: COLOR.finish });
-    this.finishLabel.position.set(this.width - HUD_SIDE_MARGIN / 2, y - FINISH_WIDTH - 2);
+    this.finishLabel.position.set(view.right - HUD_SIDE_MARGIN / 2, y - FINISH_WIDTH - 2);
+  }
+
+  /**
+   * Coup de vent : des traînées fines qui filent dans le sens du vent sur toute
+   * la vue, sous les points pour n'en masquer aucun. Rien sans vent.
+   */
+  private drawWind(effects: Effects, windX: number, view: ViewBounds): void {
+    const g = this.windStreaks.clear();
+    if (windX === 0) return;
+    const width = view.right - view.left;
+    const height = view.bottom - view.top;
+    for (const streak of effects.windStreaks) {
+      const x = view.left + streak.x * width;
+      const y = view.top + streak.y * height;
+      const half = (streak.length * width) / 2;
+      g.moveTo(x - half, y).lineTo(x + half, y);
+    }
+    g.stroke({ width: WIND_WIDTH, color: COLOR.wind, alpha: WIND_ALPHA, cap: 'round' });
   }
 
   /** Étiquette numéro `slot` du réservoir ; le réservoir grandit seulement si l'écran montre plus de lignes. */
@@ -358,7 +432,8 @@ export class Renderer {
   /**
    * Étoiles de la route haute : losange concave à quatre branches, absent une
    * fois pris. L'étoile garde sa taille ; si le rayon de ramassage est plus
-   * grand (talisman Aimant à étoiles), un halo discret montre la zone.
+   * grand (talisman Aimant à étoiles), un halo discret montre la zone. Une
+   * étoile de la pluie, qui tombe, laisse derrière elle une courte traînée.
    */
   private drawPickups(state: SimState, camera: Camera, tuning: Tuning): void {
     const g = this.pickups.clear();
@@ -369,6 +444,15 @@ export class Renderer {
       const { x, y } = camera.worldToScreen(pickup.pos);
       if (halo > 0) g.circle(x, y, halo).fill({ color: COLOR.star, alpha: 0.08 });
       g.poly(starPoints(x, y, outer)).fill(COLOR.star);
+      if (!pickup.vel) continue;
+      // La traînée part à l'opposé du mouvement, en pixels : le repère d'écran a son y vers le bas.
+      const speed = Math.hypot(pickup.vel.x, pickup.vel.y);
+      if (speed === 0) continue;
+      const behind = { x: -pickup.vel.x / speed, y: pickup.vel.y / speed };
+      TRAIL.forEach((dot, i) => {
+        const distance = outer + TRAIL_GAP + i * TRAIL_STEP;
+        g.circle(x + behind.x * distance, y + behind.y * distance, dot.radius).fill({ color: COLOR.star, alpha: dot.alpha });
+      });
     }
   }
 
@@ -382,57 +466,37 @@ export class Renderer {
       .fill(COLOR.roof);
   }
 
+  /** Câbles : un trait fin tireté sous chaque point qui glisse, de l'un à l'autre de ses bouts. Le point, lui, se dessine à sa position du moment. */
+  private drawCables(state: SimState, camera: Camera): void {
+    const g = this.cables.clear();
+    for (const anchor of state.anchors) {
+      if (!anchor.cable || anchor.broken) continue;
+      dashedLine(g, camera.worldToScreen(anchor.cable.from), camera.worldToScreen(anchor.cable.to), CABLE_DASH, CABLE_GAP);
+    }
+    g.stroke({ width: CABLE_WIDTH, color: COLOR.cable, alpha: CABLE_ALPHA });
+  }
+
   /**
    * Les points d'accroche. Normal : disque gris. Fragile : disque clair, anneau
    * en tirets et fissure, avec un anneau qui se vide pendant la tenue.
    * Propulseur : disque gris dans un anneau plein surmonté de chevrons. Un point
-   * cassé n'est plus dessiné du tout.
+   * cassé n'est plus dessiné du tout, un point dont le lampadaire est éteint
+   * (panne) se devine à peine.
    */
   private drawAnchors(state: SimState, camera: Camera, tuning: Tuning): void {
-    const radius = ANCHOR_RADIUS * camera.scale;
-    const ring = radius + KIND_RING_GAP;
     const g = this.anchors.clear();
-    const positions = (kind: AnchorKind): Vec2[] =>
-      state.anchors.filter((anchor) => anchor.kind === kind && !anchor.broken).map((anchor) => camera.worldToScreen(anchor.pos));
-    const fragile = positions('fragile');
-    const boosters = positions('booster');
-
-    for (const p of [...positions('normal'), ...boosters]) g.circle(p.x, p.y, radius);
-    g.fill(COLOR.anchor);
-    for (const p of fragile) g.circle(p.x, p.y, radius);
-    g.fill(COLOR.anchorFragile);
-
-    for (const p of fragile) {
-      for (let dash = 0; dash < DASH_COUNT; dash += 1) {
-        const start = (dash / DASH_COUNT) * TAU;
-        const end = start + (DASH_FILL / DASH_COUNT) * TAU;
-        g.moveTo(p.x + ring * Math.cos(start), p.y + ring * Math.sin(start)).lineTo(p.x + ring * Math.cos(end), p.y + ring * Math.sin(end));
-      }
+    const lit: Anchor[] = [];
+    const dark: Anchor[] = [];
+    for (const anchor of state.anchors) {
+      if (!anchor.broken) (isDark(state, anchor.id, tuning) ? dark : lit).push(anchor);
     }
-    g.stroke({ width: KIND_MARK_WIDTH, color: COLOR.kindMark });
-    for (const p of fragile) {
-      CRACK.forEach(([dx, dy], i) => {
-        if (i === 0) g.moveTo(p.x + dx * radius, p.y + dy * radius);
-        else g.lineTo(p.x + dx * radius, p.y + dy * radius);
-      });
-    }
-    g.stroke({ width: Math.max(1, radius * 0.14), color: COLOR.crack });
-
-    const halfWidth = Math.max(CHEVRON_MIN_HALF_WIDTH, CHEVRON_HALF_WIDTH * camera.scale);
-    const rise = halfWidth * 0.75;
-    for (const p of boosters) {
-      g.circle(p.x, p.y, ring);
-      for (let k = 0; k < CHEVRON_COUNT; k += 1) {
-        const base = p.y - ring - CHEVRON_GAP - k * (rise + CHEVRON_GAP);
-        g.moveTo(p.x - halfWidth, base).lineTo(p.x, base - rise).lineTo(p.x + halfWidth, base);
-      }
-    }
-    g.stroke({ width: CHEVRON_WIDTH, color: COLOR.kindMark, cap: 'round', join: 'round' });
+    this.paintAnchors(g, camera, lit, 1);
+    this.paintAnchors(g, camera, dark, DARK_ALPHA);
 
     const gauge = fragileGauge(state, tuning);
     if (gauge) {
       const p = camera.worldToScreen(gauge.pos);
-      const wearRing = ring + WEAR_RING_GAP;
+      const wearRing = ANCHOR_RADIUS * camera.scale + KIND_RING_GAP + WEAR_RING_GAP;
       const remaining = 1 - gauge.wear;
       g.circle(p.x, p.y, wearRing).stroke({ width: WEAR_RING_WIDTH, color: COLOR.wear, alpha: WEAR_TRACK_ALPHA });
       if (remaining > 0) {
@@ -443,11 +507,52 @@ export class Renderer {
     }
   }
 
-  /** Anneau autour du point visé : toujours plus large que le point, même très dézoomé. */
-  private drawTargetRing(state: SimState, camera: Camera): void {
+  /** Dessine ces accroches, formes et marques de leur espèce, à l'opacité `alpha`. */
+  private paintAnchors(g: Graphics, camera: Camera, anchors: readonly Anchor[], alpha: number): void {
+    const radius = ANCHOR_RADIUS * camera.scale;
+    const ring = radius + KIND_RING_GAP;
+    const positions = (kind: AnchorKind): Vec2[] => anchors.filter((anchor) => anchor.kind === kind).map((anchor) => camera.worldToScreen(anchor.pos));
+    const fragile = positions('fragile');
+    const boosters = positions('booster');
+
+    for (const p of [...positions('normal'), ...boosters]) g.circle(p.x, p.y, radius);
+    g.fill({ color: COLOR.anchor, alpha });
+    for (const p of fragile) g.circle(p.x, p.y, radius);
+    g.fill({ color: COLOR.anchorFragile, alpha });
+
+    for (const p of fragile) {
+      for (let dash = 0; dash < DASH_COUNT; dash += 1) {
+        const start = (dash / DASH_COUNT) * TAU;
+        const end = start + (DASH_FILL / DASH_COUNT) * TAU;
+        g.moveTo(p.x + ring * Math.cos(start), p.y + ring * Math.sin(start)).lineTo(p.x + ring * Math.cos(end), p.y + ring * Math.sin(end));
+      }
+    }
+    g.stroke({ width: KIND_MARK_WIDTH, color: COLOR.kindMark, alpha });
+    for (const p of fragile) {
+      CRACK.forEach(([dx, dy], i) => {
+        if (i === 0) g.moveTo(p.x + dx * radius, p.y + dy * radius);
+        else g.lineTo(p.x + dx * radius, p.y + dy * radius);
+      });
+    }
+    g.stroke({ width: Math.max(1, radius * 0.14), color: COLOR.crack, alpha });
+
+    const halfWidth = Math.max(CHEVRON_MIN_HALF_WIDTH, CHEVRON_HALF_WIDTH * camera.scale);
+    const rise = halfWidth * 0.75;
+    for (const p of boosters) {
+      g.circle(p.x, p.y, ring);
+      for (let k = 0; k < CHEVRON_COUNT; k += 1) {
+        const base = p.y - ring - CHEVRON_GAP - k * (rise + CHEVRON_GAP);
+        g.moveTo(p.x - halfWidth, base).lineTo(p.x, base - rise).lineTo(p.x + halfWidth, base);
+      }
+    }
+    g.stroke({ width: CHEVRON_WIDTH, color: COLOR.kindMark, alpha, cap: 'round', join: 'round' });
+  }
+
+  /** Anneau autour du point visé : toujours plus large que le point, même très dézoomé. Absent si le lampadaire du point est éteint : on vise de mémoire. */
+  private drawTargetRing(state: SimState, camera: Camera, tuning: Tuning): void {
     const g = this.targetRing.clear();
     const target = state.anchors.find((anchor) => anchor.id === state.targetId);
-    if (!target) return;
+    if (!target || isDark(state, target.id, tuning)) return;
     const p = camera.worldToScreen(target.pos);
     const radius = Math.max(TARGET_RING_RADIUS * camera.scale, ANCHOR_RADIUS * camera.scale + 6);
     g.circle(p.x, p.y, radius).stroke({ width: TARGET_RING_WIDTH, color: COLOR.target });
@@ -466,14 +571,19 @@ export class Renderer {
     g.moveTo(from.x, from.y).lineTo(tip.x, tip.y).stroke({ width: ROPE_WIDTH, color: COLOR.rope });
   }
 
-  /** La brume : du niveau `fogY` jusqu'au bas de l'écran, avec une ligne plus claire au sommet. */
-  private drawFog(state: SimState, camera: Camera): void {
+  /**
+   * La brume : du niveau `fogY` jusqu'au bas de la vue, avec une ligne plus
+   * claire au sommet, qui clignote tant que l'alerte accélère la brume.
+   */
+  private drawFog(state: SimState, camera: Camera, view: ViewBounds, effects: Effects): void {
     const g = this.fog.clear();
     const top = camera.worldToScreen({ x: 0, y: state.fogY }).y;
-    if (top >= this.height) return;
-    const visibleTop = Math.max(0, top);
-    g.rect(0, visibleTop, this.width, this.height - visibleTop).fill({ color: COLOR.fog, alpha: 0.55 });
-    if (top >= 0) g.moveTo(0, top).lineTo(this.width, top).stroke({ width: FOG_EDGE_WIDTH, color: COLOR.fogEdge });
+    if (top >= view.bottom) return;
+    const visibleTop = Math.max(view.top, top);
+    g.rect(view.left, visibleTop, view.right - view.left, view.bottom - visibleTop).fill({ color: COLOR.fog, alpha: 0.55 });
+    if (top < view.top) return;
+    const alpha = state.fogFactor > 1 ? alertAlpha(effects.clock) : 1;
+    g.moveTo(view.left, top).lineTo(view.right, top).stroke({ width: FOG_EDGE_WIDTH, color: COLOR.fogEdge, alpha });
   }
 
   /** Ombre prédictive : quelques points discrets qui montrent où irait le personnage s'il lâchait maintenant. */

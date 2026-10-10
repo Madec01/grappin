@@ -5,6 +5,7 @@ import { createProfile, loadProfile, memoryStorage, saveProfile, type LevelOutco
 import type { TalismanId } from '../src/meta/talismans';
 import { FIRST_CLEAR_XP, STAR_XP, freeRunStartY, unlockedLevel, type LevelResult } from '../src/meta/traversee';
 import type { ButtonId } from '../src/render/buttons';
+import type { Camera } from '../src/render/camera';
 import type { DeathCause, GameFrame, GameScreen } from '../src/render/renderer';
 import type { SimState } from '../src/sim/state';
 import { DEFAULT_TUNING, type Tuning } from '../src/sim/tuning';
@@ -28,6 +29,10 @@ interface Seen {
   lastResult: LevelResult | null;
   /** L'état vivant de la simulation, tel que le rendu le reçoit : de quoi téléporter le personnage. */
   state: SimState | null;
+  /** Caméra de la dernière image, et ce que les effets montrent : traînées de vent et position écran des textes flottants. */
+  camera: Camera | null;
+  lastStreaksX: number[];
+  lastTextAt: { x: number; y: number }[];
   /** Le bouton que le faux rendu trouve sous un point : aucun tant que le test n'en pose pas. */
   hit: (x: number, y: number) => ButtonId | null;
 }
@@ -52,13 +57,19 @@ function makeGame(search = '', saved?: Profile): { game: Game; seen: Seen; stora
     lastOutcome: null,
     lastResult: null,
     state: null,
+    camera: null,
+    lastStreaksX: [],
+    lastTextAt: [],
     hit: () => null,
   };
   const view = {
     width: 390,
     height: 844,
-    draw: (state: SimState, _camera: unknown, frame: GameFrame) => {
+    draw: (state: SimState, camera: Camera, frame: GameFrame) => {
       seen.state = state;
+      seen.camera = camera;
+      seen.lastStreaksX = frame.effects.windStreaks.map((streak) => streak.x);
+      seen.lastTextAt = frame.effects.texts.map((item) => ({ x: item.x, y: item.y }));
       seen.screens.push(frame.screen);
       seen.lastCause = frame.deathCause;
       seen.lastTexts = frame.effects.texts.map((item) => item.text);
@@ -244,13 +255,18 @@ describe('jeu', () => {
         'cause',
         'combo',
         'equipped',
+        'events',
+        'fogFactor',
         'fogY',
         'freeRunStartY',
         'goal',
+        'gravityX',
+        'gravityY',
         'height',
         'level',
         'levelHeight',
         'levelId',
+        'lightsOff',
         'missions',
         'mode',
         'obstacles',
@@ -267,6 +283,7 @@ describe('jeu', () => {
         'tier',
         'unlockedLevel',
         'vel',
+        'windX',
         'xp',
         'xpGained',
       ].sort(),
@@ -962,5 +979,260 @@ describe('niveaux : défaite', () => {
     seen.hit = () => null;
     game.press(100, 100);
     expect(game.debugState()).toMatchObject({ screen: 'playing', mode: 'free', seed: 3, attached: true });
+  });
+});
+
+/**
+ * Joue `seconds` de temps réel par images de 50 ms en gardant le personnage
+ * suspendu en l'air, immobile : on regarde ici le décor et les annonces, pas
+ * le vol, et un personnage qui tomberait finirait dans la brume ou sur un obstacle.
+ */
+function hover(game: Game, seen: Seen, seconds: number): void {
+  for (let frames = 0; frames < Math.round(seconds / 0.05); frames += 1) {
+    const state = seen.state;
+    if (!state) throw new Error('Pas de partie en cours');
+    state.hero.vel = { x: 0, y: 0 };
+    state.rope = null;
+    game.frame(0.05);
+  }
+}
+
+/** Téléporte le personnage à `meters` mètres au-dessus du toit de départ et le garde suspendu 0,1 s : de quoi franchir les seuils des événements. */
+function climbTo(game: Game, seen: Seen, meters: number): void {
+  game.frame(0.016);
+  const state = seen.state;
+  if (!state) throw new Error('Pas de partie en cours');
+  state.hero = { pos: { x: 0, y: state.groundY + meters }, vel: { x: 0, y: 0 }, grounded: false };
+  hover(game, seen, 0.1);
+}
+
+describe('niveaux : événements', () => {
+  /** Niveau `id` en cours, avec tous les niveaux d'avant franchis. */
+  function inLevel(id: number): ReturnType<typeof makeGame> {
+    const made = makeGame('', clearedProfile(id - 1));
+    made.game.playLevel(id);
+    return made;
+  }
+
+  it('annonce la bascule au départ, deux lignes, 2,5 s de temps réel, puis la bannière s\'efface', () => {
+    const { game, seen } = inLevel(5);
+    game.frame(0.05);
+    expect(game.debugState().events).toEqual([{ kind: 'bascule', started: false, ended: false }]);
+
+    climbTo(game, seen, 26);
+    expect(seen.lastBanner).toBe('La bascule !');
+    expect(seen.lastBannerDetail).toBe('Le niveau tourne');
+    expect(game.debugState().events).toEqual([{ kind: 'bascule', started: true, ended: false }]);
+
+    hover(game, seen, 2.2);
+    expect(seen.lastBanner).toBe('La bascule !');
+    hover(game, seen, 0.5);
+    expect(seen.lastBanner).toBeNull();
+  });
+
+  it('pendant la bascule la gravité tourne, la caméra tourne avec elle et dézoome à 0,7 au plus', () => {
+    const { game, seen } = inLevel(5);
+    climbTo(game, seen, 26);
+    expect(game.debugState()).toMatchObject({ gravityY: expect.closeTo(-1, 1) as unknown as number });
+    expect(seen.camera!.angle).toBeLessThan(0.3);
+
+    hover(game, seen, 1);
+    const half = game.debugState();
+    expect(half.gravityX).toBeGreaterThan(0.5);
+    expect(half.gravityX).toBeLessThan(0.95);
+    expect(seen.camera!.angle).toBeGreaterThan(0.4);
+    expect(seen.camera!.angle).toBeLessThan(1.4);
+
+    hover(game, seen, 1.5);
+    const turned = game.debugState();
+    expect(turned.screen).toBe('playing');
+    expect(turned.gravityX).toBeCloseTo(1, 6);
+    expect(turned.gravityY).toBeCloseTo(0, 6);
+    expect(seen.camera!.angle).toBeCloseTo(Math.PI / 2, 6);
+    expect(seen.camera!.zoom).toBeLessThan(0.701);
+  });
+
+  it('une bascule vers la gauche tourne le monde dans l\'autre sens', () => {
+    const { game, seen } = inLevel(8);
+    climbTo(game, seen, 21);
+    hover(game, seen, 2.5);
+    expect(game.debugState().gravityX).toBeCloseTo(-1, 6);
+    expect(seen.camera!.angle).toBeCloseTo(-Math.PI / 2, 6);
+  });
+
+  it('à la fin de la bascule : « Retour au calme », et le monde se redresse', () => {
+    const { game, seen } = inLevel(5);
+    climbTo(game, seen, 26);
+    hover(game, seen, 3);
+    climbTo(game, seen, 56);
+    expect(seen.lastBanner).toBe('Retour au calme');
+    expect(seen.lastBannerDetail).toBeNull();
+    expect(game.debugState().events).toEqual([{ kind: 'bascule', started: true, ended: true }]);
+    hover(game, seen, 2.5);
+    expect(game.debugState().gravityY).toBeCloseTo(-1, 6);
+    expect(seen.camera!.angle).toBeCloseTo(0, 6);
+    // Le personnage suspendu garde une vitesse de quelques dixièmes de m/s : le zoom revient près de 1, sans y arriver tout à fait.
+    expect(seen.camera!.zoom).toBeGreaterThan(0.95);
+  });
+
+  it('les textes flottants naissent là où le personnage est affiché, monde tourné', () => {
+    const { game, seen } = inLevel(5);
+    climbTo(game, seen, 26);
+    hover(game, seen, 2.5);
+    const state = seen.state!;
+    state.hero.vel = { x: 0, y: 0 };
+    state.pickups.push({ id: 9999, pos: { ...state.hero.pos }, taken: false });
+    game.frame(0.016);
+    expect(seen.lastTexts).toContain('+10');
+    const shown = seen.camera!.worldToDisplay(state.hero.pos);
+    const text = seen.lastTextAt[seen.lastTexts.indexOf('+10')]!;
+    expect(text.x).toBeCloseTo(shown.x, 6);
+    // Monde tourné, le personnage est à gauche du centre de l'écran, de l'avance de la caméra, et non au-dessous du centre.
+    expect(Math.abs(shown.x - (195 - 2.5 * seen.camera!.scale))).toBeLessThan(10);
+    expect(Math.abs(shown.y - 422)).toBeLessThan(40);
+    expect(Math.abs(text.y - seen.camera!.worldToScreen(state.hero.pos).y)).toBeGreaterThan(50);
+  });
+
+  it('annonce le vent avec son côté, lu dans le calendrier du niveau, et le fait souffler', () => {
+    const left = inLevel(6);
+    climbTo(left.game, left.seen, 21);
+    expect(left.seen.lastBanner).toBe('Coup de vent !');
+    expect(left.seen.lastBannerDetail).toBe('Il pousse vers la gauche');
+    hover(left.game, left.seen, 1.5);
+    expect(left.game.debugState().windX).toBeCloseTo(-3, 6);
+
+    const right = inLevel(9);
+    climbTo(right.game, right.seen, 11);
+    expect(right.seen.lastBanner).toBe('Coup de vent !');
+    expect(right.seen.lastBannerDetail).toBe('Il pousse vers la droite');
+    hover(right.game, right.seen, 1.5);
+    expect(right.game.debugState().windX).toBeCloseTo(3.5, 6);
+  });
+
+  it('les traînées du vent filent dans son sens ; sans vent, elles ne bougent pas', () => {
+    const { game, seen } = inLevel(6);
+    game.frame(0.05);
+    const still = [...seen.lastStreaksX];
+    game.frame(0.05);
+    expect(seen.lastStreaksX).toEqual(still);
+
+    climbTo(game, seen, 21);
+    hover(game, seen, 1);
+    const before = [...seen.lastStreaksX];
+    game.frame(0.05);
+    // Vent vers la gauche : aucune traînée ne va vers la droite, sauf celle qui renaît à droite.
+    const moved = seen.lastStreaksX.map((x, i) => x - before[i]!);
+    expect(moved.filter((dx) => dx < 0).length).toBeGreaterThan(10);
+    expect(moved.filter((dx) => dx > 0.5).length).toBeLessThan(3);
+
+    climbTo(game, seen, 51);
+    expect(seen.lastBanner).toBe('Retour au calme');
+    expect(game.debugState().windX).toBe(0);
+    const calm = [...seen.lastStreaksX];
+    game.frame(0.05);
+    expect(seen.lastStreaksX).toEqual(calm);
+  });
+
+  it('annonce la panne, éteint les lampadaires pendant elle, et ne dit rien à sa fin', () => {
+    const { game, seen } = inLevel(4);
+    game.frame(0.05);
+    expect(game.debugState().lightsOff).toBe(false);
+    climbTo(game, seen, 26);
+    expect(seen.lastBanner).toBe('Panne de lampadaires');
+    expect(seen.lastBannerDetail).toBe('Vise de mémoire');
+    expect(game.debugState().lightsOff).toBe(true);
+
+    hover(game, seen, 2.6);
+    expect(seen.lastBanner).toBeNull();
+    climbTo(game, seen, 56);
+    expect(game.debugState().lightsOff).toBe(false);
+    expect(seen.lastBanner).toBeNull();
+  });
+
+  it('annonce la pluie d\'étoiles, qui fait tomber des étoiles, et ne dit rien à sa fin', () => {
+    const { game, seen } = inLevel(3);
+    const before = seen.state === null ? 0 : seen.state.pickups.length;
+    climbTo(game, seen, 21);
+    expect(seen.lastBanner).toBe('Pluie d\'étoiles');
+    expect(seen.lastBannerDetail).toBe('Cueille-les au vol');
+    hover(game, seen, 1.5);
+    expect(seen.state!.pickups.some((pickup) => pickup.vel !== undefined)).toBe(true);
+    expect(seen.state!.pickups.length).toBeGreaterThan(before);
+
+    hover(game, seen, 2.6);
+    climbTo(game, seen, 51);
+    expect(seen.lastBanner).toBeNull();
+  });
+
+  it('annonce l\'alerte, qui double la vitesse de la brume, puis le retour au calme', () => {
+    const { game, seen } = inLevel(7);
+    expect(game.debugState().fogFactor).toBe(1);
+    climbTo(game, seen, 16);
+    expect(seen.lastBanner).toBe('Alerte !');
+    expect(seen.lastBannerDetail).toBe('La brume accélère');
+    expect(game.debugState().fogFactor).toBe(2);
+
+    hover(game, seen, 2.6);
+    climbTo(game, seen, 41);
+    expect(seen.lastBanner).toBe('Retour au calme');
+    expect(game.debugState().fogFactor).toBe(1);
+  });
+
+  it('annonce les câbles', () => {
+    const { game, seen } = inLevel(7);
+    climbTo(game, seen, 46);
+    expect(game.debugState().events.map((event) => event.kind)).toEqual(['alerte', 'cable']);
+    expect(seen.lastBanner).toBe('Câbles');
+    expect(seen.lastBannerDetail).toBe('Les accroches glissent');
+  });
+
+  it('chaque niveau expose son calendrier d\'événements, la course libre aucun', () => {
+    const { game } = inLevel(10);
+    expect(game.debugState().events).toEqual([
+      { kind: 'bascule', started: false, ended: false },
+      { kind: 'alerte', started: false, ended: false },
+      { kind: 'panne', started: false, ended: false },
+    ]);
+    expect(game.debugState()).toMatchObject({ gravityX: 0, gravityY: -1, windX: 0, lightsOff: false, fogFactor: 1 });
+
+    const free = makeFreeGame();
+    free.game.frame(0.05);
+    expect(free.game.debugState().events).toEqual([]);
+  });
+
+  it('une partie neuve repart d\'un monde droit, sans bannière d\'événement', () => {
+    const { game, seen } = inLevel(5);
+    climbTo(game, seen, 26);
+    hover(game, seen, 2.5);
+    expect(seen.camera!.angle).toBeGreaterThan(1);
+    game.playLevel(5);
+    game.frame(0.05);
+    expect(seen.camera!.angle).toBe(0);
+    expect(seen.lastBanner).toBe('Niveau 5 · Les antennes');
+  });
+});
+
+describe('ouvrir tous les niveaux', () => {
+  it('donne une étoile à chaque niveau, sauvegarde, et garde les étoiles et records déjà gagnés', () => {
+    const saved: Profile = { ...createProfile(), levels: { '1': { stars: 3, bestScore: 777 } } };
+    const { game, storage } = makeGame('', saved);
+    expect(game.debugState().unlockedLevel).toBe(2);
+    expect(game.playLevel(10)).toBe(false);
+
+    game.unlockAll();
+    expect(game.debugState()).toMatchObject({ unlockedLevel: 10, screen: 'title' });
+    const { levels } = game.currentProfile();
+    expect(Object.keys(levels).sort((a, b) => Number(a) - Number(b))).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']);
+    expect(levels['1']).toEqual({ stars: 3, bestScore: 777 });
+    for (let id = 2; id <= 10; id += 1) expect(levels[String(id)]).toEqual({ stars: 1, bestScore: 0 });
+    expect(loadProfile(storage)).toEqual(game.currentProfile());
+    expect(game.playLevel(10)).toBe(true);
+  });
+
+  it('relève aussi un niveau perdu, enregistré avec zéro étoile', () => {
+    const saved: Profile = { ...createProfile(), levels: { '2': { stars: 0, bestScore: 40 } } };
+    const { game } = makeGame('', saved);
+    game.unlockAll();
+    expect(game.currentProfile().levels['2']).toEqual({ stars: 1, bestScore: 40 });
   });
 });

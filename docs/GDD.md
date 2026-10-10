@@ -1,6 +1,6 @@
 # GRAPPIN, document de conception
 
-Version 0.4, 10 octobre 2026. Le propriétaire du projet est le seul valideur du game design, du lore et de la direction artistique. Les points marqués [VALIDÉ] ont été tranchés par lui le 9 octobre 2026. Le Lead Game Architect a les pleins pouvoirs sur le code et l'architecture.
+Version 0.4.1, 10 octobre 2026. Le propriétaire du projet est le seul valideur du game design, du lore et de la direction artistique. Les points marqués [VALIDÉ] ont été tranchés par lui le 9 octobre 2026. Le Lead Game Architect a les pleins pouvoirs sur le code et l'architecture.
 
 ## 1. Vision [VALIDÉ]
 
@@ -101,6 +101,19 @@ Retour du propriétaire sur la 0.2.0 : « difficile de prendre de la vitesse, on
 
 - **Ce que cela implique pour le score.** Un score obtenu avec un talisman ne se compare pas tout à fait à un score sans. Accepté pour un jeu solo.
 - **Plus tard.** Les niveaux débloqueront les traversées une à une.
+
+## 9 ter. Événements pendant les niveaux [VALIDÉ le 10 octobre 2026]
+
+Demande du propriétaire : des événements qui influencent le jeu pendant un niveau, dont « faire tourner le niveau pour qu'il devienne horizontal ». Les six événements proposés par le Lead ont été retenus. Chacun est planifié à une hauteur fixe d'un niveau, annoncé par une bannière, et le robot vérificateur prouve chaque segment dans les conditions de l'événement qui le couvre. En course libre, à partir du palier 2, un segment sur trois environ porte un événement, le câble et la bascule à partir du palier 4.
+
+- **La bascule.** La gravité tourne d'un quart de tour en deux secondes, vers la gauche ou la droite, tient le temps d'une section, puis revient. Le niveau tourne à l'écran pour que le bas reste en bas : la progression devient horizontale, le personnage pend de côté des points, et tomber hors de la ville est une chute. La physique ne change pas d'une ligne : seule la direction de la gravité.
+- **Le coup de vent.** Une poussée latérale de 3 m/s² qui dévie les vols, montée en une seconde, visible par des traînées.
+- **La panne.** Les lampadaires s'éteignent par vagues, deux secondes toutes les quatre, décalés selon leur numéro ; un point éteint reste accrochable, on vise de mémoire.
+- **La pluie d'étoiles.** Une étoile tous les six dixièmes de seconde tombe au-dessus du personnage, à cueillir au vol.
+- **L'alerte.** La brume double de vitesse le temps d'une section.
+- **Le câble.** Deux points du segment glissent de côté sur un câble de 3,2 m, aller-retour en trois secondes ; le vérificateur les prouve aux deux bouts et au milieu.
+
+Répartition dans les niveaux : pluie au 3, panne au 4, bascule au 5, vent au 6, alerte puis câbles au 7, bascule et panne au 8, vent, pluie et câbles au 9, bascule, alerte et panne au 10.
 
 ## 10. Caméra [VALIDÉ]
 

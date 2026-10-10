@@ -1,5 +1,6 @@
 import { add, clampLength, distance, dot, length, normalize, perpendicular, scale, sub, type Vec2 } from '../core/math/vec2';
 import { tierName } from '../data/tiers';
+import { isUpright, upOf, type Environment } from './environment';
 import { circleBoxGap } from './geometry';
 import { constrainVelocity } from './physics';
 import type { Anchor, RuleEvent, SimState } from './state';
@@ -115,13 +116,17 @@ export function applyBufferedPress(state: SimState, tuning: Tuning, events: Rule
  * pente comprise dans la fenêtre du GDD. Sans trigonométrie : on compare la
  * pente vy / |vx| aux tangentes des angles limites.
  */
-export function isPerfectRelease(vx: number, vy: number, tuning: Tuning): boolean {
-  if (vy <= 0) return false;
+export function isPerfectRelease(vx: number, vy: number, tuning: Tuning, env?: Environment): boolean {
+  // « Vers le haut » s'entend à l'opposé de la gravité du moment, et « de côté » perpendiculairement.
+  const up = env ? upOf(env) : { x: 0, y: 1 };
+  const rise = vx * up.x + vy * up.y;
+  if (rise <= 0) return false;
   const speed = length({ x: vx, y: vy });
   if (speed < tuning.perfectMinSpeed) return false;
-  const ax = vx < 0 ? -vx : vx;
+  const sideways = vx * -up.y + vy * up.x;
+  const ax = sideways < 0 ? -sideways : sideways;
   if (ax === 0) return false;
-  const slope = vy / ax;
+  const slope = rise / ax;
   return slope >= tuning.perfectMinSlope && slope <= tuning.perfectMaxSlope;
 }
 
@@ -153,7 +158,7 @@ export function release(state: SimState, tuning: Tuning, events: RuleEvent[], fo
     state.hero.vel = boosted;
     events.push({ type: 'boost' });
   }
-  const perfect = isPerfectRelease(state.hero.vel.x, state.hero.vel.y, tuning);
+  const perfect = isPerfectRelease(state.hero.vel.x, state.hero.vel.y, tuning, state.env);
   state.combo = perfect ? state.combo + 1 : 0;
   state.lastAnchorId = state.rope.anchorId;
   state.releaseStep = state.step;
@@ -211,9 +216,9 @@ export function applyTier(state: SimState, tuning: Tuning, events: RuleEvent[]):
   events.push({ type: 'tier', tier, name: tierName(tier) });
 }
 
-/** Le toit de départ, en `groundY` : le personnage s'y pose s'il n'est pas accroché. */
+/** Le toit de départ, en `groundY` : le personnage s'y pose s'il n'est pas accroché, tant que la gravité tire vers le bas. */
 export function applyGround(state: SimState, tuning: Tuning): void {
-  if (state.rope) return;
+  if (state.rope || !isUpright(state.env)) return;
   const bottom = state.hero.pos.y - tuning.heroRadius;
   if (bottom <= state.groundY && state.hero.vel.y <= 0) {
     state.hero.pos = { x: state.hero.pos.x, y: state.groundY + tuning.heroRadius };
@@ -222,6 +227,17 @@ export function applyGround(state: SimState, tuning: Tuning): void {
   } else {
     state.hero.grounded = false;
   }
+}
+
+/** Hors de la ville : pendant une bascule, tomber de côté au-delà de cette distance est une chute. */
+export const WORLD_HALF_WIDTH = 14;
+
+export function applyFall(state: SimState, events: RuleEvent[]): void {
+  if (state.status !== 'alive') return;
+  if (state.hero.pos.x > -WORLD_HALF_WIDTH && state.hero.pos.x < WORLD_HALF_WIDTH) return;
+  state.status = 'dead';
+  state.rope = null;
+  events.push({ type: 'death', height: state.height, cause: 'fall' });
 }
 
 /** Ligne d'arrivée d'un niveau : la franchir termine la partie sur une victoire. */
@@ -274,7 +290,7 @@ export function fogSpeed(height: number, tuning: Tuning): number {
  * personnage est alors renvoyé vers le haut depuis la ligne de brume, corde lâchée.
  */
 export function applyFog(state: SimState, tuning: Tuning, events: RuleEvent[]): void {
-  state.fogY += fogSpeed(state.height, tuning) * tuning.stepSeconds;
+  state.fogY += fogSpeed(state.height, tuning) * state.fogFactor * tuning.stepSeconds;
   if (state.status !== 'alive' || state.hero.pos.y >= state.fogY) return;
   if (state.chancesLeft > 0) {
     state.chancesLeft -= 1;

@@ -2,7 +2,7 @@
 
 Jeu d'arcade de mouvement en portrait, sur téléphone. Le personnage monte en se balançant de point d'accroche en point d'accroche avec un grappin. Toute la maîtrise tient dans un seul geste : sentir le bon instant de lâcher pour conserver son élan.
 
-Version 0.4 : prototype en formes grises. Dix niveaux fixes à trois étoiles, course libre à départ avancé, missions, niveaux de grimpeur et talismans. Un seul geste, une brume qui monte, un parcours engendré par segments et vérifié par un robot avant d'être affiché, des fourches entre une route basse sûre et une route haute étoilée, des obstacles à frôler, des accroches fragiles et propulseuses, des paliers nommés, le score et le combo de lâchers parfaits. Aucun habillage, aucun son : ils viennent après que la sensation est validée.
+Version 0.4.1 : prototype en formes grises. Dix niveaux fixes à trois étoiles et six événements, dont la bascule qui fait tourner le niveau, course libre à départ avancé, missions, niveaux de grimpeur et talismans. Un seul geste, une brume qui monte, un parcours engendré par segments et vérifié par un robot avant d'être affiché, des fourches entre une route basse sûre et une route haute étoilée, des obstacles à frôler, des accroches fragiles et propulseuses, des paliers nommés, le score et le combo de lâchers parfaits. Aucun habillage, aucun son : ils viennent après que la sensation est validée.
 
 **Jouer : [madec01.github.io/grappin](https://madec01.github.io/grappin/)**, une fois GitHub Pages réglé sur la source « GitHub Actions » dans les réglages du dépôt (Settings, Pages, Build and deployment, Source : GitHub Actions).
 
@@ -17,6 +17,7 @@ Version 0.4 : prototype en formes grises. Dix niveaux fixes à trois étoiles, c
 7. Une accroche en pointillés casse après une seconde ; une accroche à chevron propulse le lâcher.
 8. Chaque partie rapporte de l'expérience, les missions aussi. Les niveaux de grimpeur débloquent des talismans, à équiper depuis le bouton « Talismans » avant de partir.
 9. Le mode principal est la traversée : dix niveaux fixes, le même parcours à chaque essai, trois étoiles chacun. Perdre recommence le niveau seulement. La course libre démarre à la zone la plus haute franchie.
+10. Dès le niveau 3, des événements : pluie d'étoiles, panne de lampadaires, bascule qui fait tourner le niveau, coup de vent, alerte de brume, accroches sur câble.
 
 Le jeu se joue aussi à la souris, avec le même geste : clic maintenu, puis relâché.
 

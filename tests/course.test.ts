@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createRng } from '../src/core/math/rng';
+import { environmentOf, eventsAt } from '../src/sim/events';
 import { HALF_WIDTH, buildSegment, tierProfile } from '../src/sim/generator';
 import { Simulation } from '../src/sim/simulation';
 import { DEFAULT_TUNING } from '../src/sim/tuning';
@@ -119,12 +120,16 @@ describe('robot vérificateur', () => {
       segments += sim.state.course.segments;
       fallbacks += sim.state.course.fallbacks;
       unverified += sim.state.course.unverified;
-      // Chaque point accepté, sauf le dernier, a une sortie vers le haut dans le parcours tel qu'engendré.
+      // Chaque point accepté, sauf le dernier, a une sortie vers le haut dans le parcours tel qu'engendré,
+      // dans les conditions de l'événement qui le couvre ; les abords d'un événement, où la gravité tourne, sont laissés.
       const anchors = sim.state.anchors;
       for (let i = 0; i < anchors.length - 1; i += 1) {
         const a = anchors[i]!;
         if (a.pos.y < sim.state.fogY) continue;
-        expect(canExit(a, anchors, sim.state.obstacles, null, T), `graine ${seed}, point ${a.id}`).toBe(true);
+        const nearEdge = sim.state.schedule.some((e) => Math.abs(a.pos.y - (sim.state.groundY + e.at)) < 6 || Math.abs(a.pos.y - (sim.state.groundY + e.at + e.length)) < 6);
+        if (nearEdge) continue;
+        const env = environmentOf(eventsAt(sim.state.schedule, sim.state.groundY, a.pos.y));
+        expect(canExit(a, anchors, sim.state.obstacles, null, T, env), `graine ${seed}, point ${a.id}`).toBe(true);
       }
     }
     const elapsed = performance.now() - started;

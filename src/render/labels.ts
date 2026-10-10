@@ -2,6 +2,7 @@ import type { LevelDef } from '../data/levels';
 import type { MissionDef } from '../meta/missions';
 import { talismanById, type TalismanId } from '../meta/talismans';
 import { PERFECT_STREAK_STAR, starChecks, type LevelResult } from '../meta/traversee';
+import type { EventKind } from '../sim/events';
 
 /**
  * Textes de l'interface calculés à partir du profil : fonctions pures, sans
@@ -62,4 +63,33 @@ export function starLines(result: LevelResult): readonly StarLine[] {
     { label: 'Toutes les étoiles', done: allPickups, progress: allPickups ? null : `${result.pickupsTaken}/${result.pickupsTotal}` },
     { label: "Cinq parfaits d'affilée", done: perfects, progress: perfects ? null : `${result.perfectStreak}/${PERFECT_STREAK_STAR}` },
   ];
+}
+
+/** Ce que la bannière dit d'un événement de niveau : un titre et, le plus souvent, une phrase en dessous. */
+export interface Announcement {
+  readonly title: string;
+  readonly detail: string | null;
+}
+
+/** Annonce du début des événements, hors le vent, dont la phrase dépend du côté. */
+const STARTS: Record<Exclude<EventKind, 'vent'>, Announcement> = {
+  bascule: { title: 'La bascule !', detail: 'Le niveau tourne' },
+  panne: { title: 'Panne de lampadaires', detail: 'Vise de mémoire' },
+  pluie: { title: 'Pluie d\'étoiles', detail: 'Cueille-les au vol' },
+  alerte: { title: 'Alerte !', detail: 'La brume accélère' },
+  cable: { title: 'Câbles', detail: 'Les accroches glissent' },
+};
+
+/** Les événements dont la fin se remarque : ceux qui ont changé la façon de jouer. */
+const CALM_AFTER: ReadonlySet<EventKind> = new Set(['bascule', 'vent', 'alerte']);
+
+/**
+ * Annonce d'un événement de niveau qui commence ou finit, ou null quand sa fin
+ * ne mérite pas d'être dite. `windSide` : côté vers lequel pousse le vent, -1
+ * pour la gauche et 1 pour la droite.
+ */
+export function eventAnnouncement(kind: EventKind, phase: 'start' | 'end', windSide: -1 | 1): Announcement | null {
+  if (phase === 'end') return CALM_AFTER.has(kind) ? { title: 'Retour au calme', detail: null } : null;
+  if (kind === 'vent') return { title: 'Coup de vent !', detail: `Il pousse vers la ${windSide < 0 ? 'gauche' : 'droite'}` };
+  return STARTS[kind];
 }

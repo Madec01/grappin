@@ -1,3 +1,4 @@
+import { createRng } from '../core/math/rng';
 import type { Vec2 } from '../core/math/vec2';
 import { multiplier } from '../sim/rules';
 import type { RuleEvent } from '../sim/state';
@@ -5,8 +6,9 @@ import type { Tuning } from '../sim/tuning';
 import { formatDecimal } from './format';
 
 /**
- * Effets de temps réel : textes flottants, bannière (palier ou intro d'un
- * niveau) et animation du trait du grappin.
+ * Effets de temps réel : textes flottants, bannière (palier, intro d'un
+ * niveau ou événement), animation du trait du grappin, traînées du vent et
+ * horloge du clignotement de l'alerte.
  *
  * Tout ce qui dure un peu de temps réel à l'écran vit ici, jamais dans la
  * simulation. Le jeu y verse les événements de règles et le temps écoulé ; le
@@ -21,6 +23,26 @@ export const FLOAT_SECONDS = 0.7;
 export const BANNER_SECONDS = 2;
 /** L'intro d'un niveau se lit sur deux lignes : elle reste plus longtemps. */
 export const INTRO_SECONDS = 3;
+/** L'annonce d'un événement de niveau (bascule, vent, panne...) ou du retour au calme. */
+export const EVENT_SECONDS = 2.5;
+
+/** Alerte : la ligne claire de la brume clignote ce nombre de fois par seconde, entre ces deux opacités. */
+export const ALERT_BLINK_HZ = 2;
+const ALERT_ALPHA_MIN = 0.3;
+const ALERT_ALPHA_MAX = 1;
+
+/**
+ * Coup de vent : nombre de traînées, graine de leur tirage (des effets, pas du
+ * jeu : la même partie les voit toujours pareilles), vitesse en largeurs de vue
+ * par seconde et par m/s² de vent, et leurs longueurs en largeurs de vue.
+ */
+export const WIND_STREAKS = 20;
+const WIND_SEED = 0x57ea4;
+const WIND_SPEED_PER_STRENGTH = 0.25;
+const WIND_LENGTH_MIN = 0.06;
+const WIND_LENGTH_MAX = 0.14;
+const WIND_PACE_MIN = 0.7;
+const WIND_PACE_MAX = 1.3;
 
 /** La bannière apparaît en un quart de seconde et s'efface pendant ses 0,6 dernières secondes. */
 const BANNER_FADE_IN_SECONDS = 0.25;
@@ -57,6 +79,19 @@ export interface Banner {
   age: number;
 }
 
+/**
+ * Une traînée de vent, en fractions de la vue (0 à gauche et en haut, 1 à droite et en bas) :
+ * le rendu la pose dans le repère du monde, où le vent souffle horizontalement.
+ */
+export interface WindStreak {
+  /** Centre. */
+  x: number;
+  y: number;
+  /** Longueur, en largeurs de vue, et rapidité relative : elles ne vont pas toutes à la même vitesse. */
+  length: number;
+  pace: number;
+}
+
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
@@ -78,6 +113,12 @@ export function bannerAlpha(age: number, seconds = BANNER_SECONDS): number {
   const fadeIn = clamp01(age / BANNER_FADE_IN_SECONDS);
   const fadeOut = clamp01((seconds - age) / BANNER_FADE_OUT_SECONDS);
   return Math.min(fadeIn, fadeOut);
+}
+
+/** Opacité de la ligne claire de la brume pendant l'alerte, à l'instant `seconds` de l'horloge des effets : elle oscille `ALERT_BLINK_HZ` fois par seconde. */
+export function alertAlpha(seconds: number): number {
+  const wave = 0.5 + 0.5 * Math.sin(2 * Math.PI * ALERT_BLINK_HZ * seconds);
+  return ALERT_ALPHA_MIN + (ALERT_ALPHA_MAX - ALERT_ALPHA_MIN) * wave;
 }
 
 /** Texte que ce que vient de dire la simulation fait flotter près du personnage, ou null s'il n'y en a pas. */
@@ -105,9 +146,13 @@ export class Effects {
   private floating: FloatingText[] = [];
   private current: Banner | null = null;
   private ropeAge = ROPE_DRAW_SECONDS;
+  private elapsed = 0;
+  private readonly rng = createRng(WIND_SEED);
+  private readonly streaks: WindStreak[];
 
   constructor(tuning: Tuning) {
     this.tuning = tuning;
+    this.streaks = Array.from({ length: WIND_STREAKS }, () => ({ x: this.rng.next(), ...this.newStreak() }));
   }
 
   get texts(): readonly FloatingText[] {
@@ -123,9 +168,25 @@ export class Effects {
     return Math.min(1, this.ropeAge / ROPE_DRAW_SECONDS);
   }
 
-  /** Fait vieillir les effets de `dtSeconds` de temps réel et retire ceux qui sont finis. */
-  update(dtSeconds: number): void {
+  /** Temps réel écoulé depuis la naissance des effets, en secondes : l'horloge du clignotement de l'alerte. */
+  get clock(): number {
+    return this.elapsed;
+  }
+
+  /** Traînées du vent, à dessiner tant que `windX` n'est pas nul. */
+  get windStreaks(): readonly WindStreak[] {
+    return this.streaks;
+  }
+
+  /**
+   * Fait vieillir les effets de `dtSeconds` de temps réel et retire ceux qui
+   * sont finis. Les traînées filent dans le sens de `windX` (m/s²), d'autant
+   * plus vite que le vent est fort, et ne bougent pas sans vent.
+   */
+  update(dtSeconds: number, windX = 0): void {
+    this.elapsed += dtSeconds;
     this.ropeAge += dtSeconds;
+    this.blow(dtSeconds, windX);
     for (const item of this.floating) item.age += dtSeconds;
     this.floating = this.floating.filter((item) => item.age < FLOAT_SECONDS);
     if (this.current) {
@@ -146,6 +207,32 @@ export class Effects {
   /** Annonce un niveau au départ : son titre, puis une phrase plus petite. Remplace la bannière en cours. */
   intro(title: string, detail: string): void {
     this.current = { text: title, detail, seconds: INTRO_SECONDS, age: 0 };
+  }
+
+  /** Annonce un événement de niveau, ou son retour au calme : un titre et, souvent, une phrase. Remplace la bannière en cours. */
+  announce(title: string, detail: string | null): void {
+    this.current = { text: title, detail, seconds: EVENT_SECONDS, age: 0 };
+  }
+
+  /** Hauteur, longueur et rapidité d'une traînée qui naît ; son abscisse dépend d'où elle entre. */
+  private newStreak(): Omit<WindStreak, 'x'> {
+    return {
+      y: this.rng.next(),
+      length: WIND_LENGTH_MIN + (WIND_LENGTH_MAX - WIND_LENGTH_MIN) * this.rng.next(),
+      pace: WIND_PACE_MIN + (WIND_PACE_MAX - WIND_PACE_MIN) * this.rng.next(),
+    };
+  }
+
+  /** Pousse les traînées dans le sens du vent ; celle qui sort de la vue renaît du côté d'où il vient. */
+  private blow(dtSeconds: number, windX: number): void {
+    if (windX === 0) return;
+    const sign = windX > 0 ? 1 : -1;
+    for (const streak of this.streaks) {
+      streak.x += windX * WIND_SPEED_PER_STRENGTH * streak.pace * dtSeconds;
+      if (sign * (streak.x - 0.5) - streak.length / 2 <= 0.5) continue;
+      Object.assign(streak, this.newStreak());
+      streak.x = 0.5 - sign * (0.5 + streak.length / 2);
+    }
   }
 
   /** Ordonnée de naissance d'un texte en `x` : `bornY`, ou plus haut s'il y recouvrirait un texte encore visible. */

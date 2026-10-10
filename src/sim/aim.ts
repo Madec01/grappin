@@ -1,4 +1,5 @@
 import { distance, type Vec2 } from '../core/math/vec2';
+import { STILL, type Environment } from './environment';
 import { segmentCrossesBox } from './geometry';
 import { freeFlightAt, type Body } from './physics';
 import type { Anchor, Obstacle, SimState } from './state';
@@ -39,8 +40,9 @@ export function bestAnchor(
   grounded: boolean,
   excludeId: number | null,
   tuning: Tuning,
+  env: Environment = STILL,
 ): Anchor | null {
-  const predicted = freeFlightAt(body, grounded ? 0 : tuning.aimLookaheadSeconds, tuning);
+  const predicted = freeFlightAt(body, grounded ? 0 : tuning.aimLookaheadSeconds, tuning, env);
   let best: Anchor | null = null;
   let bestScore = Infinity;
   for (const anchor of anchors) {
@@ -61,12 +63,12 @@ export function chooseTarget(state: SimState, tuning: Tuning): AimResult {
   const excludeSteps = Math.round(0.4 / tuning.stepSeconds);
   // Le point que l'on vient de lâcher n'est pas repris tout de suite : on monte.
   const excluded = step - state.releaseStep < excludeSteps ? state.lastAnchorId : null;
-  const best = bestAnchor(state.anchors, state.obstacles, hero, hero.grounded, excluded, tuning);
+  const best = bestAnchor(state.anchors, state.obstacles, hero, hero.grounded, excluded, tuning, state.env);
 
   if (best && state.targetId !== null && best.id !== state.targetId) {
     const current = state.anchors.find((a) => a.id === state.targetId);
     if (current && !current.broken && current.id !== excluded && distance(current.pos, hero.pos) <= tuning.ropeMax && inSight(hero.pos, current, state.obstacles)) {
-      const predicted = freeFlightAt(hero, hero.grounded ? 0 : tuning.aimLookaheadSeconds, tuning);
+      const predicted = freeFlightAt(hero, hero.grounded ? 0 : tuning.aimLookaheadSeconds, tuning, state.env);
       const bestScore = aimScore(best, predicted, hero.pos.y, tuning);
       const currentScore = aimScore(current, predicted, hero.pos.y, tuning);
       if (bestScore >= currentScore * tuning.aimHysteresis) return { targetId: current.id, targetValidStep: step };

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { levelById } from '../src/data/levels';
 import { MISSIONS, missionById } from '../src/meta/missions';
 import { PERFECT_STREAK_STAR } from '../src/meta/traversee';
-import { equippedLine, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, slotsLine, starLines } from '../src/render/labels';
+import type { EventKind } from '../src/sim/events';
+import { equippedLine, eventAnnouncement, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, slotsLine, starLines } from '../src/render/labels';
 
 const mission = (id: string) => {
   const def = missionById(id);
@@ -85,5 +86,32 @@ describe('étoiles d\'un niveau', () => {
   it('un niveau sans étoile à ramasser donne la deuxième étoile d\'office, sans rien à compter', () => {
     const [, all] = starLines({ won: true, pickupsTaken: 0, pickupsTotal: 0, perfectStreak: 0 });
     expect(all).toEqual({ label: 'Toutes les étoiles', done: true, progress: null });
+  });
+});
+
+describe('annonce d\'un événement de niveau', () => {
+  it('dit le début de chaque événement par un titre et une phrase', () => {
+    expect(eventAnnouncement('bascule', 'start', 1)).toEqual({ title: 'La bascule !', detail: 'Le niveau tourne' });
+    expect(eventAnnouncement('panne', 'start', 1)).toEqual({ title: 'Panne de lampadaires', detail: 'Vise de mémoire' });
+    expect(eventAnnouncement('pluie', 'start', 1)).toEqual({ title: 'Pluie d\'étoiles', detail: 'Cueille-les au vol' });
+    expect(eventAnnouncement('alerte', 'start', 1)).toEqual({ title: 'Alerte !', detail: 'La brume accélère' });
+    expect(eventAnnouncement('cable', 'start', 1)).toEqual({ title: 'Câbles', detail: 'Les accroches glissent' });
+  });
+
+  it('dit de quel côté pousse le vent', () => {
+    expect(eventAnnouncement('vent', 'start', -1)).toEqual({ title: 'Coup de vent !', detail: 'Il pousse vers la gauche' });
+    expect(eventAnnouncement('vent', 'start', 1)).toEqual({ title: 'Coup de vent !', detail: 'Il pousse vers la droite' });
+  });
+
+  it('annonce le retour au calme à la fin de la bascule, du vent et de l\'alerte seulement', () => {
+    for (const kind of ['bascule', 'vent', 'alerte'] as const) {
+      expect(eventAnnouncement(kind, 'end', 1)).toEqual({ title: 'Retour au calme', detail: null });
+    }
+    for (const kind of ['panne', 'pluie', 'cable'] as const) expect(eventAnnouncement(kind, 'end', 1)).toBeNull();
+  });
+
+  it('annonce chaque événement du jeu au départ', () => {
+    const kinds: EventKind[] = ['bascule', 'vent', 'panne', 'pluie', 'alerte', 'cable'];
+    for (const kind of kinds) expect(eventAnnouncement(kind, 'start', 1)?.title).toBeTruthy();
   });
 });
