@@ -178,7 +178,8 @@ export function extendCourse(state: SimState, untilY: number, tuning: Tuning): v
     state.anchors.push(...accepted.anchors);
     state.obstacles.push(...accepted.obstacles);
     // Dans un niveau, franchir la ligne d'arrivée gagne aussitôt : une étoile au-dessus serait impossible à prendre, et l'étoile « toutes les étoiles » avec elle.
-    const pickups = course.plan.kind === 'level' ? accepted.pickups.filter((pickup) => pickup.pos.y < course.plan.endY) : accepted.pickups;
+    const ceiling = course.plan.kind === 'level' ? course.plan.endY : Infinity;
+    const pickups = accepted.pickups.filter((pickup) => pickup.pos.y < ceiling);
     state.pickups.push(...pickups);
     course.pickupsTotal += pickups.length;
     const top = accepted.anchors.at(-1)!;
