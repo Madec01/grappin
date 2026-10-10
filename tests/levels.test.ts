@@ -10,15 +10,15 @@ import type { RunStats } from '../src/meta/missions';
 const T = DEFAULT_TUNING;
 const quietRun: RunStats = { holds: 0, perfectStreak: 0, grazes: 0, height: 0, pickups: 0, combo: 0, fragileReleases: 0, boosters: 0, seconds: 0 };
 
-describe('les dix niveaux', () => {
+describe('les vingt niveaux', () => {
   it('se suivent sans trou, avec des graines distinctes et des profils complets', () => {
-    expect(LEVELS).toHaveLength(10);
+    expect(LEVELS).toHaveLength(20);
     expect(LEVELS[0]!.startY).toBe(0);
     for (let i = 1; i < LEVELS.length; i += 1) expect(LEVELS[i]!.startY).toBe(LEVELS[i - 1]!.endY);
     expect(new Set(LEVELS.map((l) => l.seed)).size).toBe(LEVELS.length);
     for (const level of LEVELS) {
       expect(level.endY - level.startY).toBeGreaterThanOrEqual(60);
-      expect(level.endY - level.startY).toBeLessThanOrEqual(100);
+      expect(level.endY - level.startY).toBeLessThanOrEqual(150);
       expect(level.profile.archetypes.length).toBeGreaterThan(0);
     }
     expect(levelById(3)?.name).toBe('Les enseignes');

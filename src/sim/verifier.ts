@@ -1,5 +1,6 @@
 import { clampLength, distance, scale } from '../core/math/vec2';
 import { isOptional } from './cycles';
+import { LANCEUR_CLEARANCE, launchSet, launchVelocity, pulledPosition } from './launcher';
 import { bestAnchor } from './aim';
 import { STILL, upOf, type Environment } from './environment';
 import { circleBoxGap } from './geometry';
@@ -69,6 +70,8 @@ function entryState(anchor: Anchor, offset: number, speed: number, anchors: read
 
 /** Une fois accroché à `anchor` depuis `body`, le balancement qui suit évite-t-il les obstacles ? */
 function swingIsClear(anchor: Anchor, body: Body, anchors: readonly Anchor[], obstacles: readonly Obstacle[], tuning: Tuning, env: Environment): boolean {
+  // Un lanceur ne se balance pas : il suffit que rien ne gêne autour, jusqu'où la traction recule le personnage.
+  if (anchor.kind === 'lanceur') return obstacles.every((box) => circleBoxGap(anchor.pos, LANCEUR_CLEARANCE, box) > 0);
   const ropeLength = Math.max(tuning.ropeMin, distance(body.pos, anchor.pos));
   const context = {
     hero: { pos: body.pos, vel: constrainVelocity(body.pos, body.vel, anchor.pos, ropeLength), grounded: false },
@@ -150,6 +153,7 @@ function holdAndRelease(
  * typique ? Chaque décalage d'arrivée doit réussir.
  */
 export function canExit(from: Anchor, anchors: readonly Anchor[], obstacles: readonly Obstacle[], required: readonly number[] | null, tuning: Tuning, env: Environment = STILL): boolean {
+  if (from.kind === 'lanceur') return launchExits(from, anchors, obstacles, required, tuning, env);
   for (const offset of ENTRY_OFFSETS) {
     const worst = entryState(from, offset, tuning.kickSpeed, anchors, tuning, env);
     if (!holdAndRelease(from, worst, anchors, obstacles, null, new Set(), tuning, env)) return false;
@@ -160,6 +164,23 @@ export function canExit(from: Anchor, anchors: readonly Anchor[], obstacles: rea
     if (!holdAndRelease(from, typical, anchors, obstacles, required, new Set(), tuning, env)) return false;
   }
   return true;
+}
+
+/**
+ * Depuis un lanceur, l'arrivée ne compte pas : on y est tenu. Un joueur qui vise
+ * peut lancer dans toutes les directions du haut, fort ou doucement ; il suffit
+ * qu'un des lancers de l'éventail attrape une sortie (chaque branche exigée,
+ * pour une fourche), sans partir d'une position gênée par un obstacle.
+ */
+function launchExits(from: Anchor, anchors: readonly Anchor[], obstacles: readonly Obstacle[], required: readonly number[] | null, tuning: Tuning, env: Environment): boolean {
+  const reached = new Set<number>();
+  for (const pull of launchSet(env)) {
+    const pos = pulledPosition(from.pos, pull);
+    if (obstacles.some((box) => circleBoxGap(pos, tuning.heroRadius, box) <= 0)) continue;
+    for (const id of flightCatches(from, { pos, vel: launchVelocity(pull, env) }, anchors, obstacles, tuning, env)) reached.add(id);
+    if (required ? required.every((id) => reached.has(id)) : reached.size > 0) return true;
+  }
+  return false;
 }
 
 /**

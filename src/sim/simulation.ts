@@ -1,4 +1,6 @@
 import { chooseTarget } from './aim';
+import type { Vec2 } from '../core/math/vec2';
+import { clampPull, pulledPosition } from './launcher';
 import { FREE_RUN, createCourse, extendCourse, pruneCourse, type CoursePlan } from './course';
 import { STILL } from './environment';
 import { applyEvents } from './events';
@@ -35,6 +37,7 @@ export function createState(seed: number, tuning: Tuning, plan: CoursePlan = FRE
     releaseStep: -1_000_000,
     hangSteps: 0,
     stunUntilStep: 0,
+    pull: { x: 0, y: 0 },
     course: createCourse(seed, plan),
     fogY: plan.startY + tuning.fogStart,
     groundY: plan.startY,
@@ -77,10 +80,17 @@ export class Simulation {
     return outcome === 'attached';
   }
 
-  /** Le doigt se lève : libère le personnage. */
-  release(): boolean {
+  /** Le doigt glisse pendant qu'on tient un lanceur : la traction, en mètres de monde. Sans effet physique avant le relâché. */
+  aim(pull: Vec2): void {
+    this.state.pull = clampPull(pull);
+  }
+
+  /** Le doigt se lève : libère le personnage. Depuis un lanceur, `pull` est la traction du lancer. */
+  release(pull?: Vec2): boolean {
+    if (pull) this.state.pull = clampPull(pull);
+    const recorded = this.state.pull;
     const ok = release(this.state, this.tuning, this.events);
-    if (ok) this.state.inputs.push({ step: this.state.step, kind: 'release' });
+    if (ok) this.state.inputs.push({ step: this.state.step, kind: 'release', ...(pull ? { pull: recorded } : {}) });
     return ok;
   }
 
@@ -94,9 +104,13 @@ export class Simulation {
     applyEvents(s, this.tuning, this.events);
     applyFragile(s, this.tuning, this.events);
     applyCycles(s, this.tuning, this.events);
-    const anchor = s.rope ? (s.anchors.find((a) => a.id === s.rope!.anchorId)?.pos ?? null) : null;
-    if (s.rope && anchor) {
-      const swung = swingStep(s.hero, anchor, s.rope.length, this.tuning, s.env);
+    const held = s.rope ? s.anchors.find((a) => a.id === s.rope!.anchorId) : undefined;
+    if (s.rope && held && held.kind === 'lanceur') {
+      // Tenu au lanceur, reculé de la traction du doigt : pas de balancement, pas de gravité.
+      s.hero.pos = pulledPosition(held.pos, s.pull);
+      s.hero.vel = { x: 0, y: 0 };
+    } else if (s.rope && held) {
+      const swung = swingStep(s.hero, held.pos, s.rope.length, this.tuning, s.env);
       s.hero.pos = swung.body.pos;
       s.hero.vel = swung.body.vel;
       s.rope.length = swung.ropeLength;
@@ -148,7 +162,7 @@ export class Simulation {
 /** Rejoue un journal de gestes sur une graine jusqu'à un pas donné. */
 export function replay(
   seed: number,
-  inputs: readonly { step: number; kind: 'press' | 'release' }[],
+  inputs: readonly { step: number; kind: 'press' | 'release'; pull?: Vec2 }[],
   untilStep: number,
   tuning: Tuning = DEFAULT_TUNING,
   plan: CoursePlan = FREE_RUN,
@@ -158,7 +172,7 @@ export function replay(
   while (sim.state.step < untilStep && sim.state.status === 'alive') {
     while (next < inputs.length && inputs[next]!.step === sim.state.step) {
       if (inputs[next]!.kind === 'press') sim.press();
-      else sim.release();
+      else sim.release(inputs[next]!.pull);
       next += 1;
     }
     sim.step();

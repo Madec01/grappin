@@ -214,6 +214,18 @@ async function main(): Promise<void> {
         await testPage.screenshot({ path: join(outDir, '19-mode-test-partie.png') });
       }
     }
+    // Le lanceur : le niveau 11 en mode test, le pilote s'y tient sans savoir lancer, le temps d'une image.
+    await testPage.evaluate(() => window.__grappin!.restart());
+    await testPage.waitForFunction(() => window.__grappin?.state().screen === 'title');
+    await testPage.evaluate(() => {
+      window.__grappin!.unlockAll();
+      window.__grappin!.playLevel(11);
+    });
+    await testPage.waitForFunction(() => window.__grappin?.state().screen === 'playing');
+    await autoplay(testPage, 40, Number.POSITIVE_INFINITY, 14);
+    await testPage.waitForTimeout(500);
+    await testPage.screenshot({ path: join(outDir, '22-lanceur.png') });
+
     // Les prises à cycles : la course libre du mode test part de la zone la plus haute, où elles abondent.
     await testPage.evaluate(() => window.__grappin!.restart());
     await testPage.waitForFunction(() => window.__grappin?.state().screen === 'title');

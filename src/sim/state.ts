@@ -13,7 +13,7 @@ import type { EventKind, EventRuntime, ScheduledEvent } from './events';
 
 /** Normal ; fragile, casse après une seconde de tenue ; propulseur, booste le lâcher. */
 /** Espèces de prises : normale, fragile (casse après une seconde), propulseur, électrique (piège à cycles), à éclipse (accrochable deux secondes sur quatre). */
-export type AnchorKind = 'normal' | 'fragile' | 'booster' | 'electrique' | 'eclipse';
+export type AnchorKind = 'normal' | 'fragile' | 'booster' | 'electrique' | 'eclipse' | 'lanceur';
 
 export interface Anchor {
   readonly id: number;
@@ -136,7 +136,10 @@ export interface SimState {
   combo: number;
   /** Pas jusqu'auquel le personnage, secoué par une décharge, ne vise ni n'attrape rien. */
   stunUntilStep: number;
+  /** Traction du doigt sur un lanceur tenu, en mètres de monde, plafonnée ; nulle sinon. */
+  pull: Vec2;
   status: Status;
   /** Journal des gestes : pas et nature, pour rejouer une partie. */
-  inputs: { readonly step: number; readonly kind: 'press' | 'release' }[];
+  /** Journal des entrées : appuis et relâchés, un relâché depuis un lanceur portant sa traction. */
+  inputs: { readonly step: number; readonly kind: 'press' | 'release'; readonly pull?: Vec2 }[];
 }

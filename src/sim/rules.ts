@@ -1,7 +1,8 @@
 import { add, clampLength, distance, dot, length, normalize, perpendicular, scale, sub, type Vec2 } from '../core/math/vec2';
 import { grabbable, isCharged, isLit } from './cycles';
 import { tierName } from '../data/tiers';
-import { isUpright, upOf, type Environment } from './environment';
+import { STILL, isUpright, upOf, type Environment } from './environment';
+import { launchVelocity } from './launcher';
 import { circleBoxGap } from './geometry';
 import { constrainVelocity } from './physics';
 import type { Anchor, RuleEvent, SimState } from './state';
@@ -16,7 +17,8 @@ import type { Tuning } from './tuning';
  */
 
 /** Ce dont le balancement a besoin : partagé avec le vérificateur, qui n'a pas d'état complet. */
-export type SwingContext = Pick<SimState, 'hero' | 'rope' | 'anchors'>;
+/** Ce qu'il faut pour raisonner sur une corde tenue ; `env` et `pull` ne servent qu'au lancer depuis un lanceur. */
+export type SwingContext = Pick<SimState, 'hero' | 'rope' | 'anchors'> & Partial<Pick<SimState, 'env' | 'pull'>>;
 
 function findAnchor(state: SwingContext, id: number): Anchor | undefined {
   return state.anchors.find((a) => a.id === id);
@@ -81,9 +83,17 @@ export function tryAttach(state: SimState, tuning: Tuning, events: RuleEvent[]):
   state.attachStep = state.step;
   state.grazed = [];
   events.push({ type: 'attach', anchorId: anchor.id });
-  // La première accroche de la partie peut recevoir un élan de départ plus généreux.
-  const first = state.attachCount === 0 && tuning.startKickSpeed > tuning.kickSpeed;
-  kickIfSlow(state, first ? { ...tuning, kickSpeed: tuning.startKickSpeed, minSwingSpeed: tuning.startKickSpeed } : tuning, events);
+  if (anchor.kind === 'lanceur') {
+    // Tiré jusqu'au lanceur et tenu là : ni balancement ni élan, le lancer viendra du doigt.
+    state.hero.pos = { ...anchor.pos };
+    state.hero.vel = { x: 0, y: 0 };
+    state.pull = { x: 0, y: 0 };
+    state.rope.length = tuning.ropeMin;
+  } else {
+    // La première accroche de la partie peut recevoir un élan de départ plus généreux.
+    const first = state.attachCount === 0 && tuning.startKickSpeed > tuning.kickSpeed;
+    kickIfSlow(state, first ? { ...tuning, kickSpeed: tuning.startKickSpeed, minSwingSpeed: tuning.startKickSpeed } : tuning, events);
+  }
   state.attachCount += 1;
   return true;
 }
@@ -145,6 +155,7 @@ export function multiplier(combo: number, tuning: Tuning): number {
  */
 export function releaseVelocity(state: SwingContext, tuning: Tuning): Vec2 {
   const anchor = state.rope ? findAnchor(state, state.rope.anchorId) : undefined;
+  if (anchor?.kind === 'lanceur') return launchVelocity(state.pull ?? { x: 0, y: 0 }, state.env ?? STILL);
   if (anchor?.kind !== 'booster') return state.hero.vel;
   return clampLength(scale(state.hero.vel, tuning.boostFactor), tuning.maxSpeed);
 }
@@ -159,10 +170,13 @@ export function release(state: SimState, tuning: Tuning, events: RuleEvent[], fo
   const boosted = releaseVelocity(state, tuning);
   if (boosted !== state.hero.vel) {
     state.hero.vel = boosted;
-    events.push({ type: 'boost' });
+    // Un lancer n'est pas un coup de propulseur : pas de « Boost ».
+    if (kind !== 'lanceur') events.push({ type: 'boost' });
   }
-  const perfect = isPerfectRelease(state.hero.vel.x, state.hero.vel.y, tuning, state.env);
-  state.combo = perfect ? state.combo + 1 : 0;
+  // Un lancer ne se juge pas : la série de parfaits reste ce qu'elle est.
+  const perfect = kind !== 'lanceur' && isPerfectRelease(state.hero.vel.x, state.hero.vel.y, tuning, state.env);
+  if (kind !== 'lanceur') state.combo = perfect ? state.combo + 1 : 0;
+  state.pull = { x: 0, y: 0 };
   state.lastAnchorId = state.rope.anchorId;
   state.releaseStep = state.step;
   state.rope = null;
@@ -295,7 +309,7 @@ export function applyFinish(state: SimState, events: RuleEvent[]): void {
  */
 export function applyHang(state: SimState, tuning: Tuning, events: RuleEvent[]): void {
   const anchor = state.rope ? findAnchor(state, state.rope.anchorId) : undefined;
-  if (!state.rope || !anchor) {
+  if (!state.rope || !anchor || anchor.kind === 'lanceur') {
     state.hangSteps = 0;
     return;
   }

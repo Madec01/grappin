@@ -217,11 +217,13 @@ const KIND_TUBE: Record<AnchorKind, { readonly color: number; readonly halo: num
   booster: { color: COLOR.booster, halo: COLOR.booster },
   electrique: { color: COLOR.electric, halo: COLOR.electric },
   eclipse: { color: COLOR.eclipse, halo: COLOR.eclipse },
+  // Provisoire : le lanceur prend le tube du propulseur en attendant son propre dessin.
+  lanceur: { color: COLOR.booster, halo: COLOR.booster },
 };
 const CHARGED_TUBE = { color: COLOR.electricCharged, halo: COLOR.electricCharged };
 /** Dans quel groupe tombe une prise électrique selon son cycle. */
 const ELECTRIC_GROUP: Record<ElectricState, 'calm' | 'warning' | 'charged'> = { calme: 'calm', avertit: 'warning', chargee: 'charged' };
-const KINDS: readonly AnchorKind[] = ['normal', 'fragile', 'booster', 'electrique', 'eclipse'];
+const KINDS: readonly AnchorKind[] = ['normal', 'fragile', 'booster', 'electrique', 'eclipse', 'lanceur'];
 
 /** Un point à l'écran, avec le numéro de l'accroche : le grésillement le décale d'une prise à l'autre. */
 interface Spot {
@@ -239,6 +241,7 @@ interface LitGroups {
   readonly warning: Spot[];
   readonly charged: Spot[];
   readonly eclipse: Spot[];
+  readonly lanceur: Spot[];
 }
 
 /** Ce que le dessin des accroches a besoin de savoir de l'image : tailles en pixels et horloge des effets. */
@@ -698,7 +701,7 @@ export class Renderer {
     const radius = ANCHOR_RADIUS * camera.scale;
     const paint: AnchorPaint = { scale: camera.scale, radius, ring: radius + KIND_RING_GAP, clock: effects.clock };
     const off: Anchor[] = [];
-    const groups: LitGroups = { normal: [], fragile: [], booster: [], calm: [], warning: [], charged: [], eclipse: [] };
+    const groups: LitGroups = { normal: [], fragile: [], booster: [], calm: [], warning: [], charged: [], eclipse: [], lanceur: [] };
     for (const anchor of state.anchors) {
       if (anchor.broken) continue;
       const p = camera.worldToScreen(anchor.pos);
@@ -754,6 +757,9 @@ export class Renderer {
     const core = pass === 'core';
 
     neonDiscs(g, groups.normal, radius, { ...KIND_TUBE.normal, pass });
+    // Provisoire : un lanceur est un disque de propulseur cerclé, en attendant son dessin.
+    neonDiscs(g, groups.lanceur, radius, { ...KIND_TUBE.lanceur, pass });
+    if (core) for (const spot of groups.lanceur) neonCircle(g, spot.x, spot.y, ring + 3, { ...KIND_TUBE.lanceur, width: KIND_MARK_WIDTH, pass: 'core' });
 
     // Fragile : le disque grésille, chacun à son rythme ; anneau en huit tirets ; fêlure sombre au cœur.
     if (groups.fragile.length > 0) {

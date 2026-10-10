@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Game, readSettings } from '../src/app/game';
-import { levelById } from '../src/data/levels';
+import { LEVELS, levelById } from '../src/data/levels';
 import { createProfile, loadProfile, memoryStorage, saveProfile, type LevelOutcome, type Profile, type ProfileStorage, type RunOutcome } from '../src/meta/profile';
 import type { TalismanId } from '../src/meta/talismans';
 import { FIRST_CLEAR_XP, STAR_XP, freeRunStartY, unlockedLevel, type LevelResult } from '../src/meta/traversee';
@@ -938,13 +938,14 @@ describe('niveaux : victoire', () => {
   });
 
   it('au dernier niveau, il n\'y a pas de niveau suivant : « Niveau suivant » ne fait rien', () => {
-    const { game, seen } = makeGame('', clearedProfile(9));
-    expect(game.playLevel(10)).toBe(true);
+    const last = LEVELS.length;
+    const { game, seen } = makeGame('', clearedProfile(last - 1));
+    expect(game.playLevel(last)).toBe(true);
     winByTeleport(game, seen);
     settle(game);
     seen.hit = () => 'next';
     game.press(100, 100);
-    expect(game.debugState()).toMatchObject({ screen: 'won', levelId: 10, unlockedLevel: 10 });
+    expect(game.debugState()).toMatchObject({ screen: 'won', levelId: last, unlockedLevel: last });
   });
 
   it('le pilote de test gagne le niveau 1 : les étoiles comptées sont celles de la partie', () => {
@@ -1262,9 +1263,9 @@ describe('ouvrir tous les niveaux', () => {
     expect(game.playLevel(10)).toBe(false);
 
     game.unlockAll();
-    expect(game.debugState()).toMatchObject({ unlockedLevel: 10, screen: 'title' });
+    expect(game.debugState()).toMatchObject({ unlockedLevel: LEVELS.length, screen: 'title' });
     const { levels } = game.currentProfile();
-    expect(Object.keys(levels).sort((a, b) => Number(a) - Number(b))).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']);
+    expect(Object.keys(levels).sort((a, b) => Number(a) - Number(b))).toEqual(LEVELS.map((level) => String(level.id)));
     expect(levels['1']).toEqual({ stars: 3, bestScore: 777 });
     for (let id = 2; id <= 10; id += 1) expect(levels[String(id)]).toEqual({ stars: 1, bestScore: 0 });
     expect(loadProfile(storage)).toEqual(game.currentProfile());

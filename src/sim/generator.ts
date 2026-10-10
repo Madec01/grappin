@@ -3,6 +3,7 @@ import type { Vec2 } from '../core/math/vec2';
 import { STILL, type Environment } from './environment';
 import { CABLE_HALF_LENGTH, CABLE_PERIOD_SECONDS, TRAVERSIERE_PERIOD_SECONDS } from './events';
 import { circleBoxGap } from './geometry';
+import { LANCEUR_CLEARANCE } from './launcher';
 import type { Anchor, Obstacle, Pickup } from './state';
 
 /**
@@ -15,9 +16,9 @@ import type { Anchor, Obstacle, Pickup } from './state';
  * dispose. Tout l'aléatoire vient du générateur seedé.
  */
 
-export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' | 'fragiles' | 'saut';
+export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' | 'fragiles' | 'saut' | 'lanceur';
 
-export const ARCHETYPES: readonly Archetype[] = ['chaine', 'escalier', 'couloir', 'dalles', 'rafale', 'fragiles', 'saut'];
+export const ARCHETYPES: readonly Archetype[] = ['chaine', 'escalier', 'couloir', 'dalles', 'rafale', 'fragiles', 'saut', 'lanceur'];
 
 export interface Segment {
   readonly anchors: Anchor[];
@@ -109,6 +110,7 @@ export function tierProfile(tier: number): TierProfile {
   const archetypes: Archetype[] = ['chaine', 'couloir'];
   if (tier >= 1) archetypes.push('escalier', 'dalles');
   if (tier >= 2) archetypes.push('fragiles');
+  if (tier >= 2) archetypes.push('lanceur');
   if (tier >= 3) archetypes.push('rafale', 'saut');
   return {
     spacing: Math.min(5, 3 + 0.4 * tier),
@@ -163,7 +165,14 @@ const SHAPES: Record<Archetype, { dy: readonly [number, number]; dx: readonly [n
   rafale: { dy: [0.55, 0.9], dx: [0.4, 1] },
   fragiles: { dy: [0.5, 0.8], dx: [0.4, 0.9] },
   saut: { dy: [0.55, 0.85], dx: [0.4, 0.9] },
+  lanceur: { dy: [0.55, 0.9], dx: [0.4, 1] },
 };
+
+/** Le mur à trou d'un lanceur : hauteur au-dessus du lanceur, demi-largeur du trou, et hauteur du point suivant au-dessus du mur (hors zone de pendaison). */
+const WALL_RISE_MIN = 4.5;
+const WALL_RISE_RANGE = 1.5;
+const GAP_HALF_WIDTH = 1.2;
+const ABOVE_WALL = 4.2;
 
 /**
  * Construit un segment depuis le dernier point connu (`from`), ou depuis le
@@ -209,6 +218,9 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
   const wantsSplit = archetype === 'chaine' && profile.split && rng.next() < 0.8;
   let splitDone = false;
   let jumpDone = false;
+  let launcherDone = false;
+  /** Obstacles posés par le motif lui-même, que les obstacles tirés au sort respectent. */
+  const fixed: Obstacle[] = [];
 
   while (cur.y < targetY) {
     if (wantsSplit && !splitDone && cur.y - startY > 3 && targetY - cur.y > 9) {
@@ -226,6 +238,21 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
       branchIds = [low.id, high.id];
       splitDone = true;
       cur = merge.pos;
+      continue;
+    }
+    if (archetype === 'lanceur' && !launcherDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > 11) {
+      // Lanceur : le dernier point devient un lanceur, un mur à trou le surplombe, et la chaîne reprend au-dessus du mur.
+      anchors[anchors.length - 1] = makeAnchor(ids, cur, 'lanceur');
+      const wallY = cur.y + WALL_RISE_MIN + WALL_RISE_RANGE * rng.next();
+      const gapX = clampX(cur.x + (rng.next() - 0.5) * 2 * Math.max(0, halfWidth - 2.2), halfWidth);
+      const wallX = halfWidth + WALL_MARGIN;
+      fixed.push({ id: ids.obstacle, x0: -wallX, y0: wallY, x1: gapX - GAP_HALF_WIDTH, y1: wallY + OBSTACLE_THICKNESS });
+      ids.obstacle += 1;
+      fixed.push({ id: ids.obstacle, x0: gapX + GAP_HALF_WIDTH, y0: wallY, x1: wallX, y1: wallY + OBSTACLE_THICKNESS });
+      ids.obstacle += 1;
+      cur = { x: clampX(gapX + (rng.next() - 0.5) * 1.6, halfWidth), y: wallY + ABOVE_WALL };
+      anchors.push(makeAnchor(ids, cur));
+      launcherDone = true;
       continue;
     }
     if (archetype === 'saut' && !jumpDone && profile.boosters > 0 && cur.y - startY > 6 && targetY - cur.y > 8) {
@@ -261,7 +288,7 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
   if (context.cable !== 'none') hangCables(anchors, junctionId, branchIds, halfWidth, context.cable);
   addSpecialAnchors(rng, ids, anchors, profile, halfWidth);
   const obstacleCount = archetype === 'dalles' ? Math.min(4, profile.obstacles + 2) : profile.obstacles;
-  const obstacles = placeObstacles(rng, ids, anchors, pickups, Math.max(startY, origin.y + GRACE_ABOVE_ORIGIN - 2), cur.y, obstacleCount, from, archetype === 'dalles', context, halfWidth);
+  const obstacles = placeObstacles(rng, ids, anchors, pickups, Math.max(startY, origin.y + GRACE_ABOVE_ORIGIN - 2), cur.y, obstacleCount, from, archetype === 'dalles', context, halfWidth, fixed);
   return { anchors, obstacles, pickups, junctionId, branchIds };
 }
 
@@ -376,14 +403,15 @@ function placeObstacles(
   slabsOnly: boolean,
   context: SegmentContext,
   halfWidth: number,
+  fixed: readonly Obstacle[] = [],
 ): Obstacle[] {
   const wallX = halfWidth + WALL_MARGIN;
-  const obstacles: Obstacle[] = [];
+  const obstacles: Obstacle[] = [...fixed];
   const { env, entryEnv } = context;
-  // Un point qui glisse est tenu à l'écart partout où il passe : à ses deux bouts et au milieu.
+  // Un point qui glisse est tenu à l'écart partout où il passe : à ses deux bouts et au milieu. Autour d'un lanceur, rien jusqu'où la traction recule le personnage.
   const clearOf = (pos: Vec2, box: Obstacle): boolean => circleBoxGap(pos, 0, box) >= OBSTACLE_CLEARANCE && !underAnchor(pos, box, env);
   const keepAway = (box: Obstacle): boolean =>
-    anchors.every((a) => (a.cable ? [a.cable.from, a.pos, a.cable.to] : [a.pos]).every((pos) => clearOf(pos, box))) &&
+    anchors.every((a) => (a.kind === 'lanceur' ? circleBoxGap(a.pos, LANCEUR_CLEARANCE, box) > 0 : (a.cable ? [a.cable.from, a.pos, a.cable.to] : [a.pos]).every((pos) => clearOf(pos, box)))) &&
     pickups.every((p) => circleBoxGap(p.pos, 0, box) >= PICKUP_CLEARANCE) &&
     (from === null || (circleBoxGap(from, 0, box) >= OBSTACLE_CLEARANCE && !underAnchor(from, box, env) && !underAnchor(from, box, entryEnv))) &&
     obstacles.every((o) => box.y1 < o.y0 - 1 || box.y0 > o.y1 + 1);

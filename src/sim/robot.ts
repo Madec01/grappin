@@ -1,4 +1,6 @@
 import { FREE_RUN, type CoursePlan } from './course';
+import { PULL_MAX } from './launcher';
+import type { Anchor } from './state';
 import { Simulation } from './simulation';
 import type { Tuning } from './tuning';
 
@@ -66,6 +68,21 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
           catches += 1;
           attachStep = s.step;
         }
+      }
+    } else if (s.anchors.find((a) => a.id === s.rope?.anchorId)?.kind === 'lanceur') {
+      // Sur un lanceur : après son temps de réaction, le robot vise le point le plus proche au-dessus et tire à l'opposé, aux deux tiers.
+      const launcher = s.anchors.find((a) => a.id === s.rope?.anchorId)!;
+      if (plannedRelease < 0) plannedRelease = s.step + reactionSteps;
+      if (s.step >= plannedRelease) {
+        plannedRelease = -1;
+        let target: Anchor | null = null;
+        for (const a of s.anchors) {
+          if (a.id === launcher.id || a.broken || a.pos.y < launcher.pos.y + 1) continue;
+          if (!target || Math.hypot(a.pos.x - launcher.pos.x, a.pos.y - launcher.pos.y) < Math.hypot(target.pos.x - launcher.pos.x, target.pos.y - launcher.pos.y)) target = a;
+        }
+        const dir = target ? { x: target.pos.x - launcher.pos.x, y: target.pos.y - launcher.pos.y } : { x: 0, y: 1 };
+        const len = Math.hypot(dir.x, dir.y) || 1;
+        sim.release({ x: (-dir.x / len) * PULL_MAX * 0.7, y: (-dir.y / len) * PULL_MAX * 0.7 });
       }
     } else if (s.step - attachStep > 10) {
       const held = (s.step - attachStep) * tuning.stepSeconds;

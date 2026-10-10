@@ -2,6 +2,18 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.6.0] — 2026-10-10 — Le lanceur et dix niveaux de plus
+
+Demandes du propriétaire : « il faut plus de niveaux » et une nouvelle mécanique, le lanceur : « on s'accroche dessus et il faut tirer avec le doigt dans une direction opposée à celle où on veut aller, et plus on tire fort plus ça va loin ».
+
+### Ajouté
+
+- Le lanceur, nouvelle espèce de prise : on y est tiré et tenu, sans balancement ; on tire le doigt à l'opposé de là où l'on veut aller (jusqu'à 2,5 m de monde), on relâche, et le personnage part à l'opposé, de 6 m/s sans traction à 15 m/s à pleine traction. Un simple tap lance tout droit vers le haut, doucement. Un lancer ne compte ni comme parfait ni comme raté.
+- Le motif « lanceur » du générateur : un lanceur, un mur à trou de 2,4 m entre 4,5 et 6 m au-dessus, et la chaîne qui reprend au-dessus du mur. Le vérificateur prouve chaque lanceur avec un éventail de 51 lancers (17 directions du haut, 3 forces) : l'un d'eux au moins doit passer. Dès le palier 2 en course libre.
+- Dix niveaux de plus, du 11 au 20, de 820 à 2 000 m : Les passerelles, Les cheminées, Les tours, La centrale, Les enseignes de nuit, Le pont, L'orage, Le phare, Le vertige, Le ciel. Lanceurs partout, puis traversières, prises à cycles, vents, bascules, pannes et alertes combinés.
+- Le journal des entrées garde la traction du relâché : un rejeu redonne la même partie.
+- Le robot joueur sait lancer : vers le point le plus proche au-dessus, aux deux tiers de la force.
+
 ## [0.5.3] — 2026-10-10 — La prise électrique ne tue plus
 
 Retour du propriétaire : « ça bug avec les prises électriques, sans que je m'accroche dessus, juste si le cercle de visée est dessus, ça me tue ; c'est un peu trop fort de tuer d'un coup ».

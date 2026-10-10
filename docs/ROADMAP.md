@@ -99,7 +99,15 @@ Décision du propriétaire du 10 octobre 2026 : « on va garder ce style minimal
 - 0.5.0 : écartement progressif des prises avec dézoom de la caméra, et les traversières, septième événement.
 - 0.5.1 : prise électrique (piège à cycles) et prise à éclipse (raccourci accrochable deux secondes sur quatre), jamais exigées par le vérificateur.
 - 0.5.2 : le passage au néon de tout le rendu, nouvelles prises comprises, bords de la ville et silhouettes.
+- 0.5.3 : la prise électrique ne tue plus (décharge) et la visée l'évite quand elle est dangereuse.
 - À venir : mesure sur un vrai téléphone, sons, police libre, application installable, écrans d'options et de crédits.
+
+## Phase 6 — Le lanceur et la suite de la ville — v0.6 — en cours
+
+Demandes du propriétaire du 10 octobre 2026 après la 0.5.2 : plus de niveaux, et le lanceur, une prise où l'on tire le doigt à l'opposé pour se lancer, avec des murs à trou à viser.
+
+- 0.6.0 : le lanceur (simulation, vérification, génération, robot) et les niveaux 11 à 20, de 820 à 2 000 m.
+- À venir : dessin du lanceur et de la traction, liste des niveaux sur deux pages, retours du propriétaire.
 - Accroches réactives au passage. Traînée, étirement, sifflement du vent, éclat et son du lâcher parfait.
 - Audio Web Audio : bruitages et musique libres, déverrouillage au premier tap, volumes.
 - Application installable, plein écran portrait, hors ligne. Écrans d'accueil, options, crédits.
