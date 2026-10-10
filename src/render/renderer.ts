@@ -7,6 +7,7 @@ import type { Anchor, AnchorKind, RuleEvent, SimState } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
 import type { ButtonId, ButtonRect } from './buttons';
 import type { Camera, ViewBounds } from './camera';
+import { electricState, isLit } from '../sim/cycles';
 import { fragileGauge, isDark, shadowPoints } from './cues';
 import { alertAlpha, bannerAlpha, floatAlpha, floatRise, type Effects } from './effects';
 import { formatDecimal } from './format';
@@ -154,6 +155,7 @@ const DEATH_MESSAGES: Record<DeathCause, string> = {
   fog: "La brume t'a rattrapé",
   obstacle: "Un obstacle t'a arrêté",
   fall: 'Tombé hors de la ville',
+  shock: 'Électrocuté par une prise piégée',
 };
 
 /** Hauteur à afficher : depuis le toit de départ dans un niveau, absolue en course libre. */
@@ -493,10 +495,13 @@ export class Renderer {
     const lit: Anchor[] = [];
     const dark: Anchor[] = [];
     for (const anchor of state.anchors) {
-      if (!anchor.broken) (isDark(state, anchor.id, tuning) ? dark : lit).push(anchor);
+      if (anchor.broken) continue;
+      // Une prise à éclipse éteinte se devine comme un lampadaire en panne.
+      const off = isDark(state, anchor.id, tuning) || (anchor.kind === 'eclipse' && !isLit(anchor.id, state.step, tuning));
+      (off ? dark : lit).push(anchor);
     }
-    this.paintAnchors(g, camera, lit, 1);
-    this.paintAnchors(g, camera, dark, DARK_ALPHA);
+    this.paintAnchors(g, camera, lit, 1, state.step, tuning);
+    this.paintAnchors(g, camera, dark, DARK_ALPHA, state.step, tuning);
 
     const gauge = fragileGauge(state, tuning);
     if (gauge) {
@@ -513,15 +518,28 @@ export class Renderer {
   }
 
   /** Dessine ces accroches, formes et marques de leur espèce, à l'opacité `alpha`. */
-  private paintAnchors(g: Graphics, camera: Camera, anchors: readonly Anchor[], alpha: number): void {
+  private paintAnchors(g: Graphics, camera: Camera, anchors: readonly Anchor[], alpha: number, step: number, tuning: Tuning): void {
     const radius = ANCHOR_RADIUS * camera.scale;
     const ring = radius + KIND_RING_GAP;
     const positions = (kind: AnchorKind): Vec2[] => anchors.filter((anchor) => anchor.kind === kind).map((anchor) => camera.worldToScreen(anchor.pos));
     const fragile = positions('fragile');
     const boosters = positions('booster');
 
-    for (const p of [...positions('normal'), ...boosters]) g.circle(p.x, p.y, radius);
+    for (const p of [...positions('normal'), ...boosters, ...positions('eclipse')]) g.circle(p.x, p.y, radius);
     g.fill({ color: COLOR.anchor, alpha });
+
+    // Prise électrique : un point plus pâle, un anneau quand elle avertit, un anneau plein quand elle est chargée.
+    for (const anchor of anchors) {
+      if (anchor.kind !== 'electrique') continue;
+      const p = camera.worldToScreen(anchor.pos);
+      const electric = electricState(anchor.id, step, tuning);
+      g.circle(p.x, p.y, radius).fill({ color: COLOR.electric, alpha });
+      if (electric === 'avertit') g.circle(p.x, p.y, ring).stroke({ width: KIND_MARK_WIDTH, color: COLOR.electric, alpha: alpha * 0.6 });
+      if (electric === 'chargee') g.circle(p.x, p.y, ring + 2).stroke({ width: KIND_MARK_WIDTH + 1, color: COLOR.electric, alpha });
+    }
+    // Prise à éclipse allumée : un anneau fin ; éteinte, elle est passée en sombre plus haut.
+    for (const p of positions('eclipse')) g.circle(p.x, p.y, ring);
+    g.stroke({ width: KIND_MARK_WIDTH, color: COLOR.kindMark, alpha: alpha * 0.8 });
     for (const p of fragile) g.circle(p.x, p.y, radius);
     g.fill({ color: COLOR.anchorFragile, alpha });
 

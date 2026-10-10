@@ -12,7 +12,8 @@ import type { EventKind, EventRuntime, ScheduledEvent } from './events';
  */
 
 /** Normal ; fragile, casse après une seconde de tenue ; propulseur, booste le lâcher. */
-export type AnchorKind = 'normal' | 'fragile' | 'booster';
+/** Espèces de prises : normale, fragile (casse après une seconde), propulseur, électrique (piège à cycles), à éclipse (accrochable deux secondes sur quatre). */
+export type AnchorKind = 'normal' | 'fragile' | 'booster' | 'electrique' | 'eclipse';
 
 export interface Anchor {
   readonly id: number;
@@ -80,7 +81,7 @@ export type RuleEvent =
   | { readonly type: 'graze'; readonly obstacleId: number }
   | { readonly type: 'pickup'; readonly pickupId: number }
   | { readonly type: 'tier'; readonly tier: number; readonly name: string }
-  | { readonly type: 'death'; readonly height: number; readonly cause: 'fog' | 'obstacle' | 'fall' };
+  | { readonly type: 'death'; readonly height: number; readonly cause: 'fog' | 'obstacle' | 'fall' | 'shock' };
 
 export interface SimState {
   /** Numéro du pas courant. */

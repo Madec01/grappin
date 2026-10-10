@@ -18,6 +18,8 @@ export const COLOR = {
   crack: 0x0b0f1e,
   kindMark: 0xc9d1e3,
   wear: 0xf4f6fb,
+  /** Prise électrique : un blanc tirant sur le jaune, avant le néon. */
+  electric: 0xf2e6a8,
   target: 0xe8eefc,
   /** Ligne d'arrivée d'un niveau. */
   finish: 0xe8eefc,

@@ -3,7 +3,7 @@ import { FREE_RUN, createCourse, extendCourse, pruneCourse, type CoursePlan } fr
 import { STILL } from './environment';
 import { applyEvents } from './events';
 import { integrate, swingStep } from './physics';
-import { applyBufferedPress, applyFall, applyFinish, applyFog, applyFragile, applyGround, applyHang, applyObstacles, applyPickups, applyScore, applyTier, press, release } from './rules';
+import { applyBufferedPress, applyFall, applyFinish, applyFog, applyCycles, applyFragile, applyGround, applyHang, applyObstacles, applyPickups, applyScore, applyTier, press, release } from './rules';
 import type { RuleEvent, SimState } from './state';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 
@@ -92,6 +92,7 @@ export class Simulation {
     if (s.status !== 'alive') return;
     applyEvents(s, this.tuning, this.events);
     applyFragile(s, this.tuning, this.events);
+    applyCycles(s, this.tuning, this.events);
     const anchor = s.rope ? (s.anchors.find((a) => a.id === s.rope!.anchorId)?.pos ?? null) : null;
     if (s.rope && anchor) {
       const swung = swingStep(s.hero, anchor, s.rope.length, this.tuning, s.env);

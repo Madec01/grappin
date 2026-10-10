@@ -17,7 +17,7 @@ const SECOND = Math.round(1 / T.stepSeconds);
 
 /** Niveau d'essai de 400 m sans brume, avec les événements donnés. */
 function level(events: readonly ScheduledEvent[]): Simulation {
-  const plan = { kind: 'level' as const, levelId: 99, startY: 0, endY: 400, profile: { spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine' as const], spread: 1 }, events };
+  const plan = { kind: 'level' as const, levelId: 99, startY: 0, endY: 400, profile: { spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine' as const], spread: 1, electric: 0, eclipse: 0 }, events };
   return new Simulation(7, withTuning(T, { fogBaseSpeed: 0, fogStart: -1000 }), plan);
 }
 
@@ -109,7 +109,7 @@ describe('calendrier des événements', () => {
     expect(windy.state.env.wind.x).toBeCloseTo(-3, 9);
     expect(windy.state.hero.vel.x).toBeLessThan(-2);
 
-    const alert = new Simulation(3, T, { kind: 'level', levelId: 98, startY: 0, endY: 400, profile: { spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine'], spread: 1 }, events: [{ kind: 'alerte', at: 20, length: 30 }] });
+    const alert = new Simulation(3, T, { kind: 'level', levelId: 98, startY: 0, endY: 400, profile: { spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine'], spread: 1, electric: 0, eclipse: 0 }, events: [{ kind: 'alerte', at: 20, length: 30 }] });
     climbTo(alert, 21);
     expect(alert.state.fogFactor).toBe(ALERT_FOG_FACTOR);
     const before = alert.state.fogY;

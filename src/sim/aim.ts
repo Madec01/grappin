@@ -1,4 +1,5 @@
 import { distance, type Vec2 } from '../core/math/vec2';
+import { grabbable } from './cycles';
 import { STILL, type Environment } from './environment';
 import { segmentCrossesBox } from './geometry';
 import { freeFlightAt, type Body } from './physics';
@@ -63,11 +64,13 @@ export function chooseTarget(state: SimState, tuning: Tuning): AimResult {
   const excludeSteps = Math.round(0.4 / tuning.stepSeconds);
   // Le point que l'on vient de lâcher n'est pas repris tout de suite : on monte.
   const excluded = step - state.releaseStep < excludeSteps ? state.lastAnchorId : null;
-  const best = bestAnchor(state.anchors, state.obstacles, hero, hero.grounded, excluded, tuning, state.env);
+  // Une prise à éclipse éteinte n'existe pas pour la visée : l'anneau passe à une autre, ou à rien.
+  const candidates = state.anchors.filter((a) => grabbable(a, step, tuning));
+  const best = bestAnchor(candidates, state.obstacles, hero, hero.grounded, excluded, tuning, state.env);
 
   if (best && state.targetId !== null && best.id !== state.targetId) {
-    const current = state.anchors.find((a) => a.id === state.targetId);
-    if (current && !current.broken && current.id !== excluded && distance(current.pos, hero.pos) <= tuning.ropeMax && inSight(hero.pos, current, state.obstacles)) {
+    const current = candidates.find((a) => a.id === state.targetId);
+    if (current && current.id !== excluded && distance(current.pos, hero.pos) <= tuning.ropeMax && inSight(hero.pos, current, state.obstacles)) {
       const predicted = freeFlightAt(hero, hero.grounded ? 0 : tuning.aimLookaheadSeconds, tuning, state.env);
       const bestScore = aimScore(best, predicted, hero.pos.y, tuning);
       const currentScore = aimScore(current, predicted, hero.pos.y, tuning);

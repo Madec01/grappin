@@ -1,4 +1,5 @@
 import { add, clampLength, distance, dot, length, normalize, perpendicular, scale, sub, type Vec2 } from '../core/math/vec2';
+import { grabbable, isCharged, isLit } from './cycles';
 import { tierName } from '../data/tiers';
 import { isUpright, upOf, type Environment } from './environment';
 import { circleBoxGap } from './geometry';
@@ -65,10 +66,15 @@ export function tryAttach(state: SimState, tuning: Tuning, events: RuleEvent[]):
   const coyoteSteps = Math.round(tuning.coyoteSeconds / tuning.stepSeconds);
   if (state.step - state.targetValidStep > coyoteSteps) return false;
   const anchor = findAnchor(state, state.targetId);
-  if (!anchor || anchor.broken) return false;
+  if (!anchor || !grabbable(anchor, state.step, tuning)) return false;
   const reach = tuning.ropeMax * tuning.coyoteReach;
   const d = distance(anchor.pos, state.hero.pos);
   if (d > reach) return false;
+  // Le piège : attraper une prise électrique chargée électrocute. L'appui est consommé.
+  if (anchor.kind === 'electrique' && isCharged(anchor.id, state.step, tuning)) {
+    electrocute(state, events);
+    return true;
+  }
   const ropeLength = Math.max(tuning.ropeMin, Math.min(reach, d));
   state.rope = { anchorId: anchor.id, length: ropeLength };
   state.hero.grounded = false;
@@ -177,6 +183,26 @@ export function applyFragile(state: SimState, tuning: Tuning, events: RuleEvent[
   anchor.broken = true;
   events.push({ type: 'break', anchorId: anchor.id });
   release(state, tuning, events, true);
+}
+
+/** Électrocuté par une prise piégée : mort immédiate, corde lâchée. */
+function electrocute(state: SimState, events: RuleEvent[]): void {
+  state.status = 'dead';
+  state.rope = null;
+  events.push({ type: 'death', height: state.height, cause: 'shock' });
+}
+
+/**
+ * Prises à cycles tenues : une électrique qui se charge électrocute, une
+ * éclipse qui s'éteint lâche la corde avec la vitesse du moment, comme une
+ * fragile qui casse, mais sans se casser : elle se rallume deux secondes plus tard.
+ */
+export function applyCycles(state: SimState, tuning: Tuning, events: RuleEvent[]): void {
+  if (state.status !== 'alive' || !state.rope) return;
+  const anchor = findAnchor(state, state.rope.anchorId);
+  if (!anchor) return;
+  if (anchor.kind === 'electrique' && isCharged(anchor.id, state.step, tuning)) electrocute(state, events);
+  else if (anchor.kind === 'eclipse' && !isLit(anchor.id, state.step, tuning)) release(state, tuning, events, true);
 }
 
 /** Obstacles fixes : les toucher tue, les frôler rapporte une fois par obstacle et par corde. */

@@ -1,4 +1,5 @@
 import { clampLength, distance, scale } from '../core/math/vec2';
+import { isOptional } from './cycles';
 import { bestAnchor } from './aim';
 import { STILL, upOf, type Environment } from './environment';
 import { circleBoxGap } from './geometry';
@@ -94,6 +95,8 @@ function swingIsClear(anchor: Anchor, body: Body, anchors: readonly Anchor[], ob
  */
 export function flightCatches(from: Anchor, body: Body, anchors: readonly Anchor[], obstacles: readonly Obstacle[], tuning: Tuning, env: Environment = STILL): number[] {
   const reach = tuning.ropeMax * tuning.verifyCatchRatio;
+  // Les prises électriques et à éclipse ne comptent jamais comme sortie : le parcours se prouve sans elles.
+  const catchable = anchors.filter((a) => !isOptional(a));
   const caught: number[] = [];
   const rejected = new Set<number>();
   const a = { x: env.gravityDir.x * tuning.gravity + env.wind.x, y: env.gravityDir.y * tuning.gravity + env.wind.y };
@@ -101,7 +104,7 @@ export function flightCatches(from: Anchor, body: Body, anchors: readonly Anchor
     const pos = freeFlightAt(body, t, tuning, env);
     if (obstacles.some((box) => circleBoxGap(pos, tuning.heroRadius, box) <= 0)) break;
     const vel = { x: body.vel.x + a.x * t, y: body.vel.y + a.y * t };
-    const best = bestAnchor(anchors, obstacles, { pos, vel }, false, from.id, tuning, env);
+    const best = bestAnchor(catchable, obstacles, { pos, vel }, false, from.id, tuning, env);
     if (!best || caught.includes(best.id) || rejected.has(best.id)) continue;
     if (best.pos.y <= from.pos.y + MIN_GAIN || distance(best.pos, pos) > reach) continue;
     if (swingIsClear(best, { pos, vel }, anchors, obstacles, tuning, env)) caught.push(best.id);

@@ -2,6 +2,17 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.5.1] — 2026-10-10 — Prise électrique et prise à éclipse
+
+Les deux dernières idées de prises du propriétaire, validées le 10 octobre 2026.
+
+### Ajouté
+
+- La prise électrique, un piège : elle se charge 1,5 s toutes les 4 s, avec un avertissement de 0,6 s avant ; l'attraper chargée, ou y pendre quand elle se charge, électrocute (« Électrocuté par une prise piégée »). Posée à côté d'un point de la chaîne, là où la visée peut la préférer.
+- La prise à éclipse, un raccourci : allumée deux secondes, éteinte deux secondes ; éteinte, la visée l'ignore et le grappin ne l'attrape pas ; si l'on y pend quand elle s'éteint, la corde lâche sans casse. Posée au-dessus du point qu'elle permet de sauter.
+- Les deux ne comptent jamais pour le vérificateur : chaque segment reste prouvé sans elles, et chacune a toujours un point normal à portée de corde. En course libre, éclipses dès le palier 3 (deux dès le 6), électriques dès le palier 4 ; dans les traversées, une éclipse au niveau 8, une électrique au 9, les deux au 10.
+- Rendu provisoire avant le néon : la prise électrique est plus pâle, cerclée quand elle avertit, cerclée en gras quand elle est chargée ; la prise à éclipse éteinte s'assombrit comme un lampadaire en panne.
+
 ## [0.5.0] — 2026-10-10 — Prises écartées et traversières
 
 Décision du propriétaire : ses quatre idées de prises sont retenues, dans l'ordre proposé par le Lead. Ce lot livre les deux premières.

@@ -51,6 +51,9 @@ export interface TierProfile {
    * s'écartent de plus en plus avec la hauteur.
    */
   readonly spread: number;
+  /** Prises électriques (pièges à cycles) et prises à éclipse (raccourcis accrochables deux secondes sur quatre) par segment. */
+  readonly electric: number;
+  readonly eclipse: number;
 }
 
 /** Largeur jouable à l'écartement 1 : les points restent entre -limit et +limit, les obstacles s'y appuient. */
@@ -115,6 +118,8 @@ export function tierProfile(tier: number): TierProfile {
     boosters: tier >= 3 ? 1 : 0,
     archetypes,
     spread: Math.min(MAX_SPREAD, 1 + 0.08 * tier),
+    electric: tier >= 4 ? 1 : 0,
+    eclipse: tier >= 3 ? (tier >= 6 ? 2 : 1) : 0,
   };
 }
 
@@ -254,9 +259,48 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
   }
   assignKinds(rng, anchors, profile, archetype, junctionId, branchIds);
   if (context.cable !== 'none') hangCables(anchors, junctionId, branchIds, halfWidth, context.cable);
+  addSpecialAnchors(rng, ids, anchors, profile, halfWidth);
   const obstacleCount = archetype === 'dalles' ? Math.min(4, profile.obstacles + 2) : profile.obstacles;
   const obstacles = placeObstacles(rng, ids, anchors, pickups, Math.max(startY, origin.y + GRACE_ABOVE_ORIGIN - 2), cur.y, obstacleCount, from, archetype === 'dalles', context, halfWidth);
   return { anchors, obstacles, pickups, junctionId, branchIds };
+}
+
+/** Prise à éclipse : au-dessus du point qu'elle permet de sauter, et déport de la prise électrique à côté de son point. */
+const ECLIPSE_RISE = 1.5;
+const ELECTRIC_OFFSET = 2.4;
+const ELECTRIC_RISE = 0.6;
+/** Aucune prise ajoutée à moins de cette distance d'une autre. */
+const SPECIAL_CLEARANCE = 1.6;
+
+/**
+ * Ajoute au segment ses prises électriques et à éclipse, sans toucher à la
+ * chaîne : le parcours reste prouvé sans elles. Une éclipse est un raccourci,
+ * posée au-dessus du point qu'elle permet de sauter, entre ses deux voisins.
+ * Une électrique est un piège, posée à côté d'un point de la chaîne, là où
+ * la visée peut la préférer. Chacune est insérée juste après son point, pour
+ * garder la liste à peu près ordonnée par hauteur et le sommet en dernier.
+ */
+function addSpecialAnchors(rng: Rng, ids: IdCounters, anchors: Anchor[], profile: TierProfile, halfWidth: number): void {
+  const wanted: Anchor['kind'][] = [...Array<Anchor['kind']>(profile.eclipse).fill('eclipse'), ...Array<Anchor['kind']>(profile.electric).fill('electrique')];
+  if (wanted.length === 0 || anchors.length < 5) return;
+  const farEnough = (pos: Vec2): boolean => anchors.every((a) => Math.hypot(a.pos.x - pos.x, a.pos.y - pos.y) >= SPECIAL_CLEARANCE);
+  for (const kind of wanted) {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      // Jamais sur le premier ni le dernier point, ni sur un point qui glisse.
+      const i = 1 + Math.floor(rng.next() * (anchors.length - 3));
+      const before = anchors[i - 1]!;
+      const here = anchors[i]!;
+      const after = anchors[i + 1]!;
+      if (here.cable || before.cable || after.cable) continue;
+      const pos =
+        kind === 'eclipse'
+          ? { x: clampX((before.pos.x + after.pos.x) / 2 + (rng.next() - 0.5) * 1.2, halfWidth), y: here.pos.y + ECLIPSE_RISE }
+          : { x: clampX(here.pos.x + (here.pos.x > 0 ? -1 : 1) * ELECTRIC_OFFSET, halfWidth), y: here.pos.y + ELECTRIC_RISE };
+      if (!farEnough(pos)) continue;
+      anchors.splice(i + 1, 0, makeAnchor(ids, pos, kind));
+      break;
+    }
+  }
 }
 
 /** Une traversière s'arrête à cette distance du bord jouable. */
@@ -287,7 +331,7 @@ function hangCables(anchors: Anchor[], junctionId: number | null, branchIds: rea
 
 /** Segment de repli : une chaîne serrée, sans rien d'autre. Toujours franchissable. */
 export function buildPlainSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origin: Vec2, context: SegmentContext = PLAIN_CONTEXT): Segment {
-  return buildSegment(rng, ids, from, origin, { spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine'], spread: 1 }, 'chaine', { ...context, cable: 'none' });
+  return buildSegment(rng, ids, from, origin, { spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine'], spread: 1, electric: 0, eclipse: 0 }, 'chaine', { ...context, cable: 'none' });
 }
 
 /**

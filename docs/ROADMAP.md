@@ -97,7 +97,8 @@ Décision du propriétaire du 10 octobre 2026 : « on va garder ce style minimal
 - Application installable, plein écran portrait, hors ligne. Écrans d'accueil, options, crédits.
 - Nouvelles prises du propriétaire, validées le 10 octobre 2026 dans l'ordre : écartement progressif, traversières, prise électrique, prises à éclipse. Détail au backlog, « Idées du propriétaire du 10 octobre 2026 ».
 - 0.5.0 : écartement progressif des prises avec dézoom de la caméra, et les traversières, septième événement.
-- À venir : 0.5.1 prise électrique et prises à éclipse ; 0.5.2 le passage au néon de tout le rendu, nouvelles prises comprises ; puis sons, application installable.
+- 0.5.1 : prise électrique (piège à cycles) et prise à éclipse (raccourci accrochable deux secondes sur quatre), jamais exigées par le vérificateur.
+- À venir : 0.5.2 le passage au néon de tout le rendu, nouvelles prises comprises ; puis sons, application installable.
 - Accroches réactives au passage. Traînée, étirement, sifflement du vent, éclat et son du lâcher parfait.
 - Audio Web Audio : bruitages et musique libres, déverrouillage au premier tap, volumes.
 - Application installable, plein écran portrait, hors ligne. Écrans d'accueil, options, crédits.
