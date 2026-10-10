@@ -17,8 +17,8 @@ describe('les vingt niveaux', () => {
     for (let i = 1; i < LEVELS.length; i += 1) expect(LEVELS[i]!.startY).toBe(LEVELS[i - 1]!.endY);
     expect(new Set(LEVELS.map((l) => l.seed)).size).toBe(LEVELS.length);
     for (const level of LEVELS) {
-      expect(level.endY - level.startY).toBeGreaterThanOrEqual(60);
-      expect(level.endY - level.startY).toBeLessThanOrEqual(150);
+      expect(level.endY - level.startY).toBeGreaterThanOrEqual(90);
+      expect(level.endY - level.startY).toBeLessThanOrEqual(260);
       expect(level.profile.archetypes.length).toBeGreaterThan(0);
     }
     expect(levelById(3)?.name).toBe('Les enseignes');

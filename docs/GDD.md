@@ -82,7 +82,7 @@ Le héros, son nom, et le détail du décor restent à proposer au propriétaire
 
 Retour du propriétaire sur la 0.3.0 : « quand on perd, redémarrer de zéro devient vite énervant, le jeu reste hyper répétitif ». Décision : les traversées deviennent le mode principal, la course libre passe en second.
 
-- **Traversée en niveaux fixes.** Dix niveaux nommés et enchaînés, de 60 à 100 m chacun : Les toits, Les gouttières, Les enseignes, Les clochers, Les antennes, Les grues, Les nuages, Les toits de nuit, Les gouttières de nuit, Le sommet. Chaque niveau est le même parcours à chaque essai, grâce à sa graine et à la physique déterministe : on l'apprend et on finit par le maîtriser. Chaque niveau apporte une nouveauté annoncée en une phrase à son départ, a sa brume à sa vitesse, et aucun obstacle dans ses huit premiers mètres. Perdre recommence le niveau, lui seul ; finir un niveau ouvre le suivant.
+- **Traversée en niveaux fixes.** Vingt niveaux nommés et enchaînés, de 90 à 260 m chacun (3 600 m en tout, allongés à la demande du propriétaire le 10 octobre 2026) : Les toits, Les gouttières, Les enseignes, Les clochers, Les antennes, Les grues, Les nuages, Les toits de nuit, Les gouttières de nuit, Le sommet, puis Les passerelles, Les cheminées, Les tours, La centrale, Les enseignes de nuit, Le pont, L'orage, Le phare, Le vertige, Le ciel. Chaque niveau est le même parcours à chaque essai, grâce à sa graine et à la physique déterministe : on l'apprend et on finit par le maîtriser. Chaque niveau apporte une nouveauté annoncée en une phrase à son départ, a sa brume à sa vitesse, et aucun obstacle dans ses huit premiers mètres. Perdre recommence le niveau, lui seul ; finir un niveau ouvre le suivant.
 - **Trois étoiles par niveau** : terminer, ramasser toutes les étoiles du niveau, finir avec cinq lâchers parfaits d'affilée. Chaque étoile gagnée pour la première fois rapporte 50 points d'expérience, le premier passage d'un niveau 100.
 - **Course libre**, pour le score, avec départ avancé : elle démarre à la zone la plus haute déjà franchie.
 - **Sept motifs de segments**, dans les deux modes, tirés parmi ceux que le niveau ou le palier permet : chaîne en zigzag avec fourche, escalier serré, couloir d'étoiles, champ de dalles à frôler, rafale de trois propulseurs, série de fragiles, grand saut lancé par un propulseur. Hors zone d'apprentissage, chaque segment porte au moins une étoile.
@@ -141,6 +141,8 @@ Répartition dans les niveaux : pluie au 3, panne au 4, bascule au 5, vent au 6,
 - Pas de vibration. Le son et l'image portent le feedback.
 - Le son ne démarre qu'après un premier tap : écran « Toucher pour jouer ».
 
+
+**Musique.** Décision du propriétaire du 10 octobre 2026 : ses propres pistes (dépôt Way), une par niveau, en boucle ; la piste du menu sur le titre ; la course libre prend celle du niveau qui couvre sa hauteur. Un réglage « Musique » la coupe. Les bruitages viennent plus tard.
 ## 13. Options tranchées le 9 octobre 2026 [VALIDÉ]
 
 | Option | Décision |

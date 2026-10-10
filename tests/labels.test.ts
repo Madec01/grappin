@@ -58,7 +58,7 @@ describe('niveaux', () => {
   it('écrit le titre, la ligne de la liste et l\'intervalle de hauteur', () => {
     expect(levelTitle(level)).toBe('Niveau 3 · Les enseignes');
     expect(levelRowTitle(level)).toBe('3 · Les enseignes');
-    expect(levelRange(level)).toBe('130 → 200 m');
+    expect(levelRange(level)).toBe('200 → 320 m');
   });
 });
 
@@ -123,9 +123,9 @@ describe('liste des niveaux du mode test', () => {
     const busy = levelById(8);
     if (!quiet || !busy) throw new Error('Niveaux 1 et 8 attendus');
     expect(levelEvents(quiet)).toBe('');
-    expect(levelEvents(busy)).toBe('bascule 20 m · panne 55 m');
+    expect(levelEvents(busy)).toBe('bascule 20 m · panne 55 m · bascule 110 m · …');
     const all = levelById(9);
     if (!all) throw new Error('Niveau 9 attendu');
-    expect(levelEvents(all)).toBe('vent 10 m · pluie 40 m · câbles 62 m');
+    expect(levelEvents(all)).toBe('vent 10 m · pluie 40 m · câbles 62 m · …');
   });
 });

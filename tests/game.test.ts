@@ -758,10 +758,10 @@ describe('niveaux : lancer une partie', () => {
 
     game.playLevel(3);
     const state = game.debugState();
-    expect(state).toMatchObject({ mode: 'level', levelId: 3, goal: 70 });
-    expect(state.height).toBeCloseTo(130 + DEFAULT_TUNING.heroRadius, 9);
+    expect(state).toMatchObject({ mode: 'level', levelId: 3, goal: levelOf(3).endY - levelOf(3).startY });
+    expect(state.height).toBeCloseTo(levelOf(3).startY + DEFAULT_TUNING.heroRadius, 9);
     expect(state.levelHeight).toBeCloseTo(DEFAULT_TUNING.heroRadius, 9);
-    expect(state.fogY).toBeCloseTo(130 + DEFAULT_TUNING.fogStart, 9);
+    expect(state.fogY).toBeCloseTo(levelOf(3).startY + DEFAULT_TUNING.fogStart, 9);
   });
 
   it('la course libre part de la zone la plus haute franchie, avec la graine annoncée par le titre', () => {
@@ -849,7 +849,8 @@ describe('niveaux : annonce', () => {
     free.game.playFree();
     free.game.frame(0.05);
     expect(free.game.debugState().tier).toBeGreaterThan(0);
-    expect(free.seen.lastBanner).toMatch(/ · 100 m$/);
+    // La course libre part du départ du niveau 3, sur une frontière de palier : la bannière du palier dit cette hauteur.
+    expect(free.seen.lastBanner).toMatch(new RegExp(` · ${levelOf(3).startY} m$`));
   });
 
   it('la course libre ne s\'annonce pas comme un niveau', () => {
@@ -875,7 +876,7 @@ describe('niveaux : victoire', () => {
     expect(outcome).toMatchObject({ won: true, firstClear: true, stars: won.stars, totalStars: won.stars });
     expect(outcome.level.id).toBe(1);
     expect(outcome.xpGained).toBeGreaterThanOrEqual(FIRST_CLEAR_XP + outcome.newStars * STAR_XP);
-    expect(seen.lastResult).toMatchObject({ won: true, pickupsTotal: 0 });
+    expect(seen.lastResult).toMatchObject({ won: true, pickupsTotal: seen.state?.course.pickupsTotal ?? 0 });
     expect(seen.lastProfile).toBe(outcome.profile);
 
     const saved = loadProfile(storage);
@@ -1060,12 +1061,12 @@ describe('niveaux : événements', () => {
   it('annonce la bascule au départ, deux lignes, 2,5 s de temps réel, puis la bannière s\'efface', () => {
     const { game, seen } = inLevel(5);
     game.frame(0.05);
-    expect(game.debugState().events).toEqual([{ kind: 'bascule', started: false, ended: false }]);
+    expect(game.debugState().events[0]).toEqual({ kind: 'bascule', started: false, ended: false });
 
     climbTo(game, seen, 26);
     expect(seen.lastBanner).toBe('La bascule !');
     expect(seen.lastBannerDetail).toBe('Le niveau tourne');
-    expect(game.debugState().events).toEqual([{ kind: 'bascule', started: true, ended: false }]);
+    expect(game.debugState().events[0]).toEqual({ kind: 'bascule', started: true, ended: false });
 
     hover(game, seen, 2.2);
     expect(seen.lastBanner).toBe('La bascule !');
@@ -1110,7 +1111,7 @@ describe('niveaux : événements', () => {
     climbTo(game, seen, 56);
     expect(seen.lastBanner).toBe('Retour au calme');
     expect(seen.lastBannerDetail).toBeNull();
-    expect(game.debugState().events).toEqual([{ kind: 'bascule', started: true, ended: true }]);
+    expect(game.debugState().events[0]).toEqual({ kind: 'bascule', started: true, ended: true });
     hover(game, seen, 2.5);
     expect(game.debugState().gravityY).toBeCloseTo(-1, 6);
     expect(seen.camera!.angle).toBeCloseTo(0, 6);
@@ -1224,18 +1225,14 @@ describe('niveaux : événements', () => {
   it('annonce les câbles', () => {
     const { game, seen } = inLevel(7);
     climbTo(game, seen, 46);
-    expect(game.debugState().events.map((event) => event.kind)).toEqual(['alerte', 'cable']);
+    expect(game.debugState().events.map((event) => event.kind).slice(0, 2)).toEqual(['alerte', 'cable']);
     expect(seen.lastBanner).toBe('Câbles');
     expect(seen.lastBannerDetail).toBe('Les accroches glissent');
   });
 
   it('chaque niveau expose son calendrier d\'événements, la course libre aucun', () => {
     const { game } = inLevel(10);
-    expect(game.debugState().events).toEqual([
-      { kind: 'bascule', started: false, ended: false },
-      { kind: 'alerte', started: false, ended: false },
-      { kind: 'panne', started: false, ended: false },
-    ]);
+    expect(game.debugState().events).toEqual(levelOf(10).events.map((event) => ({ kind: event.kind, started: false, ended: false })));
     expect(game.debugState()).toMatchObject({ gravityX: 0, gravityY: -1, windX: 0, lightsOff: false, fogFactor: 1 });
 
     const free = makeFreeGame();

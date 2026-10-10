@@ -13,6 +13,8 @@ Demandes du propriétaire : « il faut plus de niveaux » et une nouvelle mécan
 - Dix niveaux de plus, du 11 au 20, de 820 à 2 000 m : Les passerelles, Les cheminées, Les tours, La centrale, Les enseignes de nuit, Le pont, L'orage, Le phare, Le vertige, Le ciel. Lanceurs partout, puis traversières, prises à cycles, vents, bascules, pannes et alertes combinés.
 - Le journal des entrées garde la traction du relâché : un rejeu redonne la même partie.
 - Le robot joueur sait lancer : vers le point le plus proche au-dessus, aux deux tiers de la force.
+- Les musiques du propriétaire (dépôt Way, `assets/music/`, treize pistes) : une par niveau, en boucle, chargée au besoin, et celle du menu sur le titre ; la course libre prend la piste du niveau qui couvre sa hauteur. Rien ne joue avant le premier appui, comme l'exigent les navigateurs. Un réglage « Musique » sur le titre, gardé dans le profil.
+- Niveaux plus longs, demande du propriétaire : de 90 à 260 m au lieu de 60 à 150, soit 3 600 m de ville en tout, avec des événements doublés pour remplir la longueur.
 
 ## [0.5.3] — 2026-10-10 — La prise électrique ne tue plus
 

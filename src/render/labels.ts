@@ -60,7 +60,10 @@ const EVENT_NAMES: Record<EventKind, string> = {
 
 /** « bascule 25 m · panne 55 m » : les événements du niveau et la hauteur où ils commencent, ou une chaîne vide sans événement. */
 export function levelEvents(level: LevelDef): string {
-  return level.events.map((event) => `${EVENT_NAMES[event.kind]} ${event.at} m`).join(' · ');
+  const shown = level.events.slice(0, 3).map((event) => `${EVENT_NAMES[event.kind]} ${event.at} m`);
+  // Les niveaux longs en portent jusqu'à six : la ligne n'en dit que trois, le reste se découvre en jouant.
+  if (level.events.length > 3) shown.push('…');
+  return shown.join(' · ');
 }
 
 /** Une des trois étoiles d'un niveau : ce qu'elle demande, si elle est gagnée, et sinon où l'on en est. */
