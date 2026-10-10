@@ -1,3 +1,4 @@
+import { FREE_RUN, type CoursePlan } from './course';
 import { Simulation } from './simulation';
 import type { Tuning } from './tuning';
 
@@ -38,11 +39,12 @@ export interface RobotReport {
   /** Tenue moyenne d'une corde, en secondes. */
   readonly hold: number;
   readonly alive: boolean;
+  readonly won: boolean;
   readonly cause: 'fog' | 'obstacle' | null;
 }
 
-export function playRobot(seed: number, tuning: Tuning, seconds: number, profile: RobotProfile = REASONABLE): RobotReport {
-  const sim = new Simulation(seed, tuning);
+export function playRobot(seed: number, tuning: Tuning, seconds: number, profile: RobotProfile = REASONABLE, plan: CoursePlan = FREE_RUN): RobotReport {
+  const sim = new Simulation(seed, tuning, plan);
   const reactionSteps = Math.round(profile.reactionSeconds / tuning.stepSeconds);
   let catches = 0;
   let perfect = 0;
@@ -87,5 +89,5 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
     }
   }
   const t = sim.state.step * tuning.stepSeconds;
-  return { height: sim.state.height, seconds: t, catches, perfect, maxSpeed, hold: catches ? holdTotal / catches : 0, alive: sim.state.status === 'alive', cause };
+  return { height: sim.state.height, seconds: t, catches, perfect, maxSpeed, hold: catches ? holdTotal / catches : 0, alive: sim.state.status === 'alive', won: sim.state.status === 'won', cause };
 }

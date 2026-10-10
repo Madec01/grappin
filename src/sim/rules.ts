@@ -211,17 +211,25 @@ export function applyTier(state: SimState, tuning: Tuning, events: RuleEvent[]):
   events.push({ type: 'tier', tier, name: tierName(tier) });
 }
 
-/** Le toit de départ, en y = 0 : le personnage s'y pose s'il n'est pas accroché. */
+/** Le toit de départ, en `groundY` : le personnage s'y pose s'il n'est pas accroché. */
 export function applyGround(state: SimState, tuning: Tuning): void {
   if (state.rope) return;
   const bottom = state.hero.pos.y - tuning.heroRadius;
-  if (bottom <= 0 && state.hero.vel.y <= 0) {
-    state.hero.pos = { x: state.hero.pos.x, y: tuning.heroRadius };
+  if (bottom <= state.groundY && state.hero.vel.y <= 0) {
+    state.hero.pos = { x: state.hero.pos.x, y: state.groundY + tuning.heroRadius };
     state.hero.vel = { x: 0, y: 0 };
     state.hero.grounded = true;
   } else {
     state.hero.grounded = false;
   }
+}
+
+/** Ligne d'arrivée d'un niveau : la franchir termine la partie sur une victoire. */
+export function applyFinish(state: SimState, events: RuleEvent[]): void {
+  if (state.status !== 'alive' || state.finishY === null || state.hero.pos.y < state.finishY) return;
+  state.status = 'won';
+  state.rope = null;
+  events.push({ type: 'finish', height: state.height });
 }
 
 /**

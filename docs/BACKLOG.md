@@ -9,6 +9,17 @@ Dernière mise à jour : 9 octobre 2026. Tout ce qui figure ici attend la valida
 - **Filets de secours.** Refusés pour la première version le 9 octobre 2026.
 - Partage de rejeux, statistiques détaillées, défis.
 
+## Événements pendant les niveaux — proposés le 10 octobre 2026, à valider
+
+Demande du propriétaire : des événements qui influencent le jeu pendant un niveau, dont « faire tourner le niveau pour qu'il devienne horizontal ». Catalogue proposé par le Lead pour la 0.4.1, chaque événement annoncé par une bannière et toujours vérifié par le robot.
+
+- **La bascule.** Le niveau tourne d'un quart de tour : pendant une section, on avance le long d'une rue et non plus vers le ciel. La caméra tourne avec le parcours pour garder la place devant soi ; la gravité tire alors vers le côté de l'écran et la corde pend de travers. La brume devient un front qui avance. Technique : rotation de la caméra, direction de progression par section dans le générateur, front de pression orienté ; la physique ne change pas.
+- **Le coup de vent.** Dix secondes de vent latéral annoncé par des traînées, qui dévie les vols. Repris de la phase 6, avancé ici comme événement.
+- **La panne.** Les lampadaires s'éteignent par vagues : des accroches deviennent invisibles deux secondes avant de se rallumer. On vise de mémoire.
+- **La pluie d'étoiles.** Pendant un segment, des étoiles tombent lentement entre les points : à cueillir au vol.
+- **L'accélération de la brume.** Une sirène, et la brume double de vitesse pendant vingt mètres.
+- **Le câble.** Une accroche mobile qui glisse le long d'un câble tendu entre deux points : avant-goût de la phase 6.
+
 ## Pistes techniques relevées par le Lead le 9 octobre 2026
 
 - La corde peut traverser un obstacle pendant le balancement ; seule l'accroche exige la ligne de vue. À durcir si cela se voit en jeu.

@@ -5,11 +5,17 @@ import type { Anchor, Obstacle, Pickup } from './state';
 
 /**
  * Construction d'un segment de parcours : une chaîne de points d'accroche qui
- * monte d'une vingtaine de mètres, avec selon le palier une fourche entre une
- * route haute étoilée et une route basse sûre, des obstacles fixes, des
- * accroches fragiles et propulseuses. Le générateur propose ; le vérificateur
- * (`verifier.ts`) dispose. Tout l'aléatoire vient du générateur seedé.
+ * monte d'une vingtaine de mètres, selon un motif et un profil. Le motif
+ * donne la forme (chaîne en zigzag, escalier serré, couloir d'étoiles, champ
+ * de dalles, rafale de propulseurs, série de fragiles, grand saut) ; le profil
+ * dit ce qui est permis (espacement, obstacles, fourche, fragiles,
+ * propulseurs). Le générateur propose ; le vérificateur (`verifier.ts`)
+ * dispose. Tout l'aléatoire vient du générateur seedé.
  */
+
+export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' | 'fragiles' | 'saut';
+
+export const ARCHETYPES: readonly Archetype[] = ['chaine', 'escalier', 'couloir', 'dalles', 'rafale', 'fragiles', 'saut'];
 
 export interface Segment {
   readonly anchors: Anchor[];
@@ -27,7 +33,7 @@ export interface IdCounters {
   pickup: number;
 }
 
-/** Ce qu'un palier ajoute : une nouvelle contrainte à la fois. */
+/** Ce qu'un profil permet : une nouvelle contrainte à la fois. */
 export interface TierProfile {
   /** Espacement nominal entre deux points, en mètres. */
   readonly spacing: number;
@@ -35,14 +41,16 @@ export interface TierProfile {
   readonly split: boolean;
   readonly fragileChance: number;
   readonly boosters: number;
+  /** Motifs de segments permis ; le générateur en tire un au sort. */
+  readonly archetypes: readonly Archetype[];
 }
 
 /** Largeur jouable : les points restent entre -limit et +limit, les obstacles s'y appuient. */
 export const HALF_WIDTH = 4;
 /** Bord du monde où s'accrochent les corniches. */
 export const WALL_X = 5;
-/** Premier point, au-dessus du toit de départ. */
-export const FIRST_ANCHOR: Vec2 = { x: 0.8, y: 4 };
+/** Premier point, par rapport au toit de départ. */
+export const FIRST_ANCHOR_OFFSET: Vec2 = { x: 0.8, y: 4 };
 
 const OBSTACLE_THICKNESS = 0.4;
 /** Dégagement minimal entre un obstacle et le centre d'un point ou d'une étoile. */
@@ -51,19 +59,28 @@ const PICKUP_CLEARANCE = 0.8;
 /** Sous un point, là où l'on pend après l'avoir attrapé, rien jusqu'à cette profondeur et cette demi-largeur. */
 const HANG_DEPTH = 3.8;
 const HANG_HALF_WIDTH = 1.3;
+/** Aucun obstacle dans les premiers mètres au-dessus du toit de départ : on prend son élan tranquille. */
+const GRACE_ABOVE_ORIGIN = 8;
 
 /** Vrai si la boîte empiète sur la zone de pendaison sous un point. */
 function underAnchor(anchor: Vec2, box: Obstacle): boolean {
   return box.y1 < anchor.y && box.y1 > anchor.y - HANG_DEPTH && box.x1 > anchor.x - HANG_HALF_WIDTH && box.x0 < anchor.x + HANG_HALF_WIDTH;
 }
 
+/** Profil de la course libre selon le palier : les motifs s'ouvrent avec les contraintes. */
 export function tierProfile(tier: number): TierProfile {
+  // Palier 0, zone d'apprentissage : seuls les motifs les plus doux.
+  const archetypes: Archetype[] = ['chaine', 'couloir'];
+  if (tier >= 1) archetypes.push('escalier', 'dalles');
+  if (tier >= 2) archetypes.push('fragiles');
+  if (tier >= 3) archetypes.push('rafale', 'saut');
   return {
     spacing: Math.min(5, 3 + 0.4 * tier),
     obstacles: tier === 0 ? 0 : Math.min(3, 1 + Math.floor(tier / 2)),
     split: tier >= 1,
     fragileChance: tier >= 2 ? 0.3 : 0,
     boosters: tier >= 3 ? 1 : 0,
+    archetypes,
   };
 }
 
@@ -71,11 +88,11 @@ function clampX(x: number): number {
   return Math.max(-HALF_WIDTH, Math.min(HALF_WIDTH, x));
 }
 
-/** Point suivant d'une chaîne : on alterne les côtés, on repart de l'autre côté si l'on sort, puis on borne. */
-function nextChainPoint(rng: Rng, from: Vec2, spacing: number): Vec2 {
-  const dy = spacing * (0.55 + 0.35 * rng.next());
+/** Pas d'une chaîne : montée et déport en multiples de l'espacement, côté alterné, borné à la largeur. */
+function chainStep(rng: Rng, from: Vec2, spacing: number, dyRange: readonly [number, number], dxRange: readonly [number, number]): Vec2 {
+  const dy = spacing * (dyRange[0] + (dyRange[1] - dyRange[0]) * rng.next());
   const side = from.x > 0 ? -1 : 1;
-  const dx = side * spacing * (0.4 + 0.6 * rng.next());
+  const dx = side * spacing * (dxRange[0] + (dxRange[1] - dxRange[0]) * rng.next());
   let x = from.x + dx;
   if (x > HALF_WIDTH || x < -HALF_WIDTH) x = from.x - dx;
   return { x: clampX(x), y: from.y + dy };
@@ -87,22 +104,42 @@ function makeAnchor(ids: IdCounters, pos: Vec2, kind: Anchor['kind'] = 'normal')
   return anchor;
 }
 
+function makePickup(ids: IdCounters, pos: Vec2): Pickup {
+  const pickup: Pickup = { id: ids.pickup, pos, taken: false };
+  ids.pickup += 1;
+  return pickup;
+}
+
+/** Forme d'un motif : plages de montée et de déport, en multiples de l'espacement. */
+const SHAPES: Record<Archetype, { dy: readonly [number, number]; dx: readonly [number, number] }> = {
+  chaine: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  escalier: { dy: [0.5, 0.7], dx: [0.5, 0.9] },
+  couloir: { dy: [0.7, 0.9], dx: [0.25, 0.5] },
+  dalles: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  rafale: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  fragiles: { dy: [0.5, 0.8], dx: [0.4, 0.9] },
+  saut: { dy: [0.55, 0.85], dx: [0.4, 0.9] },
+};
+
 /**
- * Construit un segment depuis le dernier point connu (`from`, ou null au tout
- * début). `startY` est la hauteur de ce point ; le segment monte jusqu'à
- * environ `startY + 16 à 24 m`.
+ * Construit un segment depuis le dernier point connu (`from`), ou depuis le
+ * toit de départ `origin` si `from` est null. Le segment monte jusqu'à environ
+ * `16 à 24 m` au-dessus de son départ, selon le motif demandé.
  */
-export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, profile: TierProfile): Segment {
+export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origin: Vec2, profile: TierProfile, archetype: Archetype): Segment {
   const anchors: Anchor[] = [];
   const pickups: Pickup[] = [];
   let junctionId: number | null = null;
   let branchIds: number[] = [];
-  const startY = from?.y ?? 0;
+  const shape = SHAPES[archetype];
+  const spacing = archetype === 'escalier' ? Math.max(2.6, profile.spacing * 0.85) : profile.spacing;
+  const startY = from?.y ?? origin.y;
   const targetY = startY + 16 + 8 * rng.next();
-  let cur: Vec2 = from ?? FIRST_ANCHOR;
+  let cur: Vec2 = from ?? { x: origin.x + FIRST_ANCHOR_OFFSET.x, y: origin.y + FIRST_ANCHOR_OFFSET.y };
   if (!from) anchors.push(makeAnchor(ids, cur));
-  const wantsSplit = profile.split && rng.next() < 0.8;
+  const wantsSplit = archetype === 'chaine' && profile.split && rng.next() < 0.8;
   let splitDone = false;
+  let jumpDone = false;
 
   while (cur.y < targetY) {
     if (wantsSplit && !splitDone && cur.y - startY > 3 && targetY - cur.y > 9) {
@@ -115,41 +152,77 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, profi
       const high = makeAnchor(ids, { x: clampX(cur.x + side * 0.5 * u), y: cur.y + 1.1 * u });
       const merge = makeAnchor(ids, { x: clampX(cur.x - side * 0.1 * u), y: cur.y + 1.6 * u });
       anchors.push(low, high, merge);
-      pickups.push({ id: ids.pickup, pos: { x: (high.pos.x + merge.pos.x) / 2, y: (high.pos.y + merge.pos.y) / 2 + 0.3 }, taken: false });
-      ids.pickup += 1;
+      pickups.push(makePickup(ids, { x: (high.pos.x + merge.pos.x) / 2, y: (high.pos.y + merge.pos.y) / 2 + 0.3 }));
       junctionId = junction.id;
       branchIds = [low.id, high.id];
       splitDone = true;
       cur = merge.pos;
       continue;
     }
-    cur = nextChainPoint(rng, cur, profile.spacing);
+    if (archetype === 'saut' && !jumpDone && profile.boosters > 0 && cur.y - startY > 6 && targetY - cur.y > 8) {
+      // Grand saut : un propulseur, puis un trou d'un espacement et demi que seul le lâcher propulsé franchit bien.
+      const launcher = makeAnchor(ids, cur, 'booster');
+      anchors[anchors.length - 1] = launcher;
+      const side = cur.x > 0 ? -1 : 1;
+      cur = { x: clampX(cur.x + side * 0.6 * spacing), y: cur.y + 1.45 * spacing };
+      anchors.push(makeAnchor(ids, cur));
+      jumpDone = true;
+      continue;
+    }
+    const prev = cur;
+    cur = chainStep(rng, cur, spacing, shape.dy, shape.dx);
     anchors.push(makeAnchor(ids, cur));
+    // Couloir d'étoiles : une étoile entre deux points sur deux, légèrement décalée.
+    if (archetype === 'couloir' && anchors.length % 2 === 0) {
+      pickups.push(makePickup(ids, { x: clampX((prev.x + cur.x) / 2 + (rng.next() - 0.5) * 1.2), y: (prev.y + cur.y) / 2 }));
+    }
   }
 
-  assignKinds(rng, anchors, profile, junctionId, branchIds);
-  const obstacles = placeObstacles(rng, ids, anchors, pickups, startY, cur.y, profile.obstacles, from);
+  // Hors zone d'apprentissage, chaque segment porte au moins une étoile, à côté d'un point du milieu :
+  // la deuxième étoile d'un niveau doit se mériter.
+  const teaching = !profile.split && profile.obstacles === 0;
+  if (pickups.length === 0 && !teaching && anchors.length >= 3) {
+    const beside = anchors[Math.floor(anchors.length / 2)]!;
+    const side = beside.pos.x > 0 ? -1 : 1;
+    pickups.push(makePickup(ids, { x: clampX(beside.pos.x + side * 1.3), y: beside.pos.y + 0.8 }));
+  }
+  assignKinds(rng, anchors, profile, archetype, junctionId, branchIds);
+  const obstacleCount = archetype === 'dalles' ? Math.min(4, profile.obstacles + 2) : profile.obstacles;
+  const obstacles = placeObstacles(rng, ids, anchors, pickups, Math.max(startY, origin.y + GRACE_ABOVE_ORIGIN - 2), cur.y, obstacleCount, from, archetype === 'dalles');
   return { anchors, obstacles, pickups, junctionId, branchIds };
 }
 
 /** Segment de repli : une chaîne serrée, sans rien d'autre. Toujours franchissable. */
-export function buildPlainSegment(rng: Rng, ids: IdCounters, from: Vec2 | null): Segment {
-  return buildSegment(rng, ids, from, { spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0 });
+export function buildPlainSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origin: Vec2): Segment {
+  return buildSegment(rng, ids, from, origin, { spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine'] }, 'chaine');
 }
 
-/** Fragiles et propulseurs, jamais sur la fourche, ses branches, leur jonction ni le dernier point. */
-function assignKinds(rng: Rng, anchors: Anchor[], profile: TierProfile, junctionId: number | null, branchIds: readonly number[]): void {
+/**
+ * Fragiles et propulseurs, jamais sur la fourche, ses branches, leur jonction,
+ * le premier ni le dernier point. La rafale aligne trois propulseurs de suite,
+ * la série de fragiles trois à quatre fragiles de suite, au milieu du segment.
+ */
+function assignKinds(rng: Rng, anchors: Anchor[], profile: TierProfile, archetype: Archetype, junctionId: number | null, branchIds: readonly number[]): void {
   const protectedIds = new Set<number>([...branchIds, junctionId ?? -1, anchors.at(-1)?.id ?? -1, anchors[0]?.id ?? -1]);
-  const eligible = anchors.filter((a) => !protectedIds.has(a.id));
+  const eligible = anchors.filter((a) => !protectedIds.has(a.id) && a.kind === 'normal');
   const fragile = new Set<number>();
-  for (const anchor of eligible) if (rng.next() < profile.fragileChance) fragile.add(anchor.id);
   const boosters = new Set<number>();
-  const boostable = eligible.filter((a) => !fragile.has(a.id));
-  for (let i = 0; i < profile.boosters && boostable.length > 0; i += 1) boosters.add(rng.pick(boostable).id);
+  const runOf = (count: number, into: Set<number>): void => {
+    if (eligible.length === 0) return;
+    const start = Math.max(0, Math.min(eligible.length - count, Math.floor(eligible.length / 2) - 1));
+    for (let i = start; i < Math.min(eligible.length, start + count); i += 1) into.add(eligible[i]!.id);
+  };
+  if (archetype === 'rafale' && profile.boosters > 0) runOf(3, boosters);
+  else if (archetype === 'fragiles' && profile.fragileChance > 0) runOf(3 + (rng.next() < 0.5 ? 1 : 0), fragile);
+  else {
+    for (const anchor of eligible) if (rng.next() < profile.fragileChance) fragile.add(anchor.id);
+    const boostable = eligible.filter((a) => !fragile.has(a.id));
+    for (let i = 0; i < profile.boosters && boostable.length > 0; i += 1) boosters.add(rng.pick(boostable).id);
+  }
   for (let i = 0; i < anchors.length; i += 1) {
     const anchor = anchors[i]!;
-    const kind = fragile.has(anchor.id) ? 'fragile' : boosters.has(anchor.id) ? 'booster' : 'normal';
-    if (kind !== 'normal') anchors[i] = { ...anchor, kind };
+    const kind = fragile.has(anchor.id) ? 'fragile' : boosters.has(anchor.id) ? 'booster' : anchor.kind;
+    if (kind !== anchor.kind) anchors[i] = { ...anchor, kind };
   }
 }
 
@@ -163,6 +236,7 @@ function placeObstacles(
   endY: number,
   count: number,
   from: Vec2 | null,
+  slabsOnly: boolean,
 ): Obstacle[] {
   const obstacles: Obstacle[] = [];
   const keepAway = (box: Obstacle): boolean =>
@@ -175,7 +249,7 @@ function placeObstacles(
       const y0 = startY + 2 + rng.next() * Math.max(1, endY - startY - 4);
       let x0: number;
       let x1: number;
-      if (rng.next() < 0.5) {
+      if (!slabsOnly && rng.next() < 0.5) {
         const width = 1.5 + 1.5 * rng.next();
         if (rng.next() < 0.5) {
           x0 = -WALL_X;

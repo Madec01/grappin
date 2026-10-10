@@ -1,6 +1,6 @@
 # GRAPPIN, document de conception
 
-Version 0.3, 9 octobre 2026. Le propriétaire du projet est le seul valideur du game design, du lore et de la direction artistique. Les points marqués [VALIDÉ] ont été tranchés par lui le 9 octobre 2026. Le Lead Game Architect a les pleins pouvoirs sur le code et l'architecture.
+Version 0.4, 10 octobre 2026. Le propriétaire du projet est le seul valideur du game design, du lore et de la direction artistique. Les points marqués [VALIDÉ] ont été tranchés par lui le 9 octobre 2026. Le Lead Game Architect a les pleins pouvoirs sur le code et l'architecture.
 
 ## 1. Vision [VALIDÉ]
 
@@ -72,10 +72,14 @@ Le héros, son nom, et le détail du décor restent à proposer au propriétaire
 - Paliers de hauteur nommés pour donner un sentiment d'étape. Noms pour la ville de nuit, validés le 9 octobre 2026 : Les toits, Les gouttières, Les enseignes, Les clochers, Les antennes, Les grues, Les nuages.
 - **Garantie du vérificateur.** Avant d'afficher un segment, un robot joue chaque point avec la vraie physique, en supposant le pire élan d'arrivée, et exige qu'il existe toujours un instant de lâcher qui mène plus haut sans toucher d'obstacle ; pour une fourche, chaque branche doit être atteignable avec un élan ordinaire. Un segment refusé est régénéré ; un segment de repli serré, vérifié lui aussi, prend la place après six refus. Mesure : zéro repli sur quarante graines à tous les paliers, six millisecondes par segment.
 
-## 9. Modes [VALIDÉ]
+## 9. Modes [VALIDÉ le 10 octobre 2026]
 
-- **Course infinie**, mode principal.
-- **Traversées**, des niveaux avec une arrivée, construits par le même générateur avec une graine fixe et une longueur donnée. Livrées après la course infinie.
+Retour du propriétaire sur la 0.3.0 : « quand on perd, redémarrer de zéro devient vite énervant, le jeu reste hyper répétitif ». Décision : les traversées deviennent le mode principal, la course libre passe en second.
+
+- **Traversée en niveaux fixes.** Dix niveaux nommés et enchaînés, de 60 à 100 m chacun : Les toits, Les gouttières, Les enseignes, Les clochers, Les antennes, Les grues, Les nuages, Les toits de nuit, Les gouttières de nuit, Le sommet. Chaque niveau est le même parcours à chaque essai, grâce à sa graine et à la physique déterministe : on l'apprend et on finit par le maîtriser. Chaque niveau apporte une nouveauté annoncée en une phrase à son départ, a sa brume à sa vitesse, et aucun obstacle dans ses huit premiers mètres. Perdre recommence le niveau, lui seul ; finir un niveau ouvre le suivant.
+- **Trois étoiles par niveau** : terminer, ramasser toutes les étoiles du niveau, finir avec cinq lâchers parfaits d'affilée. Chaque étoile gagnée pour la première fois rapporte 50 points d'expérience, le premier passage d'un niveau 100.
+- **Course libre**, pour le score, avec départ avancé : elle démarre à la zone la plus haute déjà franchie.
+- **Sept motifs de segments**, dans les deux modes, tirés parmi ceux que le niveau ou le palier permet : chaîne en zigzag avec fourche, escalier serré, couloir d'étoiles, champ de dalles à frôler, rafale de trois propulseurs, série de fragiles, grand saut lancé par un propulseur. Hors zone d'apprentissage, chaque segment porte au moins une étoile.
 
 ## 9 bis. Progression [VALIDÉ le 9 octobre 2026]
 

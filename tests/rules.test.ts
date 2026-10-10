@@ -97,6 +97,8 @@ describe('score, sol et brume', () => {
     sim.state.hero.pos = { x: 0, y: 10 };
     sim.state.hero.vel = { x: 0, y: 0 };
     sim.state.hero.grounded = false;
+    // Aucune étoile ne doit fausser la mesure.
+    sim.state.pickups = [];
     sim.step();
     // La gravité a déjà tiré le personnage d'un pas : on lit la hauteur réellement atteinte.
     expect(sim.state.height).toBeCloseTo(10, 2);

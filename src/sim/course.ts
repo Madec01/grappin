@@ -1,5 +1,5 @@
 import { createRng } from '../core/math/rng';
-import { buildPlainSegment, buildSegment, tierProfile, type IdCounters, type Segment } from './generator';
+import { buildPlainSegment, buildSegment, tierProfile, type IdCounters, type Segment, type TierProfile } from './generator';
 import type { SimState } from './state';
 import type { Tuning } from './tuning';
 import { verifySegment } from './verifier';
@@ -12,9 +12,23 @@ import { verifySegment } from './verifier';
  * poursuive la même suite.
  */
 
+/**
+ * Ce que le parcours doit être : une course libre qui monte sans fin depuis
+ * `startY`, avec le profil du palier, ou un niveau fixe de `startY` à `endY`
+ * avec son propre profil.
+ */
+export type CoursePlan =
+  | { readonly kind: 'infinite'; readonly startY: number }
+  | { readonly kind: 'level'; readonly levelId: number; readonly startY: number; readonly endY: number; readonly profile: TierProfile };
+
+export const FREE_RUN: CoursePlan = { kind: 'infinite', startY: 0 };
+
 export interface CourseState {
   readonly seed: number;
+  readonly plan: CoursePlan;
   rngState: number;
+  /** Étoiles engendrées depuis le début, prises ou non : sert aux étoiles d'un niveau. */
+  pickupsTotal: number;
   /** Position du dernier point engendré, sommet du parcours connu. */
   lastX: number;
   lastY: number;
@@ -32,9 +46,22 @@ const MAX_FALLBACK_ATTEMPTS = 4;
 const CONTEXT_ANCHORS = 4;
 /** Les éléments passés sous la brume de plus de cette distance sont retirés. */
 const PRUNE_BEHIND = 10;
+/** Un niveau est engendré jusqu'à cette hauteur au-dessus de sa ligne d'arrivée, pour le dernier balancement. */
+const BEYOND_FINISH = 6;
 
-export function createCourse(seed: number): CourseState {
-  return { seed, rngState: createRng(seed).getState(), lastX: 0, lastY: 0, ids: { anchor: 1, obstacle: 1, pickup: 1 }, segments: 0, fallbacks: 0, unverified: 0 };
+export function createCourse(seed: number, plan: CoursePlan): CourseState {
+  return {
+    seed,
+    plan,
+    rngState: createRng(seed).getState(),
+    pickupsTotal: 0,
+    lastX: 0,
+    lastY: plan.startY,
+    ids: { anchor: 1, obstacle: 1, pickup: 1 },
+    segments: 0,
+    fallbacks: 0,
+    unverified: 0,
+  };
 }
 
 /** Ajoute des segments tant que le sommet est sous `untilY`. Modifie l'état en place. */
@@ -42,14 +69,17 @@ export function extendCourse(state: SimState, untilY: number, tuning: Tuning): v
   const course = state.course;
   const rng = createRng(course.seed);
   rng.setState(course.rngState);
-  while (course.lastY < untilY) {
+  const origin = { x: 0, y: course.plan.startY };
+  // Un niveau s'arrête un peu au-dessus de sa ligne d'arrivée ; la course libre ne s'arrête jamais.
+  const limit = course.plan.kind === 'level' ? Math.min(untilY, course.plan.endY + BEYOND_FINISH) : untilY;
+  while (course.lastY < limit) {
     const from = state.anchors.at(-1)?.pos ?? null;
-    const tier = Math.floor(course.lastY / tuning.tierHeight);
+    const profile = course.plan.kind === 'level' ? course.plan.profile : tierProfile(Math.floor(course.lastY / tuning.tierHeight));
     const context = state.anchors.slice(-CONTEXT_ANCHORS);
     const contextObstacles = state.obstacles.filter((o) => o.y1 >= course.lastY - 8);
     let accepted: Segment | null = null;
     for (let attempt = 0; attempt < MAX_ATTEMPTS && !accepted; attempt += 1) {
-      const candidate = buildSegment(rng, course.ids, from, tierProfile(tier));
+      const candidate = buildSegment(rng, course.ids, from, origin, profile, rng.pick(profile.archetypes));
       if (verifySegment(context, contextObstacles, candidate, tuning)) accepted = candidate;
     }
     if (!accepted) {
@@ -58,7 +88,7 @@ export function extendCourse(state: SimState, untilY: number, tuning: Tuning): v
       course.fallbacks += 1;
       let plain: Segment | null = null;
       for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS && !accepted; attempt += 1) {
-        plain = buildPlainSegment(rng, course.ids, from);
+        plain = buildPlainSegment(rng, course.ids, from, origin);
         if (verifySegment(context, contextObstacles, plain, tuning)) accepted = plain;
       }
       if (!accepted) {
@@ -69,6 +99,7 @@ export function extendCourse(state: SimState, untilY: number, tuning: Tuning): v
     state.anchors.push(...accepted.anchors);
     state.obstacles.push(...accepted.obstacles);
     state.pickups.push(...accepted.pickups);
+    course.pickupsTotal += accepted.pickups.length;
     const top = accepted.anchors.at(-1)!;
     course.lastX = top.pos.x;
     course.lastY = top.pos.y;

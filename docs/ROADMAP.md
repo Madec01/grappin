@@ -57,7 +57,7 @@ Tests : dix mille graines générées sans un seul passage impossible ; un robot
 
 Critère de sortie : une partie de trois minutes ne contient aucun passage impossible ni aucune mort injuste, constaté par le propriétaire.
 
-## Phase 3 — Progression — v0.3 — en cours
+## Phase 3 — Progression — v0.3 — livrée le 9 octobre 2026
 
 Décision du propriétaire du 9 octobre 2026 : missions et niveaux à talismans, avant l'habillage. Conception en section 9 bis du GDD.
 
@@ -68,9 +68,18 @@ Décision du propriétaire du 9 octobre 2026 : missions et niveaux à talismans,
 
 Tests : niveaux, talismans, missions, profil et sa relecture tolérante, suiveur de partie, écrans et boutons, fumée de bout en bout avec sauvegarde entre deux chargements.
 
-Critère de sortie : le propriétaire rejoue pour une mission ou un talisman, et la technique s'apprend sans explication orale.
+Critère de sortie : le propriétaire rejoue pour une mission ou un talisman, et la technique s'apprend sans explication orale. Retour du propriétaire : « c'est mieux », mais repartir de zéro agace et le jeu reste répétitif ; d'où la phase 4.
 
-## Phase 4 — Habillage ville de nuit — v0.4
+## Phase 4 — Niveaux et variété — v0.4 — en cours
+
+Décision du propriétaire du 10 octobre 2026 : les traversées en niveaux fixes deviennent le mode principal. Conception en section 9 du GDD.
+
+- 0.4.0 : dix niveaux fixes et enchaînés, ligne d'arrivée, trois étoiles, course libre à départ avancé, sept motifs de segments, écrans des niveaux et de victoire.
+- 0.4.1 : événements pendant les niveaux, dont la bascule du niveau à l'horizontale proposée par le propriétaire, après validation du catalogue.
+
+Critère de sortie : le propriétaire enchaîne plusieurs niveaux sans sentiment de répétition, et un niveau perdu se rejoue sans agacement.
+
+## Phase 5 — Habillage ville de nuit — v0.5
 
 - Silhouettes et lueurs : toits, lampadaires, enseignes, cloches, fenêtres, brume lumineuse.
 - Accroches réactives au passage. Traînée, étirement, sifflement du vent, éclat et son du lâcher parfait.
@@ -79,21 +88,20 @@ Critère de sortie : le propriétaire rejoue pour une mission ou un talisman, et
 
 Critère de sortie : la première minute est amusante sur un vrai téléphone, constatée par au moins une personne qui n'a pas travaillé sur le jeu. La validation technique ne vaut pas preuve de plaisir.
 
-## Phase 5 — Mouvement et contraintes finales — v0.5
+## Phase 6 — Mouvement et contraintes finales — v0.6
 
 - Accroches mobiles et rotatives, obstacles mobiles, vérificateur étendu à leur cycle.
 - Vent et dérive, toujours signalés, en dernière contrainte.
 
 Critère de sortie : chaque contrainte passe le vérificateur et ne dégrade pas la lisibilité.
 
-## Phase 6 — Traversées et confort — v0.6
+## Phase 7 — Confort — v0.7
 
-- Traversées : niveaux à arrivée, construits par le générateur avec graine fixe et longueur donnée, débloqués par les niveaux de grimpeur.
-- Mode facile avec ombre prédictive longue, ligne de record, statistiques de fin de partie.
+- Mode facile avec ombre prédictive longue, ligne de record, statistiques de fin de partie, davantage de niveaux.
 
-Critère de sortie : une traversée se termine, se rejoue à l'identique et se classe.
+Critère de sortie : un nouveau joueur choisit son confort sans aide.
 
-## Phase 7 — Polish et publication — v1.0
+## Phase 8 — Polish et publication — v1.0
 
 - Équilibrage piloté par le robot joueur, accessibilité, performance sur téléphones modestes, crédits complets.
 - Publication sur GitHub Pages, page d'évaluation pour recueillir les retours.

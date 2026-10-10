@@ -50,7 +50,8 @@ export interface Hero {
   grounded: boolean;
 }
 
-export type Status = 'alive' | 'dead';
+/** Vivant, mort, ou arrivé en haut d'un niveau. */
+export type Status = 'alive' | 'dead' | 'won';
 
 /** Événements de règles émis pendant un pas, consommés par le rendu et le son. */
 export type RuleEvent =
@@ -65,6 +66,7 @@ export type RuleEvent =
       readonly forced: boolean;
     }
   | { readonly type: 'rescue'; readonly chancesLeft: number }
+  | { readonly type: 'finish'; readonly height: number }
   | { readonly type: 'kick' }
   | { readonly type: 'boost' }
   | { readonly type: 'break'; readonly anchorId: number }
@@ -106,6 +108,10 @@ export interface SimState {
   course: CourseState;
   /** Niveau de la brume, en mètres. */
   fogY: number;
+  /** Hauteur du toit de départ : le personnage s'y pose, la hauteur se compte depuis là. */
+  groundY: number;
+  /** Ligne d'arrivée d'un niveau, ou null en course libre. */
+  finishY: number | null;
   /** Hauteur maximale atteinte, en mètres. */
   height: number;
   score: number;

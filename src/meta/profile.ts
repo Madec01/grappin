@@ -1,6 +1,8 @@
+import type { LevelDef } from '../data/levels';
 import { levelFor } from './levels';
 import { nextMissions, settleMissions, type MissionDef, type MissionState, type RunStats } from './missions';
 import { TALISMANS, slotsFor, talismanById, type Talisman, type TalismanId } from './talismans';
+import { FIRST_CLEAR_XP, STAR_XP, levelStars, type LevelResult } from './traversee';
 
 /**
  * Profil du joueur : expérience, records, talismans équipés, missions. Il est
@@ -15,6 +17,12 @@ export const ACTIVE_MISSIONS = 3;
 /** L'indice de départ s'affiche tant que le joueur n'a pas atteint cette hauteur. */
 export const HINT_UNTIL_HEIGHT = 30;
 
+/** Résultat retenu pour un niveau : ses étoiles et son meilleur score. */
+export interface LevelRecord {
+  readonly stars: number;
+  readonly bestScore: number;
+}
+
 export interface Profile {
   readonly version: typeof PROFILE_VERSION;
   readonly xp: number;
@@ -24,6 +32,8 @@ export interface Profile {
   readonly equipped: TalismanId[];
   readonly missions: MissionState[];
   readonly completedMissions: string[];
+  /** Niveaux, par numéro en texte pour le JSON. */
+  readonly levels: Record<string, LevelRecord>;
 }
 
 /** Lecture et écriture d'un texte : `localStorage` dans le navigateur, une mémoire dans les tests. */
@@ -44,6 +54,7 @@ export function createProfile(): Profile {
     equipped: [],
     missions: nextMissions([], [], ACTIVE_MISSIONS).map((id) => ({ id, progress: 0 })),
     completedMissions: [],
+    levels: {},
   };
 }
 
@@ -91,6 +102,12 @@ export function loadProfile(storage: ProfileStorage): Profile {
           .filter((m): m is MissionState => typeof m === 'object' && m !== null && typeof (m as MissionState).id === 'string' && isNumber((m as MissionState).progress))
           .map((m) => ({ id: m.id, progress: m.progress }))
       : [];
+    const levels: Record<string, LevelRecord> = {};
+    if (typeof raw.levels === 'object' && raw.levels !== null) {
+      for (const [id, record] of Object.entries(raw.levels as Record<string, Partial<LevelRecord>>)) {
+        if (/^\d+$/.test(id) && isNumber(record?.stars) && isNumber(record?.bestScore)) levels[id] = { stars: Math.min(3, Math.floor(record.stars)), bestScore: record.bestScore };
+      }
+    }
     const profile: Profile = {
       version: PROFILE_VERSION,
       xp: raw.xp,
@@ -100,6 +117,7 @@ export function loadProfile(storage: ProfileStorage): Profile {
       equipped: equipped.slice(0, slotsFor(levelFor(raw.xp))),
       missions: missions.length > 0 ? missions : fresh.missions,
       completedMissions,
+      levels,
     };
     return refillMissions(profile);
   } catch {
@@ -131,11 +149,11 @@ export interface RunOutcome {
   readonly newBestHeight: boolean;
 }
 
-/** Fin de partie : expérience, missions, records, déblocages. */
-export function endRun(profile: Profile, run: RunStats, score: number): RunOutcome {
+/** Fin de partie : expérience, missions, records, déblocages. `extraXp` : primes d'un niveau. */
+export function endRun(profile: Profile, run: RunStats, score: number, extraXp = 0): RunOutcome {
   const settled = settleMissions(profile.missions, profile.completedMissions, run);
   // Une partie compte toujours, même quittée sur le toit : au moins un point.
-  const xpGained = Math.max(1, Math.floor(score)) + settled.xp;
+  const xpGained = Math.max(1, Math.floor(score)) + settled.xp + extraXp;
   const levelBefore = levelFor(profile.xp);
   const xp = profile.xp + xpGained;
   const levelAfter = levelFor(xp);
@@ -150,6 +168,29 @@ export function endRun(profile: Profile, run: RunStats, score: number): RunOutco
     completedMissions: settled.allCompleted,
   };
   return { profile: next, xpGained, missionsCompleted: settled.completed, levelBefore, levelAfter, unlocked, newBestHeight: run.height > profile.bestHeight };
+}
+
+export interface LevelOutcome extends RunOutcome {
+  readonly level: LevelDef;
+  readonly won: boolean;
+  /** Étoiles de cette partie, et étoiles retenues pour le niveau après elle. */
+  readonly stars: number;
+  readonly totalStars: number;
+  /** Étoiles gagnées pour la première fois, et premier passage du niveau. */
+  readonly newStars: number;
+  readonly firstClear: boolean;
+}
+
+/** Fin d'un niveau, gagné ou perdu : comme une partie, plus les étoiles et les primes du niveau. */
+export function endLevel(profile: Profile, level: LevelDef, run: RunStats, score: number, result: LevelResult): LevelOutcome {
+  const before = profile.levels[String(level.id)] ?? { stars: 0, bestScore: 0 };
+  const stars = levelStars(result);
+  const newStars = Math.max(0, stars - before.stars);
+  const firstClear = result.won && before.stars === 0;
+  const outcome = endRun(profile, run, score, newStars * STAR_XP + (firstClear ? FIRST_CLEAR_XP : 0));
+  const record: LevelRecord = { stars: Math.max(before.stars, stars), bestScore: Math.max(before.bestScore, Math.floor(score)) };
+  const next: Profile = { ...outcome.profile, levels: { ...outcome.profile.levels, [String(level.id)]: record } };
+  return { ...outcome, profile: next, level, won: result.won, stars, totalStars: record.stars, newStars, firstClear };
 }
 
 /** Équipe ou retire un talisman, dans la limite des emplacements et des déblocages. Renvoie le profil inchangé si impossible. */

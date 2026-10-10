@@ -1,6 +1,6 @@
 # Architecture technique — GRAPPIN
 
-Dernière mise à jour : 9 octobre 2026, version 0.3.0. Ce document décrit ce qui existe, pas ce qui est prévu. La feuille de route tient le reste.
+Dernière mise à jour : 10 octobre 2026, version 0.4.0. Ce document décrit ce qui existe, pas ce qui est prévu. La feuille de route tient le reste.
 
 ## Principes
 
@@ -22,12 +22,14 @@ src/
   sim/physics.ts        Vol libre, corde tendue ou molle, pompage, treuil, plafond de vitesse, prédiction de vol
   sim/aim.ts            Choix du point visé : trajectoire, ligne de vue, hystérésis, coyote time
   sim/rules.ts          Accroche, lâcher, impulsions, fragiles, propulseurs, obstacles et frôlé, étoiles, paliers, score, sol, brume
-  sim/generator.ts      Construction d'un segment : chaîne, fourche, obstacles, genres de points, selon le palier
+  sim/generator.ts      Construction d'un segment selon un motif et un profil : chaîne, escalier, couloir, dalles, rafale, fragiles, saut
   sim/verifier.ts       Robot vérificateur : joue chaque point et prouve qu'une sortie vers le haut existe
-  sim/course.ts         Parcours par segments : génération, vérification, repli, élagage sous la brume
+  sim/course.ts         Plan de parcours (course libre ou niveau), génération, vérification, repli, élagage sous la brume
   sim/robot.ts          Robots joueurs raisonnable et débutant, pour mesurer un réglage
   sim/simulation.ts     Pas fixe, ordre des règles, journal, clone, rejeu
   data/tiers.ts         Noms des paliers de hauteur
+  data/levels.ts        Les dix niveaux : graine, hauteurs, brume, profil, nouveauté
+  meta/traversee.ts     Étoiles d'un niveau, niveaux débloqués, départ avancé, plan et réglages d'un niveau
   meta/levels.ts        Expérience et niveaux de grimpeur
   meta/talismans.ts     Catalogue des talismans et leur effet sur les réglages
   meta/missions.ts      Catalogue des missions, avancement et remplacement
@@ -87,9 +89,13 @@ Le lâcher ne touche pas à la vitesse : le personnage part avec celle du moment
 - **Sol.** Le toit de départ est en y = 0 : sans corde, le personnage s'y pose.
 - **Brume.** Monte à `fogBaseSpeed`, plus `fogSpeedGain` tous les `fogStepHeight` mètres, plafonnée. Le personnage passe dessous : partie terminée, la corde lâche.
 
+## Niveaux
+
+`data/levels.ts` décrit les dix niveaux ; `meta/traversee.ts` en tire le plan et les réglages d'une partie (la brume du niveau, appliquée après les talismans), compte les étoiles (terminer, toutes les étoiles du niveau, cinq parfaits d'affilée), dit quels niveaux sont débloqués (le suivant du plus haut franchi) et d'où part la course libre. Dans la simulation, le toit de départ est en `groundY`, la brume part sous lui, la hauteur se compte depuis lui, et franchir `finishY` passe le statut à `won` avec un événement `finish` : la partie est alors figée. Le même niveau est identique à chaque essai, et son rejeu aussi, ce qu'un test vérifie.
+
 ## Progression
 
-`src/meta` est un modèle pur, sans rendu ni navigateur. `levels.ts` : le niveau L demande `120 × L × (L − 1) / 2` points au total. `talismans.ts` : chaque talisman est une fonction des réglages vers des réglages, appliquée par `applyTalismans` dans l'ordre du catalogue ; ils ne font que faciliter, et la partie entière, vérificateur compris, joue avec les réglages qui en résultent. Deux talismans passent par la simulation : `startKickSpeed` donne son élan à la toute première accroche de la partie, `secondChances` fait renvoyer le personnage vers le haut par la brume au lieu de le prendre, avec un événement `rescue`. `missions.ts` : dix-huit missions ordonnées, trois actives, `settleMissions` applique le relevé d'une partie, remplit les missions de comptage par accumulation et celles de record par maximum, et remplace les accomplies. `runTracker.ts` relève depuis les événements de règles ce dont les missions ont besoin ; l'événement de lâcher porte pour cela la durée de tenue, le genre du point et le caractère forcé d'une casse. `profile.ts` tient le profil en données versionnées, l'écrit sur un stockage injecté, `localStorage` dans le navigateur et une mémoire dans les tests, et relit avec tolérance : toute donnée douteuse ramène au profil neuf. `endRun` fait le bilan d'une partie : expérience, missions, records, niveau et déblocages.
+`src/meta` est un modèle pur, sans rendu ni navigateur. `levels.ts` : le niveau L demande `120 × L × (L − 1) / 2` points au total. `talismans.ts` : chaque talisman est une fonction des réglages vers des réglages, appliquée par `applyTalismans` dans l'ordre du catalogue ; ils ne font que faciliter, et la partie entière, vérificateur compris, joue avec les réglages qui en résultent. Deux talismans passent par la simulation : `startKickSpeed` donne son élan à la toute première accroche de la partie, `secondChances` fait renvoyer le personnage vers le haut par la brume au lieu de le prendre, avec un événement `rescue`. `missions.ts` : dix-huit missions ordonnées, trois actives, `settleMissions` applique le relevé d'une partie, remplit les missions de comptage par accumulation et celles de record par maximum, et remplace les accomplies. `runTracker.ts` relève depuis les événements de règles ce dont les missions ont besoin ; l'événement de lâcher porte pour cela la durée de tenue, le genre du point et le caractère forcé d'une casse. `profile.ts` tient le profil en données versionnées, l'écrit sur un stockage injecté, `localStorage` dans le navigateur et une mémoire dans les tests, et relit avec tolérance : toute donnée douteuse ramène au profil neuf. `endRun` fait le bilan d'une partie : expérience, missions, records, niveau et déblocages ; `endLevel` y ajoute les étoiles du niveau, leurs primes et l'enregistrement du résultat.
 
 ## Visée
 
@@ -97,7 +103,7 @@ Le lâcher ne touche pas à la vitesse : le personnage part avec celle du moment
 
 ## Parcours engendré et vérifié
 
-`course.ts` ajoute des segments tant que le sommet connu est sous `hero.y + courseAhead`. Pour chaque segment, `generator.ts` propose : une chaîne de points dont l'espacement nominal vient du profil du palier, alternant les côtés dans une largeur de ±4 m ; à partir du palier 1, une fourche (route basse proche, route haute lointaine avec une étoile, point de jonction) et des obstacles, corniches appuyées aux bords ou dalles flottantes, jamais à moins de 1,4 m d'un point ni dans la zone de pendaison sous un point ; à partir du palier 2, des accroches fragiles ; du palier 3, un propulseur. Les profils vivent dans `tierProfile`.
+`course.ts` suit un plan : course libre depuis une hauteur de départ, avec le profil du palier, ou niveau fixe de `startY` à `endY` avec son propre profil, engendré en entier dès le départ et arrêté six mètres au-dessus de sa ligne d'arrivée. Il ajoute des segments tant que le sommet connu est sous `hero.y + courseAhead`. Pour chaque segment, `generator.ts` tire un motif parmi ceux que le profil permet et propose : une chaîne de points dont la montée et le déport viennent du motif et l'espacement du profil, alternant les côtés dans une largeur de ±4 m ; pour la chaîne, une fourche si le profil le permet (route basse proche, route haute lointaine avec une étoile, point de jonction) ; pour le couloir, une étoile entre deux points sur deux ; pour la rafale, trois propulseurs de suite ; pour la série de fragiles, trois ou quatre fragiles de suite ; pour le grand saut, un propulseur puis un trou d'un espacement et demi ; des obstacles, corniches appuyées aux bords ou dalles flottantes, plus nombreux et flottants seulement pour le champ de dalles, jamais à moins de 1,4 m d'un point ni dans la zone de pendaison sous un point, ni dans les huit premiers mètres au-dessus du toit de départ ; hors zone d'apprentissage, au moins une étoile par segment. Les profils de la course libre vivent dans `tierProfile`, ceux des niveaux dans `data/levels.ts`.
 
 `verifier.ts` dispose. Pour chaque point du segment sauf le dernier, et pour le point d'entrée, il construit deux états d'arrivée au pire élan, pendu 3 m sous le point, décalé d'un demi-mètre à gauche puis à droite, avec la seule impulsion de départ. Il tient la corde avec la vraie physique jusqu'à `verifyHoldSeconds`, moins pour une accroche fragile, et tous les quatre pas examine un lâcher : le vol libre est échantillonné tous les cinq centièmes de seconde ; à chaque instant, le point que la visée choisirait est relevé, et il compte s'il est plus haut, à `verifyCatchRatio` de la portée, en ligne de vue, et si le balancement qui suit l'accroche ne heurte rien pendant six dixièmes de seconde. Toucher un obstacle en vol ou en balancement arrête la tentative. Pour une fourche, les deux branches doivent en plus être atteintes depuis une arrivée à élan ordinaire, 6 m/s : la route haute est optionnelle, il suffit qu'un joueur lancé puisse la prendre. Un segment refusé est régénéré jusqu'à six fois, puis un segment de repli, chaîne serrée sans rien d'autre, est proposé et vérifié à son tour ; s'il échouait aussi, il serait accepté et compté dans `unverified`, ce que les tests interdisent. Mesure du 9 octobre 2026 sur quarante graines : zéro repli à tous les paliers, environ six millisecondes par segment, un segment tous les vingt mètres environ.
 

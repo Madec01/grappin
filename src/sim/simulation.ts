@@ -1,7 +1,7 @@
 import { chooseTarget } from './aim';
-import { createCourse, extendCourse, pruneCourse } from './course';
+import { FREE_RUN, createCourse, extendCourse, pruneCourse, type CoursePlan } from './course';
 import { integrate, swingStep } from './physics';
-import { applyBufferedPress, applyFog, applyFragile, applyGround, applyHang, applyObstacles, applyPickups, applyScore, applyTier, press, release } from './rules';
+import { applyBufferedPress, applyFinish, applyFog, applyFragile, applyGround, applyHang, applyObstacles, applyPickups, applyScore, applyTier, press, release } from './rules';
 import type { RuleEvent, SimState } from './state';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 
@@ -13,10 +13,10 @@ import { DEFAULT_TUNING, type Tuning } from './tuning';
  * rejeu des mêmes gestes sur la même graine donne exactement le même état.
  */
 
-export function createState(seed: number, tuning: Tuning): SimState {
+export function createState(seed: number, tuning: Tuning, plan: CoursePlan = FREE_RUN): SimState {
   const state: SimState = {
     step: 0,
-    hero: { pos: { x: 0, y: tuning.heroRadius }, vel: { x: 0, y: 0 }, grounded: true },
+    hero: { pos: { x: 0, y: plan.startY + tuning.heroRadius }, vel: { x: 0, y: 0 }, grounded: true },
     rope: null,
     attachStep: 0,
     attachCount: 0,
@@ -32,16 +32,19 @@ export function createState(seed: number, tuning: Tuning): SimState {
     lastAnchorId: null,
     releaseStep: -1_000_000,
     hangSteps: 0,
-    course: createCourse(seed),
-    fogY: tuning.fogStart,
+    course: createCourse(seed, plan),
+    fogY: plan.startY + tuning.fogStart,
+    groundY: plan.startY,
+    finishY: plan.kind === 'level' ? plan.endY : null,
     // La hauteur part du centre du personnage posé sur le toit : les premiers centimètres ne comptent pas.
-    height: tuning.heroRadius,
+    height: plan.startY + tuning.heroRadius,
     score: 0,
     combo: 0,
     status: 'alive',
     inputs: [],
   };
-  extendCourse(state, tuning.courseAhead, tuning);
+  // Un niveau est engendré en entier dès le départ : on connaît ainsi son nombre d'étoiles.
+  extendCourse(state, plan.kind === 'level' ? plan.endY + tuning.courseAhead : plan.startY + tuning.courseAhead, tuning);
   const aim = chooseTarget(state, tuning);
   state.targetId = aim.targetId;
   state.targetValidStep = aim.targetValidStep;
@@ -53,9 +56,9 @@ export class Simulation {
   state: SimState;
   private events: RuleEvent[] = [];
 
-  constructor(seed: number, tuning: Tuning = DEFAULT_TUNING, state?: SimState) {
+  constructor(seed: number, tuning: Tuning = DEFAULT_TUNING, plan: CoursePlan = FREE_RUN, state?: SimState) {
     this.tuning = tuning;
-    this.state = state ?? createState(seed, tuning);
+    this.state = state ?? createState(seed, tuning, plan);
   }
 
   /** Le doigt se pose : accroche au point visé, ou garde l'appui en mémoire. Vrai si la corde part tout de suite. */
@@ -98,6 +101,7 @@ export class Simulation {
     applyHang(s, this.tuning, this.events);
     applyScore(s, this.tuning);
     applyTier(s, this.tuning, this.events);
+    applyFinish(s, this.events);
     applyFog(s, this.tuning, this.events);
     extendCourse(s, s.hero.pos.y + this.tuning.courseAhead, this.tuning);
     pruneCourse(s, s.fogY);
@@ -120,7 +124,7 @@ export class Simulation {
 
   /** Copie indépendante, qui poursuit à l'identique. */
   clone(): Simulation {
-    return new Simulation(this.state.course.seed, this.tuning, structuredClone(this.state));
+    return new Simulation(this.state.course.seed, this.tuning, this.state.course.plan, structuredClone(this.state));
   }
 
   /** Empreinte stable de l'état, pour les tests de déterminisme. */
@@ -135,8 +139,9 @@ export function replay(
   inputs: readonly { step: number; kind: 'press' | 'release' }[],
   untilStep: number,
   tuning: Tuning = DEFAULT_TUNING,
+  plan: CoursePlan = FREE_RUN,
 ): Simulation {
-  const sim = new Simulation(seed, tuning);
+  const sim = new Simulation(seed, tuning, plan);
   let next = 0;
   while (sim.state.step < untilStep && sim.state.status === 'alive') {
     while (next < inputs.length && inputs[next]!.step === sim.state.step) {

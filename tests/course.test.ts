@@ -27,7 +27,8 @@ describe('parcours engendré', () => {
       const cur = anchors[i]!;
       expect(Math.abs(cur.pos.x)).toBeLessThanOrEqual(HALF_WIDTH);
       expect(cur.pos.y).toBeGreaterThan(sim.state.fogY - 11);
-      expect(Math.hypot(cur.pos.x - prev.pos.x, cur.pos.y - prev.pos.y)).toBeLessThan(T.ropeMax);
+      // Chaque point reste proche du précédent ; seul le grand saut, lancé par un propulseur, dépasse un peu la portée.
+      expect(Math.hypot(cur.pos.x - prev.pos.x, cur.pos.y - prev.pos.y)).toBeLessThan(8);
     }
   });
 
@@ -47,7 +48,7 @@ describe('parcours engendré', () => {
   });
 
   it('introduit les contraintes une à la fois selon le palier', () => {
-    expect(tierProfile(0)).toEqual({ spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0 });
+    expect(tierProfile(0)).toEqual({ spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine', 'couloir'] });
     expect(tierProfile(1).obstacles).toBe(1);
     expect(tierProfile(1).split).toBe(true);
     expect(tierProfile(1).fragileChance).toBe(0);
@@ -97,8 +98,9 @@ describe('robot vérificateur', () => {
   it('exige les deux branches d\'une fourche', () => {
     const rng = createRng(11);
     const ids = { anchor: 1, obstacle: 1, pickup: 1 };
-    let segment = buildSegment(rng, ids, { x: 0, y: 60 }, tierProfile(1));
-    while (segment.junctionId === null) segment = buildSegment(rng, ids, { x: 0, y: 60 }, tierProfile(1));
+    const origin = { x: 0, y: 0 };
+    let segment = buildSegment(rng, ids, { x: 0, y: 60 }, origin, tierProfile(1), 'chaine');
+    while (segment.junctionId === null) segment = buildSegment(rng, ids, { x: 0, y: 60 }, origin, tierProfile(1), 'chaine');
     const entry = { id: 0, pos: { x: 0, y: 60 }, kind: 'normal', broken: false } as const;
     const ok = verifySegment([entry], [], segment, T);
     // Supprimer la branche haute rend la fourche invalide, même si la basse suffit à monter.
