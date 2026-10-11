@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <filter id="large" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="16" /></filter>
+    <filter id="small" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="5" /></filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#070b16" />
+  <g transform="translate(256 256) scale(1) translate(-256 -256)">
+    <path d="M136 400 Q 200 300 330 190" stroke="#38e8ff" stroke-width="18" fill="none" stroke-linecap="round" opacity="0.45" filter="url(#large)" />
+    <path d="M136 400 Q 200 300 330 190" stroke="#38e8ff" stroke-width="9" fill="none" stroke-linecap="round" opacity="0.7" filter="url(#small)" />
+    <path d="M136 400 Q 200 300 330 190" stroke="#e6fbff" stroke-width="5" fill="none" stroke-linecap="round" />
+    <circle cx="352" cy="168" r="66" stroke="#38e8ff" stroke-width="30" fill="none" opacity="0.5" filter="url(#large)" />
+    <circle cx="352" cy="168" r="66" stroke="#38e8ff" stroke-width="16" fill="none" opacity="0.75" filter="url(#small)" />
+    <circle cx="352" cy="168" r="66" stroke="#e6fbff" stroke-width="9" fill="none" />
+    <circle cx="352" cy="168" r="18" fill="#38e8ff" opacity="0.8" filter="url(#small)" />
+    <circle cx="352" cy="168" r="13" fill="#e6fbff" />
+    <circle cx="136" cy="400" r="34" fill="#38e8ff" opacity="0.5" filter="url(#large)" />
+    <circle cx="136" cy="400" r="24" fill="#38e8ff" opacity="0.75" filter="url(#small)" />
+    <circle cx="136" cy="400" r="19" fill="#e6fbff" />
+  </g>
+</svg>

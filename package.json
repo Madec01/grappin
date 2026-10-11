@@ -1,6 +1,6 @@
 {
   "name": "grappin",
-  "version": "0.6.5",
+  "version": "0.7.0",
   "description": "GRAPPIN, jeu d'arcade de mouvement où l'on monte au grappin",
   "private": true,
   "type": "module",
@@ -21,7 +21,8 @@
     "check": "npm run lint && npm run typecheck && npm run test",
     "captures": "tsx scripts/capture.ts",
     "robot": "tsx scripts/robot.ts",
-    "rythme": "tsx scripts/rythme.ts"
+    "rythme": "tsx scripts/rythme.ts",
+    "icones": "tsx scripts/icones.ts"
   },
   "dependencies": {
     "pixi.js": "8.22.0"

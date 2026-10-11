@@ -25,6 +25,11 @@ Quatre idées de prises, données après le test des niveaux, validées par le p
 3. **Prises piégées**. Deux propositions, à choisir ou cumuler. La **prise électrique** : un point qui se charge par cycles, visible au grésillement du néon ; l'attraper chargé électrocute (mort nouvelle, « Électrocuté »), l'attraper éteint est normal. Le **leurre** : un point qui ressemble presque à un vrai, à un détail près (néon qui tremble), et qui lâche le personnage quatre dixièmes de seconde après la prise. Avis : l'électrique est le plus clair et se marie avec l'idée 2 ; le leurre punit l'inattention, ce qui peut agacer, à doser rarement. Dans les deux cas, le vérificateur ignore ces points pour prouver le passage : le niveau reste toujours faisable sans eux. Coût : moyen.
 4. **Prises de plus en plus écartées sur la largeur**. Proposition : un réglage d'écartement par palier en course libre (le déport de côté grandit avec la hauteur, jusqu'à toute la largeur de ± 4 m) et par niveau dans les traversées. Avis : c'est le levier de difficulté le plus naturel, le vérificateur garantit que cela reste franchissable. Attention à la caméra : écartées, les prises sortent de l'écran au zoom 1 ; le dézoom par la vitesse existe déjà, à compléter par un dézoom par l'écartement. Coût : faible.
 
+## Suites de l'installation sur téléphone (0.7.0)
+
+- **Bouton « Installer » sur le titre.** Sur Android, Chrome signale quand l'installation est possible (`beforeinstallprompt`) : un bouton du titre pourrait la déclencher sans passer par le menu ; sur iPhone, un rappel « Partager → Sur l'écran d'accueil ». À faire quand les écrans seront libres.
+- **Musiques hors-ligne d'avance.** Aujourd'hui une piste se garde à sa première écoute ; un bouton « Garder les musiques » téléchargerait les treize (55 Mo) d'un coup, en Wi-Fi.
+
 ## Pistes techniques relevées par le Lead le 9 octobre 2026
 
 - La corde peut traverser un obstacle pendant le balancement ; seule l'accroche exige la ligne de vue. À durcir si cela se voit en jeu.

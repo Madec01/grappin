@@ -1,0 +1,19 @@
+{
+  "id": "./",
+  "name": "GRAPPIN",
+  "short_name": "Grappin",
+  "lang": "fr",
+  "description": "Jeu d'arcade de mouvement où l'on monte au grappin, d'un seul doigt.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#070b16",
+  "theme_color": "#070b16",
+  "categories": ["games"],
+  "icons": [
+    { "src": "icones/icone-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icones/icone-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icones/icone-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

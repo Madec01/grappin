@@ -21,6 +21,15 @@ Version 0.6.0 : style néon minimaliste. Vingt niveaux fixes à trois étoiles, 
 
 Le jeu se joue aussi à la souris, avec le même geste : clic maintenu, puis relâché.
 
+## Installer sur un téléphone
+
+Le jeu s'installe depuis le navigateur, sans magasin d'applications : une icône sur l'écran d'accueil, le plein écran sans barre d'adresse, et il se lance même sans réseau (la page, le code et les icônes sont gardés sur le téléphone ; une musique déjà entendue joue hors-ligne, une musique jamais entendue reste muette).
+
+- **Android (Chrome)** : ouvrir https://madec01.github.io/grappin/, puis le menu ⋮ en haut à droite → « Installer l'application » (ou « Ajouter à l'écran d'accueil »). Chrome propose parfois lui-même l'installation en bas de l'écran.
+- **iPhone (Safari)** : ouvrir la même adresse, toucher le bouton Partager (le carré avec une flèche vers le haut) → « Sur l'écran d'accueil » → « Ajouter ».
+
+Une nouvelle version se prend toute seule à l'ouverture suivante, quand il y a du réseau. Pour désinstaller, retirer l'icône comme pour n'importe quelle application.
+
 ## Réglages pendant une séance de test
 
 Des paramètres d'adresse permettent de régler le jeu sans toucher au code :
@@ -54,6 +63,7 @@ Vite affiche une adresse locale et une adresse réseau. Ouvrez l'adresse réseau
 | `npm run typecheck` | TypeScript strict |
 | `npm run check` | Lint, typage et tests |
 | `npm run captures -- <dossier> [graine]` | Captures d'écran et vidéo d'une partie jouée par un robot, après `npm run build` |
+| `npm run icones` | Redessine les icônes de l'application installée (`public/icones/`), en PNG par Chromium |
 | `npm run rythme -- [piste ...]` | Analyse le rythme des musiques (ffmpeg requis) et écrit `public/musique/<piste>.rythme.json` ; toutes les pistes sans argument |
 | `npm run robot -- [clé=valeur ...] [profil=débutant]` | Robots joueurs en Node qui mesurent hauteur, rythme, vitesses et cause de la fin pour un réglage, par exemple `reelSpeed=4` |
 

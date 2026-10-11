@@ -82,6 +82,21 @@ function showFailure(): void {
   document.body.replaceChildren(message);
 }
 
+/**
+ * Le service worker (`sw/sw.ts`), construit à côté du jeu sous `sw.js` : il
+ * rend le jeu installable sur l'écran d'accueil et jouable hors-ligne. Il
+ * s'enregistre une fois la page chargée, pour ne rien prendre au démarrage du
+ * jeu, et seulement sur un vrai build : en développement il n'existe pas. Un
+ * navigateur sans service worker joue comme avant, sans installation.
+ */
+function registerServiceWorker(): void {
+  if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch((error: unknown) => console.warn('service worker :', error));
+  });
+}
+
+registerServiceWorker();
 start().catch((error: unknown) => {
   console.error(error);
   showFailure();

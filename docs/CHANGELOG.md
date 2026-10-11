@@ -2,6 +2,22 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.7.0] — 2026-10-11 — Installable sur le téléphone
+
+Demande du propriétaire : « pouvoir installer sur mon téléphone directement ».
+
+### Ajouté
+
+- Le jeu est une application installable (PWA) : depuis Chrome sur Android (« Installer l'application ») ou Safari sur iPhone (Partager → « Sur l'écran d'accueil »), une icône néon sur l'écran d'accueil, le plein écran sans barre d'adresse, en portrait. Le README explique la marche à suivre.
+- Il se lance sans réseau : la page, le code et les icônes sont gardés sur le téléphone par un service worker ; une musique déjà entendue joue hors-ligne, une jamais entendue reste muette. Une nouvelle version se prend toute seule à l'ouverture suivante.
+- Les icônes (`public/icones/`, dessinées par `npm run icones`) : l'anneau de visée, la corde et le personnage en néon sur le fond nuit ; une variante « maskable » pour les formes qu'Android découpe, une pour iOS.
+- Le rythme de chaque musique, analysé une fois pour toutes (`npm run rythme`, ffmpeg) et rangé à côté d'elle ; le jeu en lit le pouls à chaque image depuis la position de lecture. Rien de visible encore : le rendu qui pulse arrive en 0.8.0.
+
+### Technique
+
+- `src/sw/sw.ts` construit par l'extension Vite `scripts/pwa.ts`, qui lui injecte la liste des fichiers de la coquille et une version de cache (version de l'application + empreinte de la liste) ; `src/sw/ranges.ts` sert les demandes partielles des lecteurs audio depuis le cache. Test de bout en bout : manifeste, icônes, service worker, relance hors-ligne.
+- `src/audio/rhythm.ts`, `src/audio/rhythms.ts`, `src/audio/analysis.ts`, `scripts/rythme.ts` ; `?pouls=120` fait battre un métronome visuel pour les tests ; `debugState()` expose `pulse` et `bpm`.
+
 ## [0.6.5] — 2026-10-10 — Une ambiance de couleurs par famille de musique
 
 Demande du propriétaire : « des jeux de couleurs en fonction des musiques ».
