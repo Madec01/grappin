@@ -6,6 +6,7 @@ import gifenc from 'gifenc';
 import { PNG } from 'pngjs';
 import { doorGauge, doorState } from '../src/sim/cycles';
 import { Simulation } from '../src/sim/simulation';
+import type { ZoneKind } from '../src/sim/state';
 import { DEFAULT_TUNING } from '../src/sim/tuning';
 
 // Le paquet est en CommonJS avec des accesseurs : Node ne voit pas ses exports nommés, on passe par l'export par défaut.
@@ -16,7 +17,7 @@ const { GIFEncoder, applyPalette, quantize } = gifenc;
  * scénarisée sur un écran de téléphone simulé, et dépose des captures d'écran
  * ainsi qu'une courte vidéo convertie en GIF.
  *
- * Usage : `npm run captures -- <dossier de sortie> [graine] [scenes]`. Le build doit
+ * Usage : `npm run captures -- <dossier de sortie> [graine] [scenes [nom...]]`. Le build doit
  * exister (`npm run build`). Chromium vient de Playwright ou de
  * `PW_CHROMIUM_PATH`. La vidéo demande le ffmpeg de Playwright
  * (`npx playwright install ffmpeg`), dont le chemin est passé par `FFMPEG_PATH`
@@ -42,6 +43,9 @@ const outDir = resolve(process.argv[2] ?? 'captures');
 const seed = Number(process.argv[3] ?? '1');
 /** `scenes` en troisième argument : seulement les prises des scènes du lot 2, pour les revoir sans rejouer tout le banc. */
 const onlyScenes = process.argv[4] === 'scenes';
+/** Après `scenes`, des noms de scènes (`courant derive`) pour ne rejouer que celles-là ; aucun nom, toutes les scènes. */
+const sceneFilter = onlyScenes ? process.argv.slice(5) : [];
+const wanted = (id: string): boolean => sceneFilter.length === 0 || sceneFilter.includes(id);
 
 async function waitForServer(url: string, timeoutMs: number): Promise<void> {
   const start = Date.now();
@@ -201,6 +205,10 @@ interface PilotMemory {
   launchedAt: number;
 }
 
+/** Le pilote qui monte à plus de cette vitesse (m/s) ignore un point visé plus bas que lui de cette distance (m) : il attend la suite, comme le robot (`robot.ts`). */
+const RISING_SPEED = 1;
+const RISING_BELOW = 0.5;
+
 /**
  * Une image du pilote automatique, décidée côté Node : mêmes règles que `autoplay`, mais pour une page dont l'horloge est figée, où
  * le pilote injecté (qui boucle sur `requestAnimationFrame` et `performance.now`) ne verrait jamais d'image. `nowMs` est le temps
@@ -210,8 +218,12 @@ async function pilotFrame(page: Page, memory: PilotMemory, nowMs: number): Promi
   const s = await page.evaluate(() => window.__grappin!.state());
   const gap = (a: { x: number; y: number }): number => Math.hypot(a.x - s.pos.x, a.y - s.pos.y);
   if (!s.attached && s.targetId !== null) {
-    const target = nowMs - memory.launchedAt < 1500 ? (await page.evaluate(() => window.__grappin!.anchors())).find((a) => a.id === s.targetId) : undefined;
-    if (!target || (gap(target) <= 4 && target.y >= s.pos.y)) {
+    const target = (await page.evaluate(() => window.__grappin!.anchors())).find((a) => a.id === s.targetId);
+    // Après un lancer, on n'attrape que ce qui est au-dessus et proche ; porté vers le haut (un courant, une fusée), on ne rattrape pas un point sous soi.
+    const afterLaunch = nowMs - memory.launchedAt < 1500;
+    const reachable = !afterLaunch || !target || (gap(target) <= 4 && target.y >= s.pos.y);
+    const rising = s.vel.y > RISING_SPEED && target !== undefined && target.y < s.pos.y - RISING_BELOW;
+    if (reachable && !rising) {
       await page.evaluate(() => window.__grappin!.press());
       memory.holdSince = nowMs;
     }
@@ -270,19 +282,29 @@ async function climbUntil(page: Page, until: (s: Awaited<ReturnType<typeof pilot
   return false;
 }
 
+/** Les prises des scènes de zone : le nom de la scène, celui du fichier, l'espèce de zone attendue, et l'instant voulu (le personnage bien dans la zone, la colonne ou la bande entière autour de lui). */
+type Seen = Awaited<ReturnType<typeof pilotFrame>>;
+const ZONE_SHOTS: readonly { readonly id: string; readonly file: string; readonly zone: ZoneKind; readonly ready: (s: Seen) => boolean }[] = [
+  { id: 'courant', file: '32-scene-courant', zone: 'ascendant', ready: (s) => s.zone === 'ascendant' && s.pos.y >= 11 },
+  { id: 'derive', file: '33-scene-derive', zone: 'lateral', ready: (s) => s.zone === 'lateral' && s.pos.y >= 10 },
+  { id: 'fusee', file: '34-scene-fusee', zone: 'acceleration', ready: (s) => s.zone === 'acceleration' && s.pos.y >= 11 },
+];
+
 /**
- * Les quatre scènes du lot 2, une ou plusieurs prises chacune, en 390 × 844 :
+ * Les scènes du lot 2, une ou plusieurs prises chacune, en 390 × 844 :
  *  - 28-scene-rebond : la surface de rebond (tapis, mur) vue du toit, bannière effacée ;
  *  - 29-scene-cassable : la paroi fissurée, éteinte (le personnage va trop lentement), puis 29-scene-cassable-allumee : la même, allumée,
  *    quand le personnage va assez vite pour la traverser ;
  *  - 30-scene-porte-ouverte, -avertit, -fermee : la porte aux trois moments de son cycle (contour tireté et jauge, clignotement, masse pleine),
  *    le personnage tenu au lanceur sous le mur ;
- *  - 31-scene-anneau : un anneau juste traversé, ses voisins encore à prendre, son éclat et sa trace éteinte.
+ *  - 31-scene-anneau : un anneau juste traversé, ses voisins encore à prendre, son éclat et sa trace éteinte ;
+ *  - 32-scene-courant, 33-scene-derive, 34-scene-fusee : le personnage dans la zone (colonne du courant ascendant, bande de dérive,
+ *    couloir d'accélération avec la zone de freinage au-dessus), bannière effacée.
  * Une prise que le parcours ne permet plus (réglages changés) est omise avec un avertissement, sans bloquer le banc.
  */
 async function captureScenes(browser: Browser): Promise<void> {
   // Le rebond : le tapis et le mur de rebond sont dans la vue depuis le toit ; le personnage attend dessus, et la bannière s'efface.
-  {
+  if (wanted('rebond')) {
     const { page, close } = await openScene(browser, 'rebond');
     await page.clock.runFor(PULSE_INTRO_MS);
     await page.screenshot({ path: join(outDir, '28-scene-rebond.png') });
@@ -291,7 +313,7 @@ async function captureScenes(browser: Browser): Promise<void> {
   }
 
   // La paroi cassable, éteinte : le personnage s'accroche et se balance sous elle, la bannière effacée.
-  {
+  if (wanted('cassable')) {
     const { page, close } = await openScene(browser, 'cassable');
     const hanging = await climbUntil(page, (s) => s.attached && s.pos.y >= 6);
     if (!hanging) console.warn('29-scene-cassable : le pilote ne s\'accroche pas assez haut, prise omise');
@@ -305,7 +327,7 @@ async function captureScenes(browser: Browser): Promise<void> {
   }
 
   // La paroi cassable, allumée : la première image où le pilote va assez vite, la paroi entière dans la vue (elle est à 13 m).
-  {
+  if (wanted('cassable')) {
     const { page, close } = await openScene(browser, 'cassable');
     const fast = await climbUntil(page, (s) => Math.hypot(s.vel.x, s.vel.y) >= DEFAULT_TUNING.smashSpeed + 1 && s.pos.y >= 8 && s.pos.y <= 12.5 && s.smashed === 0);
     if (!fast) console.warn('29-scene-cassable-allumee : le pilote ne va jamais assez vite sous la paroi, prise omise');
@@ -319,7 +341,7 @@ async function captureScenes(browser: Browser): Promise<void> {
 
   // La porte : le personnage tenu au lanceur (ou accroché assez haut), sous le mur à trou ; la bannière s'efface, puis le cycle de la porte
   // est mené pas à pas jusqu'à trois instants (la jauge à moitié ouverte, l'avertissement, la jauge à moitié fermée).
-  {
+  if (wanted('porte')) {
     const { page, close } = await openScene(browser, 'porte');
     const door = new Simulation(seed, DEFAULT_TUNING, { kind: 'scene', sceneId: 'porte', startY: 0 }).state.obstacles.find((box) => box.kind === 'porte');
     const held = await climbUntil(page, (s) => s.attached && (s.heldKind === 'lanceur' || s.pos.y >= 9));
@@ -348,7 +370,7 @@ async function captureScenes(browser: Browser): Promise<void> {
   }
 
   // Les anneaux : l'image qui suit la traversée du premier, bannière comprise (elle est au-dessus des anneaux).
-  {
+  if (wanted('anneau')) {
     const { page, close } = await openScene(browser, 'anneau');
     const crossed = await climbUntil(page, (s) => s.rings >= 1);
     if (!crossed) console.warn('31-scene-anneau : le pilote ne traverse aucun anneau, prise omise');
@@ -357,6 +379,23 @@ async function captureScenes(browser: Browser): Promise<void> {
       await page.screenshot({ path: join(outDir, '31-scene-anneau.png') });
       const s = await page.evaluate(() => window.__grappin!.state());
       console.log(`Scène anneau : ${s.rings} anneau(x) traversé(s), score ${Math.round(s.score)}`);
+    }
+    await close();
+  }
+
+  // Les zones : le personnage attend sur le toit que la bannière d'intro s'efface (elle cacherait le haut de la zone), puis le pilote le mène
+  // jusqu'à l'instant voulu, dans la zone. La zone vit sur le temps réel de la page (horloge figée, menée à la main) : ses traînées sont
+  // à des endroits précis, les mêmes à chaque prise.
+  for (const shot of ZONE_SHOTS) {
+    if (!wanted(shot.id)) continue;
+    const { page, close } = await openScene(browser, shot.id);
+    await page.clock.runFor(PULSE_INTRO_MS);
+    const inside = await climbUntil(page, shot.ready);
+    if (!inside) console.warn(`${shot.file} : le pilote n'entre pas dans la zone « ${shot.zone} », prise omise`);
+    else {
+      const s = await page.evaluate(() => window.__grappin!.state());
+      await page.screenshot({ path: join(outDir, `${shot.file}.png`) });
+      console.log(`${shot.file} : zone ${s.zone}, pas ${s.step}, hauteur ${s.pos.y.toFixed(1)} m, vitesse (${s.vel.x.toFixed(1)}, ${s.vel.y.toFixed(1)}) m/s, ${s.zones} zone(s) chargée(s)`);
     }
     await close();
   }

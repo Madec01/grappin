@@ -13,7 +13,8 @@ import { mixColor } from './sling';
  * électrique orange puis rouge, prise à éclipse violette, lanceur vert d'eau,
  * obstacles solides et bords de la zone jouable rouge-magenta, surface de rebond
  * orchidée, paroi cassable braise, porte indigo, anneau de précision vert vif,
- * textes blancs, et la corde et le halo orangés du personnage dans la fenêtre
+ * zones de mouvement (courant ascendant menthe glacée, dérive vert pomme,
+ * couloir d'accélération or vif, freinage lilas pâle), textes blancs, et la corde et le halo orangés du personnage dans la fenêtre
  * de lâcher.
  *
  * Pour que l'ambiance ne se confonde jamais avec une espèce de prise, le halo

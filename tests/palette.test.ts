@@ -23,10 +23,18 @@ const SPECIES: Record<string, number> = {
   smash: COLOR.smash,
   door: COLOR.door,
   ring: COLOR.ring,
+  // Les quatre zones qui modifient le mouvement (0.12.0) : des couleurs de sens, elles aussi hors de portée de l'ambiance.
+  updraft: COLOR.updraft,
+  drift: COLOR.drift,
+  rocket: COLOR.rocket,
+  brake: COLOR.brake,
 };
 
 /** Les quatre teintes nouvelles du lot 2 : surface de rebond, paroi cassable, porte, anneau de précision. */
 const LOT2: Record<string, number> = { bounce: COLOR.bounce, smash: COLOR.smash, door: COLOR.door, ring: COLOR.ring };
+
+/** Les quatre teintes des zones : courant ascendant, dérive, couloir d'accélération, freinage. */
+const ZONES: Record<string, number> = { updraft: COLOR.updraft, drift: COLOR.drift, rocket: COLOR.rocket, brake: COLOR.brake };
 
 const FIELDS = Object.keys(PALETTES.biome1) as (keyof Palette)[];
 
@@ -125,8 +133,8 @@ describe('la teinte de la fenêtre de lâcher', () => {
 });
 
 describe('les teintes des obstacles à comportement et des anneaux', () => {
-  /** Les couleurs qui portent un sens depuis avant le lot 2 : tout `SPECIES` sauf ses quatre nouvelles. */
-  const OLD = Object.entries(SPECIES).filter(([name]) => !(name in LOT2));
+  /** Les couleurs qui portent un sens depuis avant le lot 2 : tout `SPECIES` sauf ses quatre nouvelles et les zones. */
+  const OLD = Object.entries(SPECIES).filter(([name]) => !(name in LOT2) && !(name in ZONES));
 
   it('sont à plus de 40 de toute couleur d\'espèce de prise, d\'étoile et d\'obstacle solide : un coup d\'œil les distingue', () => {
     expect(OLD.length).toBeGreaterThan(8);
@@ -165,6 +173,68 @@ describe('les teintes des obstacles à comportement et des anneaux', () => {
       expect(Number.isInteger(color), tone).toBe(true);
       expect(Math.max(...channels(color)), tone).toBeGreaterThanOrEqual(0xe0);
     }
+  });
+});
+
+describe('les teintes des zones qui modifient le mouvement', () => {
+  /** Tout ce qui porte un sens avant elles : les espèces de prises, les étoiles, les obstacles, et les teintes du lot 2. */
+  const BEFORE = Object.entries(SPECIES).filter(([name]) => !(name in ZONES));
+
+  it('sont à plus de 40 de toute couleur d\'espèce de prise, d\'étoile, d\'obstacle et d\'anneau : un coup d\'œil les distingue', () => {
+    expect(BEFORE.length).toBeGreaterThan(12);
+    for (const [tone, color] of Object.entries(ZONES)) {
+      for (const [name, species] of BEFORE) {
+        expect(color, `${tone} / ${name}`).not.toBe(species);
+        expect(distance(color, species), `${tone} / ${name}`).toBeGreaterThan(40);
+      }
+    }
+  });
+
+  it('sont franchement distinctes entre elles : un courant ne passe pas pour une dérive, ni un couloir pour un freinage', () => {
+    const entries = Object.entries(ZONES);
+    for (let i = 0; i < entries.length; i += 1) {
+      for (let j = i + 1; j < entries.length; j += 1) expect(distance(entries[i]![1], entries[j]![1]), `${entries[i]![0]} / ${entries[j]![0]}`).toBeGreaterThan(60);
+    }
+  });
+
+  it('sont loin des teintes chaudes du lâcher parfait, qui se posent sur le personnage et sa corde', () => {
+    for (const [tone, color] of Object.entries(ZONES)) {
+      for (const warm of [COLOR.release, COLOR.releaseHalo]) expect(distance(color, warm), tone).toBeGreaterThan(40);
+    }
+  });
+
+  it('se voient sur chaque ambiance : ni le halo, ni le cœur, ni la couleur d\'effet d\'une famille ne leur ressemble', () => {
+    for (const family of FAMILIES) {
+      const palette = PALETTES[family];
+      for (const [tone, color] of Object.entries(ZONES)) {
+        for (const field of ['halo', 'tube', 'pale', 'accent', 'effectA', 'effectB', 'effectC'] as const) expect(distance(palette[field], color), `${family}.${field} / ${tone}`).toBeGreaterThan(40);
+      }
+    }
+  });
+
+  it('sont des 0xRRGGBB vifs ou lumineux : un néon, pas une teinte éteinte (au moins un canal à 0xe0)', () => {
+    for (const [tone, color] of Object.entries(ZONES)) {
+      expect(Number.isInteger(color), tone).toBe(true);
+      expect(Math.max(...channels(color)), tone).toBeGreaterThanOrEqual(0xe0);
+    }
+  });
+
+  it('disent la nature de la zone : le courant est froid et clair, la dérive verte, le couloir chaud, le freinage froid et pâle', () => {
+    const [ur = 0, ug = 0, ub = 0] = channels(COLOR.updraft);
+    // Froid : le rouge est le canal le plus faible ; clair : les deux autres sont hauts.
+    expect(ur).toBeLessThan(Math.min(ug, ub));
+    expect(Math.min(ug, ub)).toBeGreaterThan(0xc0);
+    const [dr = 0, dg = 0, db = 0] = channels(COLOR.drift);
+    expect(dg).toBeGreaterThan(Math.max(dr, db));
+    const [rr = 0, rg = 0, rb = 0] = channels(COLOR.rocket);
+    expect(rr).toBeGreaterThanOrEqual(rg);
+    expect(rg).toBeGreaterThan(rb);
+    // Chaud et vif : loin du cyan du propulseur et du vert d'eau du lanceur, qui sont les teintes du « ça pousse » d'avant.
+    for (const cool of [COLOR.booster, COLOR.launcher]) expect(distance(COLOR.rocket, cool)).toBeGreaterThan(150);
+    const [br = 0, bg = 0, bb = 0] = channels(COLOR.brake);
+    // Pâle : le canal le plus faible est déjà haut ; froid : le bleu domine.
+    expect(Math.min(br, bg, bb)).toBeGreaterThan(0x80);
+    expect(bb).toBeGreaterThanOrEqual(Math.max(br, bg));
   });
 });
 

@@ -5,8 +5,9 @@ import type { LevelOutcome, Profile, RunOutcome } from '../meta/profile';
 import type { LevelResult } from '../meta/traversee';
 import { PULL_MAX } from '../sim/launcher';
 import { obstacleKind } from '../sim/obstacles';
+import { ZONE_RAMP, zoneAt } from '../sim/physics';
 import { RING_CENTRE_RATIO, WORLD_HALF_WIDTH, canSmash, multiplier } from '../sim/rules';
-import type { Anchor, AnchorKind, Obstacle, RuleEvent, SimState } from '../sim/state';
+import type { Anchor, AnchorKind, Obstacle, RuleEvent, SimState, Zone } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
 import { pauseRect, type ButtonId, type ButtonRect } from './buttons';
 import type { Camera, ViewBounds } from './camera';
@@ -21,6 +22,37 @@ import { Screens, type OverlayView } from './screens';
 import { SKIN, crackPattern, doorLook, ringPhase, springTeeth, type Crack, type DoorLook } from './skins';
 import { bandWidth, cupRadius, cupTips, mixColor, pullRatio, traceCup } from './sling';
 import { COLOR, GlowText, PALETTES, makeText, readSafeInset, starPoints, type Palette } from './style';
+import {
+  CHEVRON_FADE,
+  STREAK_TIERS,
+  ZONE_CORE,
+  ZONE_INSIDE_BOOST,
+  ZONE_TONE,
+  brakeLine,
+  brakeLineCount,
+  buildKit,
+  chevronAlong,
+  chevronCount,
+  chevronShape,
+  clipBox,
+  edgeFade,
+  frameBox,
+  frameBreadth,
+  frameLength,
+  framePoint,
+  levelOf,
+  makeFrame,
+  placeFrame,
+  streakSpan,
+  waveLight,
+  type BrakeLine,
+  type Box,
+  type Point,
+  type Span,
+  type StreakKind,
+  type ZoneFrame,
+  type ZoneKit,
+} from './zones';
 
 /**
  * Rendu PixiJS en néon minimaliste : formes et textes, aucun asset.
@@ -54,6 +86,15 @@ import { COLOR, GlowText, PALETTES, makeText, readSafeInset, starPoints, type Pa
  * s'anime se lit du pas de simulation (cycle d'une porte), de l'état (vitesse, traversée en cours) ou du numéro de l'obstacle
  * (fissures) : jamais de l'horloge de l'écran, pour que chaque capture soit reproductible. Les obstacles solides, eux, sont dessinés
  * exactement comme avant. Un rebond, un fracas ou un anneau laisse aussi un éclat bref au personnage (voir `effects.ts`).
+ *
+ * Les zones qui modifient le mouvement (courant ascendant, dérive, couloir d'accélération, freinage) se dessinent comme des champs de
+ * lumière plus que comme des objets, sous les obstacles et les anneaux, au-dessus du décor : un remplissage à peine visible, et dedans des
+ * traits qui disent la direction, chaque espèce avec son motif et sa teinte (voir `zones.ts`). Le courant ascendant : des traînées qui montent
+ * à trois vitesses et des flèches sur ses bords. La dérive : des traînées horizontales qui filent dans le sens de la poussée, seulement dans sa
+ * bande, et un liseré net en haut et en bas (c'est lui qui la distingue du vent, dont les traînées couvrent tout l'écran). Le couloir
+ * d'accélération : des chevrons serrés qui défilent vite, un contour net, une sortie barrée d'un trait lumineux et de chevrons qui s'ouvrent.
+ * Le freinage : de fines bandes pâles, lentes, qui se resserrent vers le haut, rien qui pousse. Le défilement lit l'horloge des effets
+ * (temps réel), comme les traînées du vent : purement visuel. Dans une zone, le personnage allume ses traits d'un cran.
  *
  * Deux aides du tutoriel se dessinent ici, discrètement. La fenêtre de lâcher
  * (`inReleaseWindow`) : tant que lâcher serait parfait, la corde et le halo du
@@ -276,6 +317,74 @@ const RING_ACTIVE_HALO = 1.8;
 const RING_TRACE_WIDTH = 1.5;
 
 /**
+ * Zones qui modifient le mouvement. Épaisseurs en pixels CSS, opacités de 0 à 1, longueurs en mètres (elles suivent le zoom), intensités de
+ * halo relatives à celle du tube ordinaire. Un remplissage très pâle (plus pâle à moins d'une rampe du bord, là où la poussée monte
+ * en douceur : `ZONE_RAMP`), des traits qui défilent dedans, et un contour dont la netteté dit l'espèce : très discret pour un courant,
+ * franc pour un couloir, tireté pour le freinage.
+ */
+const ZONE_FILL_EDGE = 0.035;
+const ZONE_FILL_CORE = 0.085;
+/** La rampe d'un courant se dessine en trois marches concentriques : la poussée monte en douceur vers l'intérieur. */
+const ZONE_RAMP_STEPS = 3;
+/** Contour très discret d'un courant ascendant. */
+const UPDRAFT_OUTLINE_WIDTH = 1;
+const UPDRAFT_OUTLINE_ALPHA = 0.4;
+/** Halo des traînées les plus vives. */
+const STREAK_HALO = 0.5;
+/**
+ * Flèches fixes d'un courant, que la lumière parcourt dans le sens de la poussée : opacité par niveau de lumière (du plus éteint au plus vif),
+ * épaisseur, tours de la vague par seconde, halo du niveau le plus vif, et rapport de la profondeur de la pointe à la demi-largeur.
+ */
+const ARROW_ALPHAS: readonly number[] = [0.25, 0.55, 0.95];
+const ARROW_WIDTH = 1.75;
+const ARROW_HZ = 0.5;
+const ARROW_HALO = 0.5;
+const ARROW_DEPTH_RATIO = 1;
+/** Courant ascendant : une flèche tous les 1,6 m sur chacun de ses bords, à 0,3 m du bord ; demi-largeur 0,13 m, au moins 3,5 pixels. */
+const UPDRAFT_ARROW_SPACING = 1.6;
+const UPDRAFT_ARROW_INSET = 0.3;
+const UPDRAFT_ARROW_HALF = 0.17;
+const UPDRAFT_ARROW_MIN_HALF = 4.5;
+/** Dérive : une rangée de flèches au milieu de la bande, plus grandes ; liseré net sur les deux bords longs, et petits traits en travers à ses extrémités. */
+const DRIFT_ARROW_SPACING = 1.6;
+const DRIFT_ARROW_HALF = 0.2;
+const DRIFT_ARROW_MIN_HALF = 4.5;
+const DRIFT_EDGE_WIDTH = 2;
+const DRIFT_EDGE_ALPHA = 0.85;
+const DRIFT_EDGE_HALO = 0.6;
+const DRIFT_CAP_ALPHA = 0.4;
+/** Couloir d'accélération : le remplissage s'allume vers la sortie (quatre bandes), le contour est net, les chevrons ont quatre niveaux d'opacité (fondus aux deux bouts). */
+const ROCKET_BANDS = 4;
+const ROCKET_FILL_LOW = 0.035;
+const ROCKET_FILL_HIGH = 0.11;
+const ROCKET_EDGE_WIDTH = 1.75;
+const ROCKET_EDGE_ALPHA = 0.9;
+const ROCKET_EDGE_HALO = 0.6;
+const ROCKET_CHEVRON_ALPHAS: readonly number[] = [0.12, 0.35, 0.65, 1];
+const ROCKET_CHEVRON_WIDTH = 2;
+const ROCKET_CHEVRON_HALO = 0.7;
+const ROCKET_CHEVRON_INSET = 0.2;
+const ROCKET_CHEVRON_DEPTH = 0.3;
+/** La sortie du couloir : un trait épais et lumineux, et deux bras qui s'ouvrent au-delà, de chaque coin vers l'extérieur (longueur le long de la poussée et écart en travers, en mètres). */
+const ROCKET_EXIT_WIDTH = 3;
+const ROCKET_EXIT_HALO = 1.1;
+const ROCKET_FLARE_RISE = 0.5;
+const ROCKET_FLARE_OPEN = 0.45;
+const ROCKET_FLARE_WIDTH = 2.25;
+const ROCKET_FLARE_ALPHA = 0.85;
+/** Freinage : le remplissage s'épaissit vers le haut (quatre bandes), contour tireté, fines bandes à trois niveaux d'opacité, en retrait des bords. */
+const BRAKE_BANDS = 4;
+const BRAKE_FILL_LOW = 0.025;
+const BRAKE_FILL_HIGH = 0.085;
+const BRAKE_OUTLINE_WIDTH = 1;
+const BRAKE_OUTLINE_ALPHA = 0.4;
+const BRAKE_DASH = 4;
+const BRAKE_GAP = 5;
+const BRAKE_LINE_ALPHAS: readonly number[] = [0.18, 0.38, 0.62];
+const BRAKE_LINE_WIDTH = 1;
+const BRAKE_LINE_INSET = 4;
+
+/**
  * Éclats (rebond, fracas, anneau) : cercle qui s'élargit en s'effaçant à l'endroit du personnage. Épaisseur du trait, halo, et pour un fracas
  * les huit éclats qui partent en étoile, de quelle part du rayon et sur quelle longueur.
  */
@@ -453,6 +562,24 @@ interface AnchorPaint {
   readonly clock: number;
 }
 
+/**
+ * Ce que le dessin d'une zone a besoin de savoir de l'image : le repère de la zone à l'écran, la vue, l'échelle, l'horloge des effets,
+ * l'intensité (un cran de plus quand le personnage y est), ses dimensions en pixels, ses teintes et ce qu'on retient d'elle. Un seul
+ * objet, réécrit pour chaque zone.
+ */
+interface ZonePaint {
+  frame: ZoneFrame;
+  view: ViewBounds;
+  scale: number;
+  clock: number;
+  vivid: number;
+  length: number;
+  breadth: number;
+  tone: number;
+  core: number;
+  kit: ZoneKit;
+}
+
 /** Hauteur à afficher : depuis le toit de départ dans un niveau, absolue en course libre. */
 function shownHeight(state: SimState): number {
   return state.finishY === null ? state.height : Math.max(0, state.height - state.groundY);
@@ -507,6 +634,7 @@ export class Renderer {
   private readonly altitudeLines = new Graphics();
   private readonly altitudeLabelLayer = new Container();
   private readonly windStreaks = new Graphics();
+  private readonly zoneField = new Graphics();
   private readonly finishLine = new Graphics();
   private readonly rings = new Graphics();
   private readonly obstacles = new Graphics();
@@ -581,6 +709,30 @@ export class Renderer {
   private readonly ringLots: Record<'libre' | 'traverse' | 'centre' | 'prise', RingSpot[]> = { libre: [], traverse: [], centre: [], prise: [] };
   /** Motif de fissures de chaque paroi cassable rencontrée, par numéro d'obstacle. */
   private readonly crackCache = new Map<number, Crack[]>();
+  /** Ce que le rendu retient de chaque zone (sens, dimensions, traînées), par zone : il s'oublie avec elle. Et les objets de travail de leur dessin, réutilisés d'une image à l'autre. */
+  private readonly zoneKits = new WeakMap<Zone, ZoneKit>();
+  private readonly zonePaint: ZonePaint = {
+    frame: makeFrame(),
+    view: { left: 0, right: 0, top: 0, bottom: 0 },
+    scale: 1,
+    clock: 0,
+    vivid: 1,
+    length: 0,
+    breadth: 0,
+    tone: 0,
+    core: 0,
+    kit: buildKit({ id: 0, kind: 'ascendant', dir: { x: 0, y: 1 }, x0: 0, y0: 0, x1: 1, y1: 1 }),
+  };
+  private readonly zoneBox: Box = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly zoneSpan: Span = { from: 0, to: 0 };
+  private readonly zoneLine: BrakeLine = { along: 0, light: 0 };
+  private readonly zoneFrom: Point = { x: 0, y: 0 };
+  private readonly zoneTo: Point = { x: 0, y: 0 };
+  private readonly zoneChevron: readonly [Point, Point, Point] = [
+    { x: 0, y: 0 },
+    { x: 0, y: 0 },
+    { x: 0, y: 0 },
+  ];
 
   private constructor(app: Application) {
     this.app = app;
@@ -604,6 +756,7 @@ export class Renderer {
       this.altitudeLines,
       this.altitudeLabelLayer,
       this.windStreaks,
+      this.zoneField,
       this.finishLine,
       this.finishLabel,
       this.rings,
@@ -689,6 +842,7 @@ export class Renderer {
     this.drawCityEdges(camera, view);
     this.drawAltitude(state, camera, view);
     this.drawWind(effects, state.env.wind.x, view);
+    this.drawZones(state, camera, view, effects);
     this.drawFinish(state, camera, view);
     this.drawRings(state, camera, view);
     this.drawObstacles(state, camera, view, tuning);
@@ -902,6 +1056,277 @@ export class Renderer {
       },
       { color: this.palette.pale, halo: this.palette.pale, width: WIND_WIDTH, alpha: WIND_ALPHA, strength: 0.6, spread: 0.7, cap: 'round' },
     );
+  }
+
+  /**
+   * Zones qui modifient le mouvement : un seul tracé pour toutes, sous les obstacles et les anneaux. Chaque zone se dessine dans son
+   * propre repère (voir `zones.ts`), rogné à ce que l'écran montre. Les zones hors de la vue ne coûtent rien. Le défilement lit l'horloge
+   * des effets ; la zone où se trouve le personnage allume ses traits d'un cran.
+   */
+  private drawZones(state: SimState, camera: Camera, view: ViewBounds, effects: Effects): void {
+    const g = this.zoneField.clear();
+    if (state.zones.length === 0) return;
+    const inside = zoneAt(state.zones, state.hero.pos);
+    const scale = camera.scale;
+    const p = this.zonePaint;
+    p.view = view;
+    p.scale = scale;
+    p.clock = effects.clock;
+    for (const zone of state.zones) {
+      const topLeft = camera.worldToScreen({ x: zone.x0, y: zone.y1 });
+      const width = (zone.x1 - zone.x0) * scale;
+      const height = (zone.y1 - zone.y0) * scale;
+      // Hors de la vue, ni le tracé ni son halo ne servent.
+      if (topLeft.x + width < view.left - CULL_MARGIN || topLeft.x > view.right + CULL_MARGIN || topLeft.y + height < view.top - CULL_MARGIN || topLeft.y > view.bottom + CULL_MARGIN) continue;
+      const kit = this.kitOf(zone);
+      p.kit = kit;
+      p.frame = placeFrame(p.frame, topLeft.x, topLeft.y, width, height, kit.flow);
+      p.length = frameLength(p.frame);
+      p.breadth = frameBreadth(p.frame);
+      p.vivid = zone === inside ? ZONE_INSIDE_BOOST : 1;
+      p.tone = ZONE_TONE[zone.kind];
+      p.core = ZONE_CORE[zone.kind];
+      switch (zone.kind) {
+        case 'ascendant':
+          this.paintUpdraft(g, p);
+          break;
+        case 'lateral':
+          this.paintDrift(g, p);
+          break;
+        case 'acceleration':
+          this.paintRocket(g, p);
+          break;
+        case 'freinage':
+          this.paintBrake(g, p);
+          break;
+      }
+    }
+  }
+
+  /** Ce que le rendu retient de la zone (sens, dimensions, traînées) : calculé une fois, tant que la zone existe. */
+  private kitOf(zone: Zone): ZoneKit {
+    let kit = this.zoneKits.get(zone);
+    if (!kit) {
+      kit = buildKit(zone);
+      this.zoneKits.set(zone, kit);
+    }
+    return kit;
+  }
+
+  /** Remplit, d'une teinte très pâle, la bande de la zone entre `from` et `to` le long de sa poussée et `left` et `right` en travers, rognée à la vue. */
+  private fillBand(g: Graphics, p: ZonePaint, from: number, to: number, left: number, right: number, alpha: number): void {
+    const box = frameBox(p.frame, from, to, left, right, this.zoneBox);
+    if (!clipBox(box, p.view, box)) return;
+    g.rect(box.x, box.y, box.width, box.height).fill({ color: p.tone, alpha: Math.min(1, alpha * p.vivid) });
+  }
+
+  /** Remplissage d'un courant : très pâle, un peu plus franc à plus d'une rampe des bords, là où la poussée est pleine (voir `zoneAcceleration`). */
+  private fillRamped(g: Graphics, p: ZonePaint): void {
+    const ramp = Math.min(ZONE_RAMP * p.scale, p.breadth / 2, p.length / 2);
+    this.fillBand(g, p, 0, p.length, 0, p.breadth, ZONE_FILL_EDGE);
+    for (let step = 1; step <= ZONE_RAMP_STEPS; step += 1) {
+      const inset = (ramp * step) / ZONE_RAMP_STEPS;
+      this.fillBand(g, p, inset, p.length - inset, inset, p.breadth - inset, (ZONE_FILL_CORE - ZONE_FILL_EDGE) / ZONE_RAMP_STEPS);
+    }
+  }
+
+  /** Ajoute au tracé le segment de la zone à la position `across` en travers, d'un bout à l'autre de sa poussée. */
+  private traceLine(target: Graphics, p: ZonePaint, across: number): void {
+    framePoint(p.frame, 0, across, this.zoneFrom);
+    framePoint(p.frame, p.length, across, this.zoneTo);
+    target.moveTo(this.zoneFrom.x, this.zoneFrom.y).lineTo(this.zoneTo.x, this.zoneTo.y);
+  }
+
+  /** Ajoute au tracé le segment en travers de la zone, à la distance `along` de son entrée. */
+  private traceCross(target: Graphics, p: ZonePaint, along: number): void {
+    framePoint(p.frame, along, 0, this.zoneFrom);
+    framePoint(p.frame, along, p.breadth, this.zoneTo);
+    target.moveTo(this.zoneFrom.x, this.zoneFrom.y).lineTo(this.zoneTo.x, this.zoneTo.y);
+  }
+
+  /** Ajoute au tracé le chevron de centre (`along`, `across`), pointe dans le sens de la poussée. */
+  private traceChevron(target: Graphics, p: ZonePaint, along: number, across: number, depth: number, half: number): void {
+    const points = this.zoneChevron;
+    chevronShape(p.frame, along, across, depth, half, points);
+    target.moveTo(points[0].x, points[0].y).lineTo(points[1].x, points[1].y).lineTo(points[2].x, points[2].y);
+  }
+
+  /** Traînées d'un courant, rang par rang : chaque rang a sa vitesse, sa longueur, son épaisseur ; le plus vif a un halo. Rognées aux limites de la zone. */
+  private paintStreaks(g: Graphics, p: ZonePaint, kind: StreakKind): void {
+    STREAK_TIERS[kind].forEach((tier, index) => {
+      neonStroke(
+        g,
+        (target) => {
+          for (const mote of p.kit.motes) {
+            if (mote.tier !== index || !streakSpan(mote, tier, p.clock, p.kit.lengthMeters, this.zoneSpan)) continue;
+            const across = mote.lane * p.breadth;
+            framePoint(p.frame, this.zoneSpan.from * p.length, across, this.zoneFrom);
+            framePoint(p.frame, this.zoneSpan.to * p.length, across, this.zoneTo);
+            target.moveTo(this.zoneFrom.x, this.zoneFrom.y).lineTo(this.zoneTo.x, this.zoneTo.y);
+          }
+        },
+        { color: tier.glow ? p.core : p.tone, halo: p.tone, width: tier.width, alpha: Math.min(1, tier.alpha * p.vivid), strength: tier.glow ? STREAK_HALO * this.species : 0, cap: 'round' },
+      );
+    });
+  }
+
+  /**
+   * Flèches fixes, en une ou deux rangées le long de la poussée, que la lumière parcourt dans son sens (voir `waveLight`) : la direction se
+   * lit même quand rien ne défile. `rows` à 1 : une rangée au milieu ; à 2 : une sur chaque bord, à `inset` pixels.
+   */
+  private paintArrows(g: Graphics, p: ZonePaint, rows: 1 | 2, inset: number, spacingMeters: number, halfMeters: number, minHalf: number): void {
+    const count = Math.max(2, Math.round(p.kit.lengthMeters / spacingMeters));
+    const step = p.length / count;
+    const half = Math.max(minHalf, halfMeters * p.scale);
+    const levels = ARROW_ALPHAS.length;
+    ARROW_ALPHAS.forEach((alpha, level) => {
+      neonStroke(
+        g,
+        (target) => {
+          for (let row = 0; row < rows; row += 1) {
+            const across = rows === 1 ? p.breadth / 2 : row === 0 ? inset : p.breadth - inset;
+            for (let i = 0; i < count; i += 1) {
+              if (levelOf(waveLight(i, count, p.clock, ARROW_HZ), levels) === level) this.traceChevron(target, p, (i + 0.5) * step, across, half * ARROW_DEPTH_RATIO, half);
+            }
+          }
+        },
+        { color: p.core, halo: p.tone, width: ARROW_WIDTH, alpha: Math.min(1, alpha * p.vivid), strength: level === levels - 1 ? ARROW_HALO * this.species : 0, cap: 'round', join: 'round' },
+      );
+    });
+  }
+
+  /**
+   * Courant ascendant : une colonne à peine teintée au contour très discret, des traînées qui montent à trois vitesses (elles bouclent en
+   * haut et renaissent en bas) et, sur chaque bord, des flèches vers le haut que la lumière parcourt de bas en haut.
+   */
+  private paintUpdraft(g: Graphics, p: ZonePaint): void {
+    this.fillRamped(g, p);
+    const box = frameBox(p.frame, 0, p.length, 0, p.breadth, this.zoneBox);
+    g.rect(box.x, box.y, box.width, box.height).stroke({ width: UPDRAFT_OUTLINE_WIDTH, color: p.tone, alpha: Math.min(1, UPDRAFT_OUTLINE_ALPHA * p.vivid) });
+    this.paintStreaks(g, p, 'ascendant');
+    this.paintArrows(g, p, 2, Math.min(UPDRAFT_ARROW_INSET * p.scale, p.breadth * 0.2), UPDRAFT_ARROW_SPACING, UPDRAFT_ARROW_HALF, UPDRAFT_ARROW_MIN_HALF);
+  }
+
+  /**
+   * Dérive : une bande dont les limites se voient (un liseré net en haut et en bas, un petit trait à chaque bout), des traînées plus
+   * longues et plus rapides que celles du vent, seulement dans la bande, et une rangée de flèches qui pointent dans le sens de la
+   * poussée. C'est la bande, pas l'écran entier, qui file : ce n'est pas le vent.
+   */
+  private paintDrift(g: Graphics, p: ZonePaint): void {
+    this.fillRamped(g, p);
+    this.paintStreaks(g, p, 'lateral');
+    this.paintArrows(g, p, 1, 0, DRIFT_ARROW_SPACING, DRIFT_ARROW_HALF, DRIFT_ARROW_MIN_HALF);
+    const edge = { color: p.core, halo: p.tone, width: DRIFT_EDGE_WIDTH, alpha: Math.min(1, DRIFT_EDGE_ALPHA * p.vivid), strength: DRIFT_EDGE_HALO * this.species, cap: 'round' as const };
+    neonStroke(
+      g,
+      (target) => {
+        this.traceLine(target, p, 0);
+        this.traceLine(target, p, p.breadth);
+      },
+      edge,
+    );
+    neonStroke(
+      g,
+      (target) => {
+        this.traceCross(target, p, 0);
+        this.traceCross(target, p, p.length);
+      },
+      { color: p.tone, halo: p.tone, width: 1, alpha: Math.min(1, DRIFT_CAP_ALPHA * p.vivid), strength: 0 },
+    );
+  }
+
+  /**
+   * Couloir d'accélération : un remplissage qui s'allume vers la sortie, des chevrons serrés qui défilent vite dans le sens de la poussée
+   * (fondus aux deux bouts), un contour net, et la sortie marquée d'un trait épais et lumineux, suivi de chevrons qui s'ouvrent : on
+   * voit de loin où le couloir finit.
+   */
+  private paintRocket(g: Graphics, p: ZonePaint): void {
+    const { length, breadth } = p;
+    for (let band = 0; band < ROCKET_BANDS; band += 1) {
+      const t = band / (ROCKET_BANDS - 1);
+      this.fillBand(g, p, (length * band) / ROCKET_BANDS, (length * (band + 1)) / ROCKET_BANDS, 0, breadth, ROCKET_FILL_LOW + (ROCKET_FILL_HIGH - ROCKET_FILL_LOW) * t);
+    }
+    const inset = Math.min(ROCKET_CHEVRON_INSET * p.scale, breadth * 0.12);
+    const half = breadth / 2 - inset;
+    const depth = ROCKET_CHEVRON_DEPTH * p.scale;
+    const count = chevronCount(p.kit.lengthMeters);
+    const levels = ROCKET_CHEVRON_ALPHAS.length;
+    ROCKET_CHEVRON_ALPHAS.forEach((alpha, level) => {
+      neonStroke(
+        g,
+        (target) => {
+          for (let k = 0; k < count; k += 1) {
+            const meters = chevronAlong(k, p.clock);
+            if (meters >= p.kit.lengthMeters) continue;
+            const where = meters / p.kit.lengthMeters;
+            if (levelOf(edgeFade(where, CHEVRON_FADE), levels) === level) this.traceChevron(target, p, where * length, breadth / 2, depth, half);
+          }
+        },
+        { color: level === levels - 1 ? p.core : p.tone, halo: p.tone, width: ROCKET_CHEVRON_WIDTH, alpha: Math.min(1, alpha * p.vivid), strength: level === levels - 1 ? ROCKET_CHEVRON_HALO * this.species : 0, cap: 'round', join: 'round' },
+      );
+    });
+    // Le contour net : les deux côtés et l'entrée ; la sortie a son propre trait.
+    neonStroke(
+      g,
+      (target) => {
+        this.traceLine(target, p, 0);
+        this.traceLine(target, p, breadth);
+        this.traceCross(target, p, 0);
+      },
+      { color: p.tone, halo: p.tone, width: ROCKET_EDGE_WIDTH, alpha: Math.min(1, ROCKET_EDGE_ALPHA * p.vivid), strength: ROCKET_EDGE_HALO * this.species, cap: 'round' },
+    );
+    neonStroke(g, (target) => this.traceCross(target, p, length), { color: p.core, halo: p.tone, width: ROCKET_EXIT_WIDTH, alpha: Math.min(1, p.vivid), strength: ROCKET_EXIT_HALO * this.species, cap: 'round' });
+    neonStroke(
+      g,
+      (target) => {
+        const rise = length + ROCKET_FLARE_RISE * p.scale;
+        const open = ROCKET_FLARE_OPEN * p.scale;
+        framePoint(p.frame, length, 0, this.zoneFrom);
+        framePoint(p.frame, rise, -open, this.zoneTo);
+        target.moveTo(this.zoneFrom.x, this.zoneFrom.y).lineTo(this.zoneTo.x, this.zoneTo.y);
+        framePoint(p.frame, length, breadth, this.zoneFrom);
+        framePoint(p.frame, rise, breadth + open, this.zoneTo);
+        target.moveTo(this.zoneFrom.x, this.zoneFrom.y).lineTo(this.zoneTo.x, this.zoneTo.y);
+      },
+      { color: p.core, halo: p.tone, width: ROCKET_FLARE_WIDTH, alpha: Math.min(1, ROCKET_FLARE_ALPHA * p.vivid), strength: ROCKET_EXIT_HALO * this.species, cap: 'round' },
+    );
+  }
+
+  /**
+   * Freinage : une matière calme. Un remplissage qui s'épaissit vers le haut, un contour tireté à peine visible, de fines bandes pâles,
+   * plus serrées en haut, qui descendent très lentement : à l'inverse de ce qui monte, rien n'y pousse, rien n'y file.
+   */
+  private paintBrake(g: Graphics, p: ZonePaint): void {
+    const { length, breadth } = p;
+    for (let band = 0; band < BRAKE_BANDS; band += 1) {
+      const t = band / (BRAKE_BANDS - 1);
+      this.fillBand(g, p, (length * band) / BRAKE_BANDS, (length * (band + 1)) / BRAKE_BANDS, 0, breadth, BRAKE_FILL_LOW + (BRAKE_FILL_HIGH - BRAKE_FILL_LOW) * t);
+    }
+    const box = frameBox(p.frame, 0, length, 0, breadth, this.zoneBox);
+    const { x, y, width, height } = box;
+    dashedLine(g, { x, y }, { x: x + width, y }, BRAKE_DASH, BRAKE_GAP);
+    dashedLine(g, { x: x + width, y }, { x: x + width, y: y + height }, BRAKE_DASH, BRAKE_GAP);
+    dashedLine(g, { x: x + width, y: y + height }, { x, y: y + height }, BRAKE_DASH, BRAKE_GAP);
+    dashedLine(g, { x, y: y + height }, { x, y }, BRAKE_DASH, BRAKE_GAP);
+    g.stroke({ width: BRAKE_OUTLINE_WIDTH, color: p.tone, alpha: Math.min(1, BRAKE_OUTLINE_ALPHA * p.vivid) });
+    const inset = Math.min(BRAKE_LINE_INSET, breadth * 0.1);
+    const count = brakeLineCount(p.kit.lengthMeters);
+    const levels = BRAKE_LINE_ALPHAS.length;
+    BRAKE_LINE_ALPHAS.forEach((alpha, level) => {
+      neonStroke(
+        g,
+        (target) => {
+          for (let k = 0; k < count; k += 1) {
+            const line = brakeLine(k, count, p.clock, this.zoneLine);
+            if (line.light < 0.02 || levelOf(line.light, levels) !== level) continue;
+            framePoint(p.frame, line.along * length, inset, this.zoneFrom);
+            framePoint(p.frame, line.along * length, breadth - inset, this.zoneTo);
+            target.moveTo(this.zoneFrom.x, this.zoneFrom.y).lineTo(this.zoneTo.x, this.zoneTo.y);
+          }
+        },
+        { color: level === levels - 1 ? p.core : p.tone, halo: p.tone, width: BRAKE_LINE_WIDTH, alpha: Math.min(1, alpha * p.vivid), strength: 0 },
+      );
+    });
   }
 
   /** Étiquette numéro `slot` du réservoir ; le réservoir grandit seulement si l'écran montre plus de lignes. */

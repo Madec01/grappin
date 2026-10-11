@@ -15,8 +15,9 @@ import { DEFAULT_TUNING } from '../src/sim/tuning';
  * automatique, la pause fige la partie et se reprend sans lâcher la corde, les
  * réglages du titre (Sons, Départ) survivent au rechargement, la fenêtre de
  * lâcher s'ouvre puis se referme pendant un balancement, et le premier conseil
- * du tutoriel apparaît à la première accroche, et les quatre scènes de démonstration du lot 2 (rebond, paroi cassable, porte, anneau)
- * se jouent et se dessinent sans erreur. Tout passe par `window.__grappin`.
+ * du tutoriel apparaît à la première accroche, les quatre scènes de démonstration du lot 2 (rebond, paroi cassable, porte, anneau)
+ * se jouent et se dessinent sans erreur, et les trois scènes de zones (courant ascendant, dérive, fusée) chargent leurs zones et voient le
+ * pilote y entrer. Tout passe par `window.__grappin`.
  */
 
 const CENTER = { x: 195, y: 422 };
@@ -405,6 +406,82 @@ test('scène « anneau » : le pilote automatique traverse au moins un anneau, e
   expect((await state(page)).scene).toBe('anneau');
   expect(errors).toEqual([]);
 });
+
+/**
+ * Une image du pilote pour une page à l'horloge figée (`page.clock`), décidée côté test : mêmes règles que le pilote du banc de captures
+ * (`scripts/capture.ts`) et que le robot (`src/sim/robot.ts`). Il accroche dès qu'un point est visé, sauf s'il est porté vers le haut (un
+ * courant, une fusée) et que le point visé est sous lui : il monte d'abord, comme un joueur. Il lâche dans la fenêtre du lâcher parfait,
+ * ou, la fenêtre étant étroite sur la première oscillation, dès qu'il va assez vite (ou que la corde est au plus court) en montant à
+ * 30° à 60° ; jamais plus de 2,5 s tenu. `nowMs` est le temps simulé écoulé. Rend l'état vu avant l'action.
+ */
+interface PilotMemory {
+  holdSince: number;
+}
+
+async function pilotFrame(page: Page, memory: PilotMemory, nowMs: number): Promise<Awaited<ReturnType<typeof state>>> {
+  const s = await state(page);
+  if (!s.attached && s.targetId !== null) {
+    const target = (await page.evaluate(() => window.__grappin!.anchors())).find((a) => a.id === s.targetId);
+    const rising = s.vel.y > 1 && target !== undefined && target.y < s.pos.y - 0.5;
+    if (!rising) {
+      await page.evaluate(() => window.__grappin!.press());
+      memory.holdSince = nowMs;
+    }
+  } else if (s.attached && nowMs - memory.holdSince > 80) {
+    const ready = Math.hypot(s.vel.x, s.vel.y) >= 8 || (s.ropeLength !== null && s.ropeLength <= 1.5 + 1e-9);
+    const slope = s.vel.x !== 0 ? s.vel.y / Math.abs(s.vel.x) : Infinity;
+    if (s.releaseWindow || (ready && s.vel.y > 1 && slope > 0.6 && slope < 1.8) || nowMs - memory.holdSince > 2500) await page.evaluate(() => window.__grappin!.release());
+  }
+  return s;
+}
+
+/**
+ * Zones qui modifient le mouvement (0.12.0), trois scènes de démonstration : le courant ascendant, la dérive, la fusée (couloir
+ * d'accélération puis zone de freinage). Chacune se charge avec au moins une zone, et le pilote, mené image par image sur l'horloge figée
+ * de la page (une image dure seize millisecondes : le test ne dépend pas de la vitesse du rendu logiciel), entre dans la zone : `state().zone`
+ * dit l'espèce de celle où se trouve le personnage. Les zones se dessinent à chaque image, sans erreur de console.
+ */
+const ZONE_SCENES = [
+  { scene: 'courant', zone: 'ascendant' },
+  { scene: 'derive', zone: 'lateral' },
+  { scene: 'fusee', zone: 'acceleration' },
+] as const;
+
+for (const { scene, zone } of ZONE_SCENES) {
+  test(`scène « ${scene} » : ?scene=${scene} charge ses zones, et le pilote entre dans la zone « ${zone} »`, async ({ page }) => {
+    const errors = watchErrors(page);
+    await page.clock.install({ time: 0 });
+    await open(page, `/?scene=${scene}&graine=5&fogBaseSpeed=0.1`);
+    await page.clock.pauseAt(60_000);
+    await page.evaluate(() => window.__grappin!.playFree());
+    // L'intro de la scène a le temps de se dessiner, fondus compris, avant que le pilote joue.
+    for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(16);
+    const loaded = await state(page);
+    expect(loaded).toMatchObject({ screen: 'playing', scene, zone: null });
+    expect(loaded.zones).toBeGreaterThanOrEqual(1);
+
+    const memory: PilotMemory = { holdSince: 0 };
+    const seen: (typeof loaded.zone)[] = [];
+    let highest = 0;
+    for (let frame = 0; frame < 400; frame += 1) {
+      await page.clock.runFor(16);
+      const s = await pilotFrame(page, memory, frame * 16);
+      expect(s.screen).toBe('playing');
+      if (s.zone !== seen.at(-1)) seen.push(s.zone);
+      highest = Math.max(highest, s.pos.y);
+      // La fusée : dans le couloir, puis dans le freinage au-dessus (ou au moins au-delà, à plus de 18 m).
+      if (scene === 'fusee' ? seen.includes('freinage') || highest > 18 : seen.includes(zone)) break;
+    }
+    expect(seen, `zones traversées : ${seen.join(', ')}`).toContain(zone);
+    if (scene === 'fusee') {
+      // Le couloir d'abord, puis le freinage ou une hauteur qui prouve qu'il a été franchi.
+      expect(seen.indexOf('acceleration')).toBeGreaterThanOrEqual(0);
+      expect(seen.includes('freinage') || highest > 18).toBe(true);
+      if (seen.includes('freinage')) expect(seen.indexOf('freinage')).toBeGreaterThan(seen.indexOf('acceleration'));
+    }
+    expect(errors).toEqual([]);
+  });
+}
 
 test('progression : une partie rapporte de l\'expérience, le profil survit au rechargement, un talisman s\'équipe', async ({ page }) => {
   const errors = watchErrors(page);

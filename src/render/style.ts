@@ -63,6 +63,17 @@ export const COLOR = {
   smash: 0xff5a1f,
   door: 0x7a5cff,
   ring: 0x3cff66,
+  /**
+   * Zones qui modifient le mouvement (version 0.12.0). Des champs de traînées plus que des objets : chacune sa teinte, loin de toute
+   * espèce de prise, de tout obstacle et de toute ambiance, pour que sa direction se lise d'un coup d'œil. Courant ascendant : menthe
+   * glacée (froid, clair, qui monte). Dérive : vert pomme (une bande qui file de côté, sans rapport avec le vent pâle de l'ambiance).
+   * Couloir d'accélération : or vif (chaud, loin du cyan du propulseur et du vert d'eau du lanceur). Freinage : lilas pâle (calme,
+   * froid, sans rien qui pousse). Aucune n'est ambiante : un test les garde loin de toutes les autres.
+   */
+  updraft: 0x73ebdc,
+  drift: 0x7de12d,
+  rocket: 0xffc800,
+  brake: 0xeb9bff,
 
   /** Interface : textes blancs. */
   text: 0xf4f8ff,

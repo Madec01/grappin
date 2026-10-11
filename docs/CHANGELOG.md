@@ -14,6 +14,7 @@ Suite du lot 2 du brief, section 8 : des zones où le vol change, chacune avec s
 - **La visée, l'ombre prédictive et le vérificateur jouent les zones.** Sous un courant, le vol prédit est joué pas à pas avec la vraie physique, pas par la formule du vol libre : l'ombre montre le vol porté ou dévié, la visée prend le point qu'on atteindra vraiment, et chaque segment à zones est prouvé avec ses zones. Mesuré : 60 segments sur 60 prouvés pour le courant et la fusée, 59 sur 60 pour la dérive ; la vérification coûte 6 à 10 ms par segment au lieu de 4.
 - **Scènes** `?scene=courant`, `?scene=derive`, `?scene=fusee`, prouvées par le vérificateur et grimpées par les deux robots.
 - **Robots** : porté vers le haut, un robot ne rattrape plus un point sous lui, il monte d'abord, comme un joueur.
+- **Habillages des zones** (`render/zones.ts`, pur) : le courant ascendant en menthe glacée, traînées qui montent et flèches sur les bords ; la dérive en vert pomme, traînées horizontales dans la bande seule, liserés haut et bas ; le couloir d'accélération en or vif, chevrons serrés qui défilent, sortie marquée d'un trait et d'un entonnoir ; le freinage en lilas pâle, bandes fines qui se resserrent vers le haut. Les traits sont un cran plus vifs autour du personnage quand il est dans une zone. Quatre couleurs nouvelles, loin des espèces, des obstacles et des ambiances (test). Trois prises de plus au banc de captures (`npm run captures -- <dossier> 5 scenes courant derive fusee` pour des scènes choisies).
 
 ### Modifié
 
