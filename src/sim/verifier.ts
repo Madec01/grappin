@@ -1,4 +1,4 @@
-import { clampLength, distance, scale } from '../core/math/vec2';
+import { clampLength, distance, scale, type Vec2 } from '../core/math/vec2';
 import { isOptional } from './cycles';
 import { LANCEUR_CLEARANCE, launchSet, launchVelocity, pulledPosition } from './launcher';
 import { bestAnchor } from './aim';
@@ -6,9 +6,10 @@ import { STILL, upOf, type Environment } from './environment';
 import { circleBoxGap } from './geometry';
 import type { Segment } from './generator';
 import { provableObstacles } from './obstacles';
+import { flightStep, needsSteps, startFlight } from './flight';
 import { NO_ZONES, constrainVelocity, flightSamples, swingStep, type Body } from './physics';
 import { kickIfSlow } from './rules';
-import type { Anchor, Obstacle, RuleEvent, Zone } from './state';
+import type { Anchor, Obstacle, Ring, RuleEvent, Zone } from './state';
 import type { Tuning } from './tuning';
 
 /**
@@ -31,8 +32,13 @@ import type { Tuning } from './tuning';
  * comptent pas (on les attend ouvertes) ni les parois cassées, les surfaces de
  * rebond et les parois cassables sont tenues pour solides. Les zones (courants,
  * couloir d'accélération, freinage) sont jouées dans les vols et les
- * balancements : un segment sous un courant est prouvé avec le courant.
+ * balancements : un segment sous un courant est prouvé avec le courant. Et
+ * depuis 0.12.1, les vols jouent aussi les rencontres (`flight.ts`) : une
+ * surface de rebond renvoie, une paroi cassable cède si l'on va assez vite, un
+ * anneau pris au centre accélère ; le générateur peut donc EXIGER une de ces
+ * mécaniques, le vérificateur ne prouve le passage qu'avec elle.
  */
+const NO_RINGS: readonly Ring[] = [];
 
 const ENTRY_ROPE = 3;
 const ENTRY_OFFSETS = [-0.5, 0.5] as const;
@@ -73,8 +79,8 @@ function entryState(anchor: Anchor, offset: number, speed: number, anchors: read
   return { body: { pos: context.hero.pos, vel: context.hero.vel }, ropeLength };
 }
 
-/** Une fois accroché à `anchor` depuis `body`, le balancement qui suit évite-t-il les obstacles ? */
-function swingIsClear(anchor: Anchor, body: Body, anchors: readonly Anchor[], obstacles: readonly Obstacle[], tuning: Tuning, env: Environment, zones: readonly Zone[]): boolean {
+/** Une fois accroché à `anchor` depuis `body`, le balancement qui suit évite-t-il les obstacles ? Le robot s'en sert aussi avant d'attraper. */
+export function swingIsClear(anchor: Anchor, body: Body, anchors: readonly Anchor[], obstacles: readonly Obstacle[], tuning: Tuning, env: Environment, zones: readonly Zone[]): boolean {
   // Un lanceur ne se balance pas : il suffit que rien ne gêne autour, jusqu'où la traction recule le personnage.
   if (anchor.kind === 'lanceur') return obstacles.every((box) => circleBoxGap(anchor.pos, LANCEUR_CLEARANCE, box) > 0);
   const ropeLength = Math.max(tuning.ropeMin, distance(body.pos, anchor.pos));
@@ -101,20 +107,39 @@ function swingIsClear(anchor: Anchor, body: Body, anchors: readonly Anchor[], ob
  * en ligne de vue, et dont le balancement qui suit ne heurte aucun obstacle.
  * Le vol s'arrête au premier obstacle touché.
  */
-export function flightCatches(from: Anchor, body: Body, anchors: readonly Anchor[], allObstacles: readonly Obstacle[], tuning: Tuning, env: Environment = STILL, zones: readonly Zone[] = NO_ZONES): number[] {
+export function flightCatches(from: Anchor, body: Body, anchors: readonly Anchor[], allObstacles: readonly Obstacle[], tuning: Tuning, env: Environment = STILL, zones: readonly Zone[] = NO_ZONES, rings: readonly Ring[] = NO_RINGS): number[] {
   const obstacles = provableObstacles(allObstacles);
   const reach = tuning.ropeMax * tuning.verifyCatchRatio;
   // Les prises électriques et à éclipse ne comptent jamais comme sortie : le parcours se prouve sans elles.
   const catchable = anchors.filter((a) => !isOptional(a));
   const caught: number[] = [];
   const rejected = new Set<number>();
-  for (const { pos, vel } of flightSamples(body, tuning.verifyFlightSeconds, FLIGHT_SAMPLE, tuning, env, zones)) {
-    if (obstacles.some((box) => circleBoxGap(pos, tuning.heroRadius, box) <= 0)) break;
-    const best = bestAnchor(catchable, obstacles, { pos, vel }, false, from.id, tuning, env, zones);
-    if (!best || caught.includes(best.id) || rejected.has(best.id)) continue;
-    if (best.pos.y <= from.pos.y + MIN_GAIN || distance(best.pos, pos) > reach) continue;
-    if (swingIsClear(best, { pos, vel }, anchors, obstacles, tuning, env, zones)) caught.push(best.id);
+  const consider = (pos: Vec2, vel: Vec2, standing: readonly Obstacle[]): void => {
+    const best = bestAnchor(catchable, standing, { pos, vel }, false, from.id, tuning, env, zones);
+    if (!best || caught.includes(best.id) || rejected.has(best.id)) return;
+    if (best.pos.y <= from.pos.y + MIN_GAIN || distance(best.pos, pos) > reach) return;
+    if (swingIsClear(best, { pos, vel }, anchors, standing, tuning, env, zones)) caught.push(best.id);
     else rejected.add(best.id);
+  };
+  if (!needsSteps(obstacles, rings, zones)) {
+    // Rien que des solides : la formule fermée du vol libre, et le vol s'arrête au premier obstacle touché.
+    for (const { pos, vel } of flightSamples(body, tuning.verifyFlightSeconds, FLIGHT_SAMPLE, tuning, env)) {
+      if (obstacles.some((box) => circleBoxGap(pos, tuning.heroRadius, box) <= 0)) break;
+      consider(pos, vel, obstacles);
+    }
+    return caught;
+  }
+  // Des rencontres possibles : le vol se joue pas à pas, rebonds, fracas, anneaux et zones compris.
+  const flight = startFlight(body);
+  const stepsPerSample = Math.max(1, Math.round(FLIGHT_SAMPLE / tuning.stepSeconds));
+  const total = Math.round(tuning.verifyFlightSeconds / tuning.stepSeconds);
+  for (let k = 1; k <= total; k += 1) {
+    flightStep(flight, obstacles, rings, zones, tuning, env);
+    if (flight.ended) break;
+    if (k % stepsPerSample !== 0) continue;
+    // Une paroi cassée pendant ce vol ne coupe plus la ligne de vue ni le balancement qui suit.
+    const standing = flight.smashed.size === 0 ? obstacles : obstacles.filter((box) => !flight.smashed.has(box.id));
+    consider(flight.body.pos, flight.body.vel, standing);
   }
   return caught;
 }
@@ -134,6 +159,7 @@ function holdAndRelease(
   tuning: Tuning,
   env: Environment,
   zones: readonly Zone[],
+  rings: readonly Ring[],
 ): boolean {
   const holdSeconds = from.kind === 'fragile' ? Math.min(tuning.verifyHoldSeconds, tuning.fragileSeconds - 2 * tuning.stepSeconds) : tuning.verifyHoldSeconds;
   const maxSteps = Math.round(holdSeconds / tuning.stepSeconds);
@@ -142,7 +168,7 @@ function holdAndRelease(
   for (let k = 0; k <= maxSteps; k += 1) {
     if (k % RELEASE_EVERY === 0) {
       const vel = from.kind === 'booster' ? clampLength(scale(swing.body.vel, tuning.boostFactor), tuning.maxSpeed) : swing.body.vel;
-      for (const id of flightCatches(from, { pos: swing.body.pos, vel }, anchors, obstacles, tuning, env, zones)) reached.add(id);
+      for (const id of flightCatches(from, { pos: swing.body.pos, vel }, anchors, obstacles, tuning, env, zones, rings)) reached.add(id);
       if (satisfied()) return true;
     }
     if (obstacles.some((box) => circleBoxGap(swing.body.pos, tuning.heroRadius, box) <= 0)) break;
@@ -156,17 +182,17 @@ function holdAndRelease(
  * pour une fourche, chaque branche exigée est-elle atteignable avec un élan
  * typique ? Chaque décalage d'arrivée doit réussir.
  */
-export function canExit(from: Anchor, anchors: readonly Anchor[], allObstacles: readonly Obstacle[], required: readonly number[] | null, tuning: Tuning, env: Environment = STILL, zones: readonly Zone[] = NO_ZONES): boolean {
+export function canExit(from: Anchor, anchors: readonly Anchor[], allObstacles: readonly Obstacle[], required: readonly number[] | null, tuning: Tuning, env: Environment = STILL, zones: readonly Zone[] = NO_ZONES, rings: readonly Ring[] = NO_RINGS): boolean {
   const obstacles = provableObstacles(allObstacles);
-  if (from.kind === 'lanceur') return launchExits(from, anchors, obstacles, required, tuning, env, zones);
+  if (from.kind === 'lanceur') return launchExits(from, anchors, obstacles, required, tuning, env, zones, rings);
   for (const offset of ENTRY_OFFSETS) {
     const worst = entryState(from, offset, tuning.kickSpeed, anchors, tuning, env);
-    if (!holdAndRelease(from, worst, anchors, obstacles, null, new Set(), tuning, env, zones)) return false;
+    if (!holdAndRelease(from, worst, anchors, obstacles, null, new Set(), tuning, env, zones, rings)) return false;
   }
   if (!required) return true;
   for (const offset of ENTRY_OFFSETS) {
     const typical = entryState(from, offset, TYPICAL_ENTRY_SPEED, anchors, tuning, env);
-    if (!holdAndRelease(from, typical, anchors, obstacles, required, new Set(), tuning, env, zones)) return false;
+    if (!holdAndRelease(from, typical, anchors, obstacles, required, new Set(), tuning, env, zones, rings)) return false;
   }
   return true;
 }
@@ -177,12 +203,12 @@ export function canExit(from: Anchor, anchors: readonly Anchor[], allObstacles: 
  * qu'un des lancers de l'éventail attrape une sortie (chaque branche exigée,
  * pour une fourche), sans partir d'une position gênée par un obstacle.
  */
-function launchExits(from: Anchor, anchors: readonly Anchor[], obstacles: readonly Obstacle[], required: readonly number[] | null, tuning: Tuning, env: Environment, zones: readonly Zone[]): boolean {
+function launchExits(from: Anchor, anchors: readonly Anchor[], obstacles: readonly Obstacle[], required: readonly number[] | null, tuning: Tuning, env: Environment, zones: readonly Zone[], rings: readonly Ring[]): boolean {
   const reached = new Set<number>();
   for (const pull of launchSet(env)) {
     const pos = pulledPosition(from.pos, pull);
     if (obstacles.some((box) => circleBoxGap(pos, tuning.heroRadius, box) <= 0)) continue;
-    for (const id of flightCatches(from, { pos, vel: launchVelocity(pull, env) }, anchors, obstacles, tuning, env, zones)) reached.add(id);
+    for (const id of flightCatches(from, { pos, vel: launchVelocity(pull, env) }, anchors, obstacles, tuning, env, zones, rings)) reached.add(id);
     if (required ? required.every((id) => reached.has(id)) : reached.size > 0) return true;
   }
   return false;
@@ -202,16 +228,18 @@ export function verifySegment(
   env: Environment = STILL,
   entryEnv: Environment = env,
   contextZones: readonly Zone[] = NO_ZONES,
+  contextRings: readonly Ring[] = NO_RINGS,
 ): boolean {
   const anchors = [...context, ...segment.anchors];
   const obstacles = [...contextObstacles, ...segment.obstacles];
   const zones = segment.zones.length === 0 && contextZones.length === 0 ? NO_ZONES : [...contextZones, ...segment.zones];
+  const rings = segment.rings.length === 0 && contextRings.length === 0 ? NO_RINGS : [...contextRings, ...segment.rings];
   const entry = context.at(-1);
   // Le point d'entrée appartient au segment précédent : il se joue dans ses propres conditions.
-  if (entry && !canExit(entry, anchors, obstacles, null, tuning, entryEnv, zones)) return false;
+  if (entry && !canExit(entry, anchors, obstacles, null, tuning, entryEnv, zones, rings)) return false;
   for (const anchor of segment.anchors.slice(0, -1)) {
     const required = anchor.id === segment.junctionId ? segment.branchIds : null;
-    if (!canExit(anchor, anchors, obstacles, required, tuning, env, zones)) return false;
+    if (!canExit(anchor, anchors, obstacles, required, tuning, env, zones, rings)) return false;
   }
   return true;
 }

@@ -2,6 +2,36 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.12.1] — 2026-10-11 — Les nouveautés comptent : des mécaniques exigées, pas décoratives
+
+Retour du propriétaire sur 0.11.0 : « tout fonctionne, mais les cassables ne servent à rien dans le gameplay en l'état, pareil pour le reste. Il faut que ça rajoute des éléments de difficulté. » Cause : le parcours était prouvé *sans* les nouveautés, qui restaient facultatives. Désormais le vérificateur joue les mécaniques dans ses vols, et le générateur peut les exiger : un passage n'est prouvé qu'avec elles.
+
+### Ajouté
+
+- **Le vérificateur joue les rencontres** (`sim/flight.ts`, partagé avec les règles du jeu) : dans ses vols, une surface de rebond renvoie, une paroi cassable cède si l'on va assez vite et arrête sinon, un anneau traversé accélère, les zones poussent. Les mêmes formules que la partie, au pas près.
+- **Mur à percer (« brise »).** Un lanceur sous un mur cassable sans trou, de toute la largeur : seul un tir à pleine puissance le traverse, un tir mou rebondit. Mesuré : 60 segments sur 60 prouvés avec le mur, 0 sans lui. Dès le palier 2, au niveau 17, scène `?scene=cassable`.
+- **Ricochet (« ricochet », brief L5).** Un lanceur dont une chicane barre le tir direct vers le trou du mur ; un mur de rebond vertical, de l'autre côté, renvoie un tir tiré sous la chicane par-dessus elle et dans le trou. Géométrie trouvée par balayage (288 combinaisons, 4 réussissent partout), figée (mur à 5,2 m). 60 sur 60 prouvés avec le rebond, 0 sans. Dès le palier 4, au niveau 12, scène `?scene=rebond`.
+- **Percée (« percee »).** Le couloir d'accélération de la fusée sous un plafond cassable de toute la largeur : seule la vitesse du couloir le perce. 60 sur 60 prouvés avec, 0 sans. Dès le palier 4, au niveau 16.
+- **Sas (« sas »).** Un lanceur sous un mur dont le trou, décalé, est une porte : on tire quand elle est ouverte. Dès le palier 4, au niveau 18, scène `?scene=porte`.
+- **Cerceau (« cerceau »).** Un lanceur sous un mur dont le seul passage est un anneau, plus étroit que le trou d'un mur ordinaire et décalé : un tir de précision ; la sortie est de côté, au-dessus d'un pan, pour qu'on ne l'attrape pas à travers l'anneau avant de l'avoir passé. Dès le palier 2, au niveau 15, scène `?scene=anneau`.
+- **Tout anneau traversé accélère** (`ringBoost` 1,3) ; le centre rapporte et monte la série comme avant.
+- **Robots** : avant d'attraper, un robot regarde le balancement qui suivrait (comme le vérificateur) et attend si ce balancement heurte un mur ; avant de lâcher, il regarde une demi-seconde de vol et garde la corde si elle finit dans un mur.
+
+### Corrigé
+
+- **Posé sur une corniche, le personnage restait étourdi sans fin (B-012).** À chaque pas il la touchait à vitesse nulle, ce qui comptait pour un choc : étourdi, sans cible, sans pouvoir rien attraper, jusqu'à la brume. Se poser n'est plus un choc : il reste posé, garde sa série, vise et attrape.
+- **Un pilote qui tire depuis un lanceur partait du lanceur lui-même**, pas de la position reculée par la traction que suppose le vérificateur (et où un doigt l'aurait mis) : 1,7 m d'écart qui envoyaient le robot dans la chicane du ricochet. `Simulation.release(pull)` recule le personnage d'abord.
+
+### Modifié
+
+- Le trampoline, essayé comme usage exigé du rebond, est abandonné : un rebond ne redonne jamais plus de hauteur qu'un vol direct, et la visée automatique attrape à 5,6 m, si bien qu'aucune géométrie sans lanceur n'oblige à rebondir. Les surfaces de rebond restent, en filet et en ricochet.
+- Les scènes `rebond`, `cassable` et `anneau` montrent l'usage exigé ; leurs noms : « Le ricochet », « Le mur à percer », « Le cerceau ».
+- Le test « un obstacle ne tue pas » lâche le personnage sur une dalle, au lieu d'attendre qu'un pilote heurte quelque chose.
+
+### Technique
+
+- `sim/flight.ts` (`flightStep`, `startFlight`, `needsSteps`, `reflected`, `pushOut`, `ringBoosted`), `verifier.flightCatches` pas à pas dès qu'une rencontre est possible, `verifySegment`/`canExit`/`flightCatches` prennent les anneaux, `swingIsClear` exporté ; motifs `brise`, `sas`, `cerceau`, `ricochet`, `percee` et constructeurs `smashWall`, `doorWall`, `hoop`, `ricochet` partagés avec les scènes ; `RICOCHET_WALL_RISE` ; `tuning.ringBoost`.
+
 ## [0.12.0] — 2026-10-11 — Lot 2, deuxième livraison : les zones qui modifient le mouvement
 
 Suite du lot 2 du brief, section 8 : des zones où le vol change, chacune avec sa scène. Reste pour le lot 2 : la roue motorisée, l'obstacle tournant, le lanceur à ouverture mobile et le tir avec rebond (0.13.0).

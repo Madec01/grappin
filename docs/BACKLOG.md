@@ -42,14 +42,14 @@ Le brief complet du propriétaire (synthèse des échanges du 11 octobre 2026) e
 | Lanceur L1 ouverture décalée | 6 | fait (0.9.0) |
 | Lanceur L2 deux ouvertures (sûre / étroite étoilée) | 6 | fait (0.9.0) |
 | Lanceur L4 passage sous un plafond | 6 | à revoir : impossible tel quel, une prise s'attrape à toute vitesse ; demande une accroche qui dépende de la vitesse (décision du propriétaire), voir CHANGELOG 0.10.0 |
-| Lanceur L3 ouverture mobile, L5 tir avec rebond | 6 | à faire (0.13.0 ; les portes et les surfaces de rebond existent depuis 0.11.0, la scène « porte » en est déjà un premier L3 : un lanceur dont le trou du mur est une porte) |
+| Lanceur L3 ouverture mobile, L5 tir avec rebond | 6 | L5 fait (0.12.1, motif « ricochet ») ; L3 : le sas (trou-porte) en est une première forme, l'ouverture qui se déplace reste à faire (0.13.0) |
 | P1 Roue motorisée | 7 | à faire (0.13.0) |
 | P2 Rail de lancement | 7 | à faire (lot 5) |
 | P3 Aimant de trajectoire | 7 | à faire (lot 5) |
 | P4 Lien élastique | 7 | prototype (lot 5) |
 | P5 Prise interrupteur | 7 | à faire (lot 5) |
 | Z1 Courant ascendant, Z2 courant latéral, Z3 couloir d'accélération, Z4 zone de freinage | 8 | fait (0.12.0, avec une scène chacun ; les forces, plafonds et dimensions sont des constantes de `sim/generator.ts`, à revoir sur ressenti) |
-| O1 Portes intermittentes, O3 surfaces de rebond, O4 parois cassables, O5 anneaux de précision | 9 | fait (0.11.0, avec une scène de démonstration chacune) ; à revoir sur ressenti : restitution du rebond, seuil de vitesse des parois, cycle des portes |
+| O1 Portes intermittentes, O3 surfaces de rebond, O4 parois cassables, O5 anneaux de précision | 9 | fait (0.11.0) ; rendus exigés en 0.12.1 (sas, ricochet, mur à percer et percée, cerceau), suite au retour du propriétaire « ça ne rajoute pas de difficulté » ; à revoir sur ressenti : restitution, seuil de vitesse, cycle des portes, et la part des lanceurs dans ces usages |
 | O2 Obstacles tournants | 9 | à faire (0.13.0) |
 | O6 Passage qui se referme | 9 | à faire (lot 5) |
 | H1 Puits de chute, H2 tunnel descendant, règles de la brume en descente | 10 | à faire (lot 5) |

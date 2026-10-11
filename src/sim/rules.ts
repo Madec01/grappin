@@ -4,6 +4,7 @@ import { tierName } from '../data/tiers';
 import { STILL, isUpright, upOf, type Environment } from './environment';
 import { launchVelocity } from './launcher';
 import { circleBoxGap } from './geometry';
+import { BOUNCE_FRICTION, BOUNCE_RESTITUTION, RING_CENTRE_RATIO, SMASH_KEEP, pushOut, reflected, ringBoosted } from './flight';
 import { isSolidNow, obstacleKind } from './obstacles';
 import { constrainVelocity } from './physics';
 import type { Anchor, RuleEvent, SimState, Obstacle } from './state';
@@ -236,47 +237,13 @@ export const BUMP_FRICTION = 0.6;
 export const BUMP_STUN_SECONDS = 0.45;
 /** Sous cette vitesse de rebond, le personnage s'arrête contre l'obstacle : il peut s'y poser. */
 const BUMP_REST_SPEED = 0.8;
-/** Surface de rebond : presque toute la vitesse rendue, presque rien de perdu le long de la surface. */
-export const BOUNCE_RESTITUTION = 0.9;
-export const BOUNCE_FRICTION = 0.95;
-/** Part de la vitesse gardée en traversant une paroi cassable. */
-export const SMASH_KEEP = 0.8;
-/** Un anneau est traversé « au centre » si le passage s'approche à cette part de son rayon. */
-export const RING_CENTRE_RATIO = 0.4;
+export { BOUNCE_FRICTION, BOUNCE_RESTITUTION, RING_CENTRE_RATIO, SMASH_KEEP } from './flight';
 
-/**
- * Sort le personnage de la boîte qu'il touche, par le chemin le plus court, et
- * rend la normale du contact (de la boîte vers lui). Partagé par le choc et le
- * rebond.
- */
-function pushOut(state: SimState, box: Obstacle, tuning: Tuning): { x: number; y: number } {
-  const { pos } = state.hero;
-  // Le point de la boîte le plus proche du centre ; la normale va de ce point vers le personnage.
-  const nearest = { x: Math.min(box.x1, Math.max(box.x0, pos.x)), y: Math.min(box.y1, Math.max(box.y0, pos.y)) };
-  let n = { x: pos.x - nearest.x, y: pos.y - nearest.y };
-  const len = Math.hypot(n.x, n.y);
-  if (len > 1e-9) n = { x: n.x / len, y: n.y / len };
-  else {
-    // Le centre est dans la boîte : on sort par la face la plus proche.
-    const faces = [
-      { d: pos.x - box.x0, n: { x: -1, y: 0 } },
-      { d: box.x1 - pos.x, n: { x: 1, y: 0 } },
-      { d: pos.y - box.y0, n: { x: 0, y: -1 } },
-      { d: box.y1 - pos.y, n: { x: 0, y: 1 } },
-    ];
-    n = faces.reduce((best, face) => (face.d < best.d ? face : best)).n;
-  }
-  const depth = tuning.heroRadius - len;
-  state.hero.pos = { x: pos.x + n.x * (depth + 1e-3), y: pos.y + n.y * (depth + 1e-3) };
-  return n;
-}
-
-/** La vitesse après un contact de normale `n` : la part vers la surface rendue à `restitution`, la part le long gardée à `friction`. */
-function reflected(vel: Vec2, n: Vec2, restitution: number, friction: number): Vec2 {
-  const along = vel.x * n.x + vel.y * n.y;
-  const tangent = { x: vel.x - along * n.x, y: vel.y - along * n.y };
-  const bounced = along < 0 ? -along * restitution : Math.max(0, along);
-  return { x: tangent.x * friction + n.x * bounced, y: tangent.y * friction + n.y * bounced };
+/** Sort le personnage de la boîte qu'il touche (voir `flight.ts`) et rend la normale du contact. */
+function pushHeroOut(state: SimState, box: Obstacle, tuning: Tuning): Vec2 {
+  const out = pushOut(state.hero.pos, tuning.heroRadius, box);
+  state.hero.pos = out.pos;
+  return out.n;
 }
 
 /**
@@ -287,7 +254,14 @@ function reflected(vel: Vec2, n: Vec2, restitution: number, friction: number): V
  * poser. La brume reste le seul juge.
  */
 function bump(state: SimState, box: Obstacle, tuning: Tuning, events: RuleEvent[]): void {
-  const n = pushOut(state, box, tuning);
+  const n = pushHeroOut(state, box, tuning);
+  // Posé sur le dessus d'une corniche, le personnage la touche à chaque pas, à vitesse nulle : ce n'est pas un choc. Il reste
+  // posé, garde sa série et peut viser (B-012 : avant, il restait étourdi sans fin, sans pouvoir rien attraper).
+  const towards = -(state.hero.vel.x * n.x + state.hero.vel.y * n.y);
+  if (!state.rope && towards < BUMP_REST_SPEED && Math.hypot(state.hero.vel.x, state.hero.vel.y) < BUMP_REST_SPEED) {
+    state.hero.vel = { x: 0, y: 0 };
+    return;
+  }
   if (state.rope) release(state, tuning, events, true);
   let next = reflected(state.hero.vel, n, BUMP_RESTITUTION, BUMP_FRICTION);
   if (Math.hypot(next.x, next.y) < BUMP_REST_SPEED) next = { x: 0, y: 0 };
@@ -304,7 +278,7 @@ function bump(state: SimState, box: Obstacle, tuning: Tuning, events: RuleEvent[
  * chute devient une remontée, un tir manqué se récupère.
  */
 function bounce(state: SimState, box: Obstacle, tuning: Tuning, events: RuleEvent[]): void {
-  const n = pushOut(state, box, tuning);
+  const n = pushHeroOut(state, box, tuning);
   if (state.rope) release(state, tuning, events, true);
   const next = reflected(state.hero.vel, n, BOUNCE_RESTITUTION, BOUNCE_FRICTION);
   state.hero.vel = { x: next.x || 0, y: next.y || 0 };
@@ -364,7 +338,9 @@ export function applyObstacles(state: SimState, tuning: Tuning, events: RuleEven
 /**
  * Anneaux de précision (brief, O5) : traverser le disque d'un anneau rapporte
  * quand on en ressort, selon le passage le plus proche du centre ; au centre,
- * davantage et un cran de série. Un anneau raté ne coûte rien.
+ * davantage et un cran de série. Tout anneau traversé donne un coup
+ * d'accélération (`ringBoost`) : un anneau porte plus loin, et le générateur
+ * peut l'exiger (le cerceau). Un anneau raté ne coûte rien.
  */
 export function applyRings(state: SimState, tuning: Tuning, events: RuleEvent[]): void {
   if (state.status !== 'alive') return;
@@ -380,6 +356,7 @@ export function applyRings(state: SimState, tuning: Tuning, events: RuleEvent[])
     ring.taken = true;
     ring.closest = null;
     if (centred) state.combo += 1;
+    state.hero.vel = ringBoosted(state.hero.vel, tuning);
     state.score += (centred ? tuning.ringCentreScore : tuning.ringScore) * multiplier(state.combo, tuning);
     events.push({ type: 'ring', ringId: ring.id, centred });
   }

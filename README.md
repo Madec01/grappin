@@ -37,7 +37,7 @@ Des paramètres d'adresse permettent de régler le jeu sans toucher au code :
 - `?graine=12` rejoue toujours le même parcours.
 - La musique est celle du propriétaire (dépôt Way), une piste par niveau, dans `public/musique/`. À côté de chaque piste, son fichier de rythme (`<piste>.rythme.json`, produit par `npm run rythme`) fait pulser l'ambiance et les éléments du jeu au tempo ; musique coupée, rien ne pulse.
 - `?pouls=120` fait battre un métronome visuel à ce tempo, sans son : pour regarder le pouls, et pour les tests.
-- `?scene=rebond`, `?scene=cassable`, `?scene=porte`, `?scene=anneau`, `?scene=courant`, `?scene=derive` ou `?scene=fusee` fait commencer la course libre par une scène de démonstration de cette mécanique, la même à chaque fois.
+- `?scene=rebond` (le ricochet), `?scene=cassable` (le mur à percer), `?scene=porte` (le sas), `?scene=anneau` (le cerceau), `?scene=courant`, `?scene=derive` ou `?scene=fusee` fait commencer la course libre par une scène de démonstration de cette mécanique, la même à chaque fois.
 - Les bruitages du geste sont synthétisés (aucun fichier) ; « Sons : oui/non » sur le titre les coupe. « Départ : avancé / du sol » choisit d'où part la course libre.
 - Pause : le bouton en haut à droite pendant la partie, ou automatiquement quand l'application passe en arrière-plan ; « Reprendre » ne lâche jamais la corde, on la reprend en main en appuyant de nouveau.
 - Pour qui apprend (jamais 30 m atteints), la brume monte à 60 % et l'ombre prédictive porte plus loin ; des conseils courts apparaissent au moment du geste, une seule fois chacun. La fenêtre de lâcher parfait se voit : corde et halo chauds.

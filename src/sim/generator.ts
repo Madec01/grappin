@@ -24,9 +24,23 @@ import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from './state
  * d'accélération puis une zone de freinage avant le point suivant
  * (« accélération, envolée, freinage, rattrapage »).
  */
-export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' | 'fragiles' | 'saut' | 'lanceur' | 'courant' | 'derive' | 'fusee';
+export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' | 'fragiles' | 'saut' | 'lanceur' | 'courant' | 'derive' | 'fusee' | 'brise' | 'sas' | 'cerceau' | 'ricochet' | 'percee';
 
-export const ARCHETYPES: readonly Archetype[] = ['chaine', 'escalier', 'couloir', 'dalles', 'rafale', 'fragiles', 'saut', 'lanceur', 'courant', 'derive', 'fusee'];
+/**
+ * Les cinq derniers motifs EXIGENT une mécanique du lot 2 (retour du
+ * propriétaire, 0.12.1 : « il faut que ça rajoute de la difficulté ») :
+ * « brise », un lanceur sous un mur cassable sans trou, à percer à pleine
+ * puissance ; « sas », un lanceur sous un mur dont le trou est une porte, à
+ * passer quand elle est ouverte ; « cerceau », un lanceur sous un mur dont le
+ * seul passage est un anneau, étroit et décalé ; « ricochet », un lanceur
+ * dont une chicane barre le tir direct, et qu'un mur de rebond renvoie dans
+ * le trou (brief, L5) ; « percee », un couloir d'accélération sous un plafond
+ * cassable que seule sa vitesse perce. Le vérificateur joue ces mécaniques
+ * dans ses vols (`flight.ts`) : le passage n'est prouvé qu'avec elles. Un
+ * rebond ne peut pas s'exiger ailleurs qu'au tir : il ne redonne jamais plus
+ * de hauteur qu'un vol direct, et la visée attrape à 5,6 m.
+ */
+export const ARCHETYPES: readonly Archetype[] = ['chaine', 'escalier', 'couloir', 'dalles', 'rafale', 'fragiles', 'saut', 'lanceur', 'courant', 'derive', 'fusee', 'brise', 'sas', 'cerceau', 'ricochet', 'percee'];
 
 export interface Segment {
   readonly anchors: Anchor[];
@@ -138,6 +152,9 @@ export function tierProfile(tier: number): TierProfile {
   if (tier >= 2) archetypes.push('courant');
   if (tier >= 3) archetypes.push('derive');
   if (tier >= 4) archetypes.push('fusee');
+  // Lot 2, les usages exigés : avec les lanceurs (palier 2), le cerceau et le mur à percer ; puis le sas et le ricochet ; la percée avec la fusée.
+  if (tier >= 2) archetypes.push('cerceau', 'brise');
+  if (tier >= 4) archetypes.push('sas', 'ricochet', 'percee');
   return {
     spacing: Math.min(5, 3 + 0.4 * tier),
     obstacles: tier === 0 ? 0 : Math.min(3, 1 + Math.floor(tier / 2)),
@@ -200,7 +217,121 @@ const SHAPES: Record<Archetype, { dy: readonly [number, number]; dx: readonly [n
   courant: { dy: [0.55, 0.9], dx: [0.4, 1] },
   derive: { dy: [0.55, 0.9], dx: [0.4, 1] },
   fusee: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  brise: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  sas: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  cerceau: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  ricochet: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  percee: { dy: [0.55, 0.9], dx: [0.4, 1] },
 };
+
+/**
+ * Les usages exigés du lot 2, en mètres. Mur à percer (« brise ») : un mur
+ * cassable de toute la largeur, à la hauteur du mur d'un lanceur, et la chaîne
+ * qui reprend au-dessus comme après un mur à trou : seul un tir à pleine
+ * puissance le traverse. Sas : le mur d'une chaîne ordinaire, `SAS_RISE`
+ * au-dessus du point, dont le trou (large de deux `GAP_HALF_WIDTH`) est une
+ * porte, et la chaîne reprend `SAS_ABOVE` au-dessus. Trampoline : depuis le
+ * point courant, un tapis de rebond `TRAMPOLINE_DROP` plus bas et
+ * `TRAMPOLINE_SIDE` de côté, et le point suivant `TRAMPOLINE_REACH` de côté
+ * et `TRAMPOLINE_RISE` plus haut, hors de portée d'un vol direct : on tombe sur
+ * le tapis, on remonte. Cerceau : un anneau au milieu du vol vers un point
+ * `HOOP_RISE` plus haut, trop loin sans l'accélération du centre.
+ */
+/**
+ * Cerceau : au-dessus d'un lanceur, un mur dont le seul passage est un anneau,
+ * plus étroit que le trou d'un mur ordinaire (`HOOP_GAP_HALF`), décalé comme
+ * lui : un tir de précision ; pris au centre, l'anneau rapporte et accélère.
+ */
+const HOOP_GAP_HALF = 1.3;
+const HOOP_EXIT_SIDE = 2.4;
+/**
+ * Ricochet (brief, L5 : « tir avec rebond ») : au-dessus d'un lanceur, un mur
+ * dont le trou est un peu décalé du côté opposé au mur de rebond ; une chicane
+ * solide, `RICOCHET_CHICANE_RISE` au-dessus du lanceur, de
+ * `RICOCHET_CHICANE_FROM` (côté trou) à `RICOCHET_CHICANE_TO` (côté rebond),
+ * barre le tir direct vers le trou ; on tire sous la chicane vers le mur de
+ * rebond vertical, à `RICOCHET_PAD_SIDE`, qui renvoie par-dessus la chicane et
+ * dans le trou.
+ */
+const RICOCHET_GAP_OFFSET = 1.6;
+const RICOCHET_CHICANE_RISE = 3.2;
+const RICOCHET_CHICANE_FROM = 2.6;
+const RICOCHET_CHICANE_TO = 1.4;
+const RICOCHET_PAD_SIDE = 3.4;
+const RICOCHET_PAD_HALF = 0.2;
+const RICOCHET_PAD_BOTTOM = 0.6;
+const RICOCHET_PAD_TOP = 5.2;
+/** Le mur du ricochet est toujours à cette hauteur au-dessus du lanceur : la géométrie du renvoi est réglée (balayage du 11 octobre 2026), elle ne se tire pas au sort. */
+export const RICOCHET_WALL_RISE = 5.2;
+/** Percée : un plafond cassable de toute la largeur, `PERCEE_ABOVE_BOOST` au-dessus du couloir d'accélération, que seule sa vitesse perce. */
+const PERCEE_ABOVE_BOOST = 0.8;
+/** Un mur à percer couvre tout le monde jouable et au-delà : on ne le contourne pas par les côtés. */
+const SMASH_WALL_BEYOND = 6;
+
+/** Le mur cassable sans trou au-dessus d'un lanceur, et où la chaîne reprend. `rise` : hauteur du mur au-dessus du lanceur. Partagé avec les scènes. */
+export function smashWall(ids: IdCounters, launcher: Vec2, rise: number, exitDx: number, halfWidth: number): { wall: Obstacle; exit: Vec2 } {
+  const wallX = halfWidth + SMASH_WALL_BEYOND;
+  const wallY = launcher.y + rise;
+  const wall: Obstacle = { id: ids.obstacle, x0: -wallX, y0: wallY, x1: wallX, y1: wallY + OBSTACLE_THICKNESS, kind: 'cassable' };
+  ids.obstacle += 1;
+  return { wall, exit: { x: clampX(launcher.x + exitDx, halfWidth), y: wallY + ABOVE_WALL } };
+}
+
+/**
+ * Le mur à porte au-dessus d'un lanceur (brief : « première combinaison
+ * recommandée : lanceur et ouverture » qui s'ouvre et se ferme) : deux pans
+ * solides, une porte dans le trou décalé, et où la chaîne reprend. `rise` :
+ * hauteur du mur au-dessus du lanceur. Partagé avec les scènes.
+ */
+export function doorWall(ids: IdCounters, launcher: Vec2, rise: number, gapX: number, halfWidth: number): { walls: Obstacle[]; exit: Vec2 } {
+  const wallX = halfWidth + WALL_MARGIN;
+  const wallY = launcher.y + rise;
+  const x = clampX(gapX, halfWidth - GAP_HALF_WIDTH);
+  const walls: Obstacle[] = [
+    { id: ids.obstacle, x0: -wallX, y0: wallY, x1: x - GAP_HALF_WIDTH, y1: wallY + OBSTACLE_THICKNESS },
+    { id: ids.obstacle + 1, x0: x - GAP_HALF_WIDTH, y0: wallY, x1: x + GAP_HALF_WIDTH, y1: wallY + OBSTACLE_THICKNESS, kind: 'porte' },
+    { id: ids.obstacle + 2, x0: x + GAP_HALF_WIDTH, y0: wallY, x1: wallX, y1: wallY + OBSTACLE_THICKNESS },
+  ];
+  ids.obstacle += 3;
+  return { walls, exit: { x, y: wallY + ABOVE_WALL } };
+}
+
+/** L'anneau au milieu du vol depuis `from` vers un point trop loin pour un vol ordinaire, et ce point. Partagé avec les scènes. */
+export function hoop(ids: IdCounters, launcher: Vec2, rise: number, gapX: number, halfWidth: number): { walls: Obstacle[]; ring: Ring; exit: Vec2 } {
+  const wallX = halfWidth + WALL_MARGIN;
+  const wallY = launcher.y + rise;
+  const x = clampX(gapX, halfWidth - HOOP_GAP_HALF);
+  const walls: Obstacle[] = [
+    { id: ids.obstacle, x0: -wallX, y0: wallY, x1: x - HOOP_GAP_HALF, y1: wallY + OBSTACLE_THICKNESS },
+    { id: ids.obstacle + 1, x0: x + HOOP_GAP_HALF, y0: wallY, x1: wallX, y1: wallY + OBSTACLE_THICKNESS },
+  ];
+  ids.obstacle += 2;
+  const ring: Ring = { id: ids.ring, pos: { x, y: wallY + OBSTACLE_THICKNESS / 2 }, radius: RING_RADIUS, closest: null, taken: false };
+  ids.ring += 1;
+  // La sortie est de côté, au-dessus d'un pan : on ne la voit pas à travers l'anneau depuis le bas, on ne l'attrape qu'une fois passé.
+  const side = x > launcher.x ? 1 : -1;
+  return { walls, ring, exit: { x: clampX(x + side * HOOP_EXIT_SIDE, halfWidth), y: wallY + ABOVE_WALL } };
+}
+
+/** Le ricochet au-dessus d'un lanceur : mur à trou décalé du côté `side`, chicane qui barre le tir direct, mur de rebond de l'autre côté. Partagé avec les scènes. */
+export function ricochet(ids: IdCounters, launcher: Vec2, rise: number, side: -1 | 1, halfWidth: number): { boxes: Obstacle[]; exit: Vec2 } {
+  const wallX = halfWidth + WALL_MARGIN;
+  const wallY = launcher.y + rise;
+  // `side` est le côté du mur de rebond ; le trou est de l'autre côté, un peu décalé.
+  const gapX = clampX(launcher.x - side * RICOCHET_GAP_OFFSET, halfWidth);
+  const span = (a: number, b: number): [number, number] => (side > 0 ? [launcher.x + a, launcher.x + b] : [launcher.x - b, launcher.x - a]);
+  const [cx0, cx1] = span(-RICOCHET_CHICANE_FROM, RICOCHET_CHICANE_TO);
+  const [px0, px1] = span(RICOCHET_PAD_SIDE - RICOCHET_PAD_HALF, RICOCHET_PAD_SIDE + RICOCHET_PAD_HALF);
+  const chicaneY = launcher.y + RICOCHET_CHICANE_RISE;
+  const boxes: Obstacle[] = [
+    { id: ids.obstacle, x0: -wallX, y0: wallY, x1: gapX - GAP_HALF_WIDTH, y1: wallY + OBSTACLE_THICKNESS },
+    { id: ids.obstacle + 1, x0: gapX + GAP_HALF_WIDTH, y0: wallY, x1: wallX, y1: wallY + OBSTACLE_THICKNESS },
+    { id: ids.obstacle + 2, x0: Math.min(cx0, cx1), y0: chicaneY, x1: Math.max(cx0, cx1), y1: chicaneY + OBSTACLE_THICKNESS },
+    { id: ids.obstacle + 3, x0: Math.min(px0, px1), y0: launcher.y + RICOCHET_PAD_BOTTOM, x1: Math.max(px0, px1), y1: launcher.y + RICOCHET_PAD_TOP, kind: 'rebond' },
+  ];
+  ids.obstacle += 4;
+  return { boxes, exit: { x: gapX, y: wallY + ABOVE_WALL } };
+}
 
 /**
  * Les zones du lot 2, en mètres. Courant ascendant : une colonne de
@@ -343,9 +474,12 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
   let jumpDone = false;
   let launcherDone = false;
   let zoneDone = false;
+  let featureDone = false;
   /** Obstacles posés par le motif lui-même, que les obstacles tirés au sort respectent. */
   const fixed: Obstacle[] = [];
   const zones: Zone[] = [];
+  /** Anneaux posés par le motif lui-même (cerceau). */
+  const fixedRings: Ring[] = [];
 
   while (cur.y < targetY) {
     if (wantsSplit && !splitDone && cur.y - startY > 3 && targetY - cur.y > 9) {
@@ -405,6 +539,50 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
       launcherDone = true;
       continue;
     }
+    if (archetype === 'brise' && !featureDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > 11) {
+      // Mur à percer : le dernier point devient un lanceur, un mur cassable sans trou le surplombe, la chaîne reprend au-dessus.
+      anchors[anchors.length - 1] = makeAnchor(ids, cur, 'lanceur');
+      const { wall, exit } = smashWall(ids, cur, WALL_RISE_MIN + WALL_RISE_RANGE * rng.next(), (rng.next() - 0.5) * 2, halfWidth);
+      fixed.push(wall);
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      featureDone = true;
+      continue;
+    }
+    if (archetype === 'sas' && !featureDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > 11) {
+      // Sas : le dernier point devient un lanceur, et le trou décalé du mur est une porte ; on tire quand elle est ouverte.
+      anchors[anchors.length - 1] = makeAnchor(ids, cur, 'lanceur');
+      const side = cur.x > 0 ? -1 : 1;
+      const { walls, exit } = doorWall(ids, cur, WALL_RISE_MIN + WALL_RISE_RANGE * rng.next(), cur.x + side * (GAP_OFFSET_MIN + (GAP_OFFSET_MAX - GAP_OFFSET_MIN) * rng.next()), halfWidth);
+      fixed.push(...walls);
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      featureDone = true;
+      continue;
+    }
+    if (archetype === 'cerceau' && !featureDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > 11) {
+      // Cerceau : le dernier point devient un lanceur, et le seul passage du mur est un anneau, étroit et décalé : un tir de précision.
+      anchors[anchors.length - 1] = makeAnchor(ids, cur, 'lanceur');
+      const side = cur.x > 0 ? -1 : 1;
+      const { walls, ring, exit } = hoop(ids, cur, WALL_RISE_MIN + WALL_RISE_RANGE * rng.next(), cur.x + side * (GAP_OFFSET_MIN + (GAP_OFFSET_MAX - GAP_OFFSET_MIN) * rng.next()), halfWidth);
+      fixed.push(...walls);
+      fixedRings.push(ring);
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      featureDone = true;
+      continue;
+    }
+    if (archetype === 'ricochet' && !featureDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > 11 && halfWidth + WALL_MARGIN - Math.abs(cur.x) >= RICOCHET_PAD_SIDE + RICOCHET_PAD_HALF) {
+      // Ricochet : le dernier point devient un lanceur ; une chicane barre le tir direct vers le trou, un mur de rebond y renvoie.
+      anchors[anchors.length - 1] = makeAnchor(ids, cur, 'lanceur');
+      const side: -1 | 1 = cur.x > 0 ? -1 : 1;
+      const { boxes, exit } = ricochet(ids, cur, RICOCHET_WALL_RISE, side, halfWidth);
+      fixed.push(...boxes);
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      featureDone = true;
+      continue;
+    }
     if (archetype === 'courant' && !zoneDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > UPDRAFT_RISE + 2) {
       // Courant ascendant : depuis le dernier point, une colonne porte jusqu'au point suivant, hors de portée de corde.
       const { zone, exit } = updraft(ids, cur, halfWidth);
@@ -419,10 +597,17 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
       zones.push(drift(ids, cur.y, cur.x > 0 ? -1 : 1, halfWidth));
       zoneDone = true;
     }
-    if (archetype === 'fusee' && !zoneDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > BOOST_RISE + 2) {
-      // Fusée : un couloir d'accélération, un freinage, et le point de sortie loin au-dessus.
+    if ((archetype === 'fusee' || archetype === 'percee') && !zoneDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > BOOST_RISE + 2) {
+      // Fusée : un couloir d'accélération, un freinage, et le point de sortie loin au-dessus. Percée : en plus, un plafond cassable
+      // de toute la largeur juste au-dessus du couloir, que seule la vitesse du couloir perce.
       const { boost, brake, exit } = rocket(ids, cur, halfWidth);
       zones.push(boost, brake);
+      if (archetype === 'percee') {
+        const wallX = halfWidth + SMASH_WALL_BEYOND;
+        const y0 = boost.y1 + PERCEE_ABOVE_BOOST;
+        fixed.push({ id: ids.obstacle, x0: -wallX, y0, x1: wallX, y1: y0 + OBSTACLE_THICKNESS, kind: 'cassable' });
+        ids.obstacle += 1;
+      }
       cur = exit;
       anchors.push(makeAnchor(ids, cur));
       zoneDone = true;
@@ -460,7 +645,7 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
   assignKinds(rng, anchors, profile, archetype, junctionId, branchIds);
   if (context.cable !== 'none') hangCables(anchors, junctionId, branchIds, halfWidth, context.cable);
   addSpecialAnchors(rng, ids, anchors, profile, halfWidth, zones);
-  const rings = placeRings(rng, ids, anchors, pickups, zones, profile.rings ?? 0, new Set([...branchIds, junctionId ?? -1]), halfWidth);
+  const rings = [...fixedRings, ...placeRings(rng, ids, anchors, pickups, zones, profile.rings ?? 0, new Set([...branchIds, junctionId ?? -1]), halfWidth, fixedRings)];
   const obstacleCount = archetype === 'dalles' ? Math.min(4, profile.obstacles + 2) : profile.obstacles;
   // Les espèces du lot 2 se posent d'abord : elles sont le propos du segment, les obstacles ordinaires prennent la place qui reste.
   const kinds: ObstacleKind[] = [
@@ -487,9 +672,9 @@ const RING_RING_CLEARANCE = 0.5;
  * une fourche, ni sur un autre anneau. Rien de solide : un anneau raté ne
  * coûte rien, le parcours se prouve sans lui.
  */
-function placeRings(rng: Rng, ids: IdCounters, anchors: readonly Anchor[], pickups: readonly Pickup[], zones: readonly Zone[], count: number, protectedIds: ReadonlySet<number>, halfWidth: number): Ring[] {
-  const rings: Ring[] = [];
-  if (count <= 0 || anchors.length < 4) return rings;
+function placeRings(rng: Rng, ids: IdCounters, anchors: readonly Anchor[], pickups: readonly Pickup[], zones: readonly Zone[], count: number, protectedIds: ReadonlySet<number>, halfWidth: number, fixed: readonly Ring[] = []): Ring[] {
+  const rings: Ring[] = [...fixed];
+  if (count <= 0 || anchors.length < 4) return rings.slice(fixed.length);
   const bands = launchBands(anchors);
   const pairs: number[] = [];
   for (let i = 1; i < anchors.length - 2; i += 1) {
@@ -519,7 +704,7 @@ function placeRings(rng: Rng, ids: IdCounters, anchors: readonly Anchor[], picku
       break;
     }
   }
-  return rings;
+  return rings.slice(fixed.length);
 }
 
 /** Prise à éclipse : au-dessus du point qu'elle permet de sauter, et déport de la prise électrique à côté de son point. */
