@@ -28,6 +28,10 @@ const GIF_WIDTH = 300;
 
 /** Les images des ambiances : une seconde et demie de jeu, en pas de simulation (cent vingt par seconde). */
 const PALETTE_STEPS = 180;
+/** Les images du pouls : l'horloge de la page est figée à cet instant (une dizaine de minutes, bien après le chargement), puis menée à la main. */
+const PULSE_CLOCK_MS = 600_000;
+/** L'intro d'un niveau dure trois secondes : on en laisse trois et demie, pour que la bannière soit effacée. */
+const PULSE_INTRO_MS = 3500;
 
 const PORT = 4175;
 const VIEWPORT = { width: 390, height: 844 };
@@ -49,7 +53,8 @@ async function waitForServer(url: string, timeoutMs: number): Promise<void> {
 }
 
 function startPreview(): ChildProcess {
-  return spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' });
+  // Détaché dans son propre groupe : à la fin, c'est tout le groupe qui est arrêté, pas seulement l'enveloppe `npx`.
+  return spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore', detached: true });
 }
 
 /** Touche le centre du bouton `id` de l'écran affiché, sitôt qu'une image l'a dessiné. */
@@ -58,6 +63,26 @@ async function tapButton(page: Page, id: string): Promise<void> {
   const button = (await page.evaluate(() => window.__grappin!.buttons())).find((b) => b.id === id)!;
   await page.evaluate(({ x, y }) => window.__grappin!.press(x, y), { x: button.x + button.width / 2, y: button.y + button.height / 2 });
   await page.evaluate(() => window.__grappin!.release());
+}
+
+/** Durée d'une image sur l'horloge figée d'une page : celle du rafraîchissement (`requestAnimationFrame`) simulé, un soixantième de seconde. */
+const FRAME_MS = 16;
+
+/**
+ * Fait avancer, image par image, le temps d'une page dont l'horloge est figée (`page.clock`), jusqu'à ce que le pouls de la musique
+ * (`state().pulse`) satisfasse `accept`, et rend sa valeur. Une page qui tourne en temps réel ne tiendrait pas : sur le rendu logiciel
+ * du banc, la cadence tombe à quelques images par seconde, et un temps ne reste au-dessus de 0,9 que dix-sept millisecondes ; une
+ * capture arriverait des images plus tard, ailleurs dans le battement, et la brume aurait le temps de rattraper le personnage. Ici le
+ * jeu ne vit que du temps qu'on lui donne : l'image voulue y est exacte, et la capture qui suit la montre telle quelle.
+ */
+async function stepPulse(page: Page, accept: (pulse: number) => boolean): Promise<number> {
+  // Un temps dure bien plus de deux fois une image : si le pouls ne passe pas la condition en quelques battements, rien ne bat.
+  for (let frame = 0; frame < 240; frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const { pulse } = await page.evaluate(() => window.__grappin!.state());
+    if (accept(pulse)) return pulse;
+  }
+  throw new Error('Le pouls ne passe jamais la condition : le métronome (?pouls=120) bat-il ?');
 }
 
 /**
@@ -379,6 +404,32 @@ async function main(): Promise<void> {
     }
     await palettePage.close();
 
+    // Le pouls : le métronome de `?pouls=120` fait battre l'ambiance sans son. Le niveau 3 (Indigo) montre la ville sur les côtés ;
+    // une image sur le temps (le pouls vient de monter à plus de 0,9), une autre au creux (retombé sous 0,12), sur la même scène : le
+    // personnage reste sur son toit. L'horloge de la page est figée avant le niveau (voir `stepPulse`), puis menée à la main.
+    // Les pages des niveaux et de la fin ont fini leur travail : on les ferme, car chaque page ouverte fait tourner son rendu logiciel et
+    // ralentit toutes les autres. Le pouls a son propre contexte, sans vidéo : l'horloge figée d'une page n'aime pas celui, chargé, du banc.
+    await levelPage.close();
+    await ending.close();
+    const pulseContext = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    const pulsePage = await pulseContext.newPage();
+    await pulsePage.clock.install({ time: 0 });
+    await pulsePage.goto(`http://localhost:${PORT}/?test=1&pouls=120`);
+    await pulsePage.waitForFunction(() => window.__grappin?.state().screen === 'title');
+    await pulsePage.evaluate(() => window.__grappin!.unlockAll());
+    await pulsePage.evaluate(() => window.__grappin!.playLevel(3));
+    await pulsePage.waitForFunction(() => window.__grappin?.state().screen === 'playing');
+    await pulsePage.clock.pauseAt(PULSE_CLOCK_MS);
+    // L'intro du niveau (trois secondes) a le temps de s'effacer, à l'image près.
+    await pulsePage.clock.runFor(PULSE_INTRO_MS);
+    const onBeat = await stepPulse(pulsePage, (pulse) => pulse > 0.9);
+    await pulsePage.screenshot({ path: join(outDir, '24-pouls-temps.png') });
+    const trough = await stepPulse(pulsePage, (pulse) => pulse < 0.12);
+    await pulsePage.screenshot({ path: join(outDir, '24-pouls-creux.png') });
+    const st = await pulsePage.evaluate(() => window.__grappin!.state());
+    console.log(`Pouls : image du temps à ${onBeat.toFixed(2)}, du creux à ${trough.toFixed(2)}, ${st.bpm} bpm, palette ${st.palette}, écran ${st.screen}`);
+    await pulseContext.close();
+
     if (errors.length > 0) console.warn('Erreurs console :', errors);
 
     const videoPath = await page.video()?.path();
@@ -394,7 +445,8 @@ async function main(): Promise<void> {
     }
     rmSync(videoDir, { recursive: true, force: true });
   } finally {
-    server.kill();
+    if (server.pid !== undefined) process.kill(-server.pid, 'SIGTERM');
+    else server.kill();
   }
 }
 

@@ -2,6 +2,22 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.8.0] — 2026-10-11 — L'ambiance pulse au rythme de la musique
+
+Demande du propriétaire : « que l'ambiance lumineuse pulse avec la musique, que ça change de couleur d'effet, que ça pulse au rythme, même les éléments du jeu ».
+
+### Ajouté
+
+- Sur chaque temps de la musique : le fond monte d'un cran vers la brume, les halos des points, de la corde, du personnage et de l'anneau tenu s'élargissent et s'allument, la crête de brume s'éclaire, les immeubles dansent (pairs sur les temps 1 et 3, impairs sur 2 et 4), le cerne des obstacles et les halos des prises spéciales s'intensifient, le multiplicateur grossit. Les étoiles scintillent avec les aigus. La force de chaque temps module tout cela : un passage calme respire, un passage fort frappe.
+- Toutes les deux mesures, la couleur d'effet (halo des points, de la corde, des titres et bannières) tourne entre trois teintes de la palette : halo, accent, crête de brume, avec un fondu d'un temps. Plus visible en Braise qu'en Cyan nuit, dont les teintes sont proches.
+- Rien ne bouge qui porte un sens : ni une forme, ni une taille de cible, ni une position, ni une couleur d'espèce ; l'état d'une prise électrique ou à éclipse passe avant la musique ; les lignes d'altitude, l'ombre prédictive et la fronde ne pulsent pas. Musique coupée, le rendu est exactement celui d'avant, pixel pour pixel.
+- Les réglages sont au même endroit (`PULSE`, `src/render/pulse.ts`), pour ajuster sur retour.
+
+### Technique
+
+- `src/render/pulse.ts` (fonctions pures, 25 tests), rendu et écrans branchés sur `GameFrame.pulse` ; le pouls vient de la position de lecture et du fichier de rythme de la piste (0.7.0). Captures `24-pouls-temps` et `24-pouls-creux` à horloge figée ; test de bout en bout du métronome `?pouls=120`.
+- Le banc de captures arrête tout le groupe de processus de son serveur de prévisualisation.
+
 ## [0.7.0] — 2026-10-11 — Installable sur le téléphone
 
 Demande du propriétaire : « pouvoir installer sur mon téléphone directement ».

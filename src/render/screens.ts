@@ -17,10 +17,12 @@ import { COLOR, GlowText, makeText, readSafeInset, starPoints, type Palette } fr
  * n'est dessiné qu'une fois par vue et par taille d'écran : ses halos ne
  * coûtent rien à l'image.
  *
- * L'accent de la palette (contour des boutons, lignes allumées, barre d'expérience,
- * halo des titres) et le voile, qui prend la couleur du fond, ne sont pas figés
- * au tracé : ces formes sont dessinées en blanc et teintées, si bien qu'une
- * palette qui change, même en plein fondu, ne retrace rien. Voir `Column.skins`.
+ * L'accent de la palette (contour des boutons, lignes allumées, barre d'expérience)
+ * et le voile, qui prend la couleur du fond, ne sont pas figés au tracé : ces
+ * formes sont dessinées en blanc et teintées, si bien qu'une palette qui change,
+ * même en plein fondu, ne retrace rien. Voir `Column.skins`. Il en va de même du
+ * halo des titres, qui suit l'accent au silence et la couleur d'effet quand la
+ * musique bat (voir `Column.glows` et pulse.ts).
  *
  * Chaque écran est fait de deux blocs empilés : celui du haut (l'information)
  * et celui du bas (le bouton et l'invite), collé au bas de l'écran pour rester
@@ -162,6 +164,8 @@ class Column {
    * ou par halo, qui en change la teinte. L'écran les appelle avec l'accent du moment.
    */
   readonly skins: ((accent: number) => void)[] = [];
+  /** Les halos de titres qui suivent l'ambiance : une fonction par titre, qui en change la teinte. L'écran les appelle avec le halo du moment. */
+  readonly glows: ((glow: number) => void)[] = [];
   private readonly width: number;
   private cursor = 0;
 
@@ -188,7 +192,7 @@ class Column {
   /**
    * Texte centré, qui passe à la ligne s'il dépasse la largeur du bloc. `glow` :
    * le halo de néon autour des lettres, pour les titres. 'accent' le fait suivre
-   * la palette ; un nombre est une couleur fixe.
+   * l'ambiance (l'accent, ou la couleur d'effet du pouls) ; un nombre est une couleur fixe.
    */
   line(text: string, size: number, color: number, bold = false, glow?: Glow): void {
     if (glow === undefined) {
@@ -201,8 +205,8 @@ class Column {
     }
     const label = new GlowText(text, size, color, glow === 'accent' ? COLOR.white : glow, { bold, wrap: this.width });
     if (glow === 'accent') {
-      this.skins.push((accent) => {
-        label.glow = accent;
+      this.glows.push((color) => {
+        label.glow = color;
       });
     }
     label.anchorAt(0.5, 0);
@@ -623,6 +627,9 @@ export class Screens {
   /** Ce que l'accent colore dans l'écran affiché, et l'accent qui lui a été donné : null tant qu'aucun ne l'a été. */
   private skins: ((accent: number) => void)[] = [];
   private accent: number | null = null;
+  /** Les halos de titres de l'écran affiché, et le halo qui leur a été donné : null tant qu'aucun ne l'a été. */
+  private glows: ((glow: number) => void)[] = [];
+  private glow: number | null = null;
 
   constructor() {
     this.root.addChild(this.shade, this.content);
@@ -631,9 +638,10 @@ export class Screens {
   /**
    * Montre la vue donnée, et ne remet en page que si elle ou la taille de l'écran
    * a changé. L'ambiance, elle, se rafraîchit à chaque image sans rien retracer :
-   * le voile prend la couleur du fond, et l'accent colore ses formes et ses halos.
+   * le voile prend la couleur du fond, l'accent colore ses formes, et `glow`
+   * (l'accent par défaut) colore les halos de ses titres.
    */
-  draw(view: OverlayView, width: number, height: number, palette: Palette): void {
+  draw(view: OverlayView, width: number, height: number, palette: Palette, glow: number = palette.accent): void {
     this.root.visible = view.kind !== 'none';
     if (view.kind === 'none') {
       if (this.shown) this.clear();
@@ -644,6 +652,10 @@ export class Screens {
     if (palette.accent !== this.accent) {
       this.accent = palette.accent;
       for (const skin of this.skins) skin(palette.accent);
+    }
+    if (glow !== this.glow) {
+      this.glow = glow;
+      for (const tint of this.glows) tint(glow);
     }
   }
 
@@ -670,6 +682,7 @@ export class Screens {
     lower.root.y = upper.height + BLOCK_GAP + free;
     this.content.addChild(upper.root, lower.root);
     this.skins = [...upper.skins, ...lower.skins];
+    this.glows = [...upper.glows, ...lower.glows];
     this.content.scale.set(scale);
     this.content.position.set((width - contentWidth * scale) / 2, top);
 
@@ -702,6 +715,8 @@ export class Screens {
     this.rects = [];
     this.skins = [];
     this.accent = null;
+    this.glows = [];
+    this.glow = null;
     this.shown = null;
   }
 }

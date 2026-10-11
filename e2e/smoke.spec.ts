@@ -219,6 +219,46 @@ test('ambiances : chaque famille de musique a sa palette, et le fondu se joue sa
   expect(errors).toEqual([]);
 });
 
+test('pouls : avec ?test=1&pouls=120 le pouls bat à 120 temps par minute ; sans ?pouls et musique coupée il reste à 0', async ({ page }) => {
+  const errors = watchErrors(page);
+  // L'horloge de la page est figée, puis menée à la main, une image simulée (16 ms) à la fois : le test ne dépend pas de la vitesse du
+  // rendu logiciel, où quelques images par seconde manqueraient le temps (au-dessus de 0,9, il ne dure que 17 ms).
+  await page.clock.install({ time: 0 });
+  await open(page, '/?test=1&pouls=120');
+  expect((await state(page)).bpm).toBe(120);
+  await page.clock.pauseAt(60_000);
+
+  // Sur une seconde (deux temps) : le pouls monte près de 1 sur le temps et retombe sous 0,15 au creux, sans sortir de 0 à 1.
+  const beats: number[] = [];
+  for (let frame = 0; frame < 63; frame += 1) {
+    await page.clock.runFor(16);
+    beats.push((await state(page)).pulse);
+  }
+  expect(Math.max(...beats)).toBeGreaterThan(0.9);
+  expect(Math.min(...beats)).toBeLessThan(0.15);
+  expect(Math.max(...beats)).toBeLessThanOrEqual(1);
+  expect(Math.min(...beats)).toBeGreaterThanOrEqual(0);
+
+  // Le métronome bat aussi pendant une partie.
+  expect(await page.evaluate(() => window.__grappin!.playLevel(3))).toBe(true);
+  await page.clock.runFor(400);
+  expect(await state(page)).toMatchObject({ screen: 'playing', bpm: 120 });
+
+  // Sans `?pouls` et la musique coupée : rien ne bat, ni le pouls ni le tempo. L'horloge reprend son cours réel.
+  await page.clock.resume();
+  await open(page, '/');
+  await tapButton(page, 'music');
+  await expect.poll(async () => (await state(page)).musicOn).toBe(false);
+  const flat: number[] = [];
+  for (let frame = 0; frame < 20; frame += 1) {
+    flat.push((await state(page)).pulse);
+    await page.waitForTimeout(50);
+  }
+  expect(Math.max(...flat)).toBe(0);
+  expect((await state(page)).bpm).toBe(0);
+  expect(errors).toEqual([]);
+});
+
 test('un pilote automatique grimpe au-delà de 10 m sans erreur de console', async ({ page }) => {
   const errors = watchErrors(page);
   // Brume ralentie : sur les machines lentes de l'intégration continue, le pilote réagit à la cadence
