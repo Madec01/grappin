@@ -1,6 +1,7 @@
 import { FREE_RUN, type CoursePlan } from './course';
 import { PULL_MAX } from './launcher';
-import type { Anchor } from './state';
+import { bestLaunch } from './pilot';
+import type { Anchor, RuleEvent, SimState } from './state';
 import { Simulation } from './simulation';
 import type { Tuning } from './tuning';
 
@@ -30,6 +31,9 @@ export interface RobotProfile {
 }
 
 export const REASONABLE: RobotProfile = { name: 'raisonnable', speedTarget: 8, minSlope: 0.6, maxSlope: 1.8, reactionSeconds: 0, maxHoldSeconds: 2.5 };
+/** Temps minimal passé sur un lanceur avant de tirer, en secondes. */
+export const LAUNCH_AIM_SECONDS = 0.35;
+
 export const BEGINNER: RobotProfile = { name: 'débutant', speedTarget: 6, minSlope: 0.3, maxSlope: 3, reactionSeconds: 0.25, maxHoldSeconds: 3 };
 
 export interface RobotReport {
@@ -45,7 +49,10 @@ export interface RobotReport {
   readonly cause: 'fog' | 'fall' | null;
 }
 
-export function playRobot(seed: number, tuning: Tuning, seconds: number, profile: RobotProfile = REASONABLE, plan: CoursePlan = FREE_RUN): RobotReport {
+/** Ce qu'un observateur peut suivre pas à pas : l'état après le pas, et les événements de règles du pas. Pour les diagnostics. */
+export type RobotTrace = (state: SimState, events: readonly RuleEvent[]) => void;
+
+export function playRobot(seed: number, tuning: Tuning, seconds: number, profile: RobotProfile = REASONABLE, plan: CoursePlan = FREE_RUN, trace?: RobotTrace): RobotReport {
   const sim = new Simulation(seed, tuning, plan);
   const reactionSteps = Math.round(profile.reactionSeconds / tuning.stepSeconds);
   let catches = 0;
@@ -61,6 +68,8 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
   let launchedStep = -1_000_000;
   let launchedY = -Infinity;
   const launchWaitSteps = Math.round(1.5 / tuning.stepSeconds);
+  /** Sur un lanceur, le robot prend le temps de bander la fronde : le personnage doit d'abord être tiré jusqu'au lanceur, et un pouce ne vise pas en moins d'un tiers de seconde. */
+  const aimSteps = Math.max(reactionSteps, Math.round(LAUNCH_AIM_SECONDS / tuning.stepSeconds));
   const limit = Math.round(seconds / tuning.stepSeconds);
   while (sim.state.status === 'alive' && sim.state.step < limit) {
     const s = sim.state;
@@ -76,9 +85,10 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
         }
       }
     } else if (s.anchors.find((a) => a.id === s.rope?.anchorId)?.kind === 'lanceur') {
-      // Sur un lanceur : après son temps de réaction, le robot vise le point le plus proche au-dessus et tire à l'opposé, aux deux tiers.
+      // Sur un lanceur : après son temps de réaction, le robot tire la traction que le vérificateur a prouvée (voir `pilot.ts`) ;
+      // sans sortie prouvée, il vise le point le plus proche au-dessus et tire à l'opposé, aux deux tiers.
       const launcher = s.anchors.find((a) => a.id === s.rope?.anchorId)!;
-      if (plannedRelease < 0) plannedRelease = s.step + reactionSteps;
+      if (plannedRelease < 0) plannedRelease = s.step + aimSteps;
       if (s.step >= plannedRelease) {
         plannedRelease = -1;
         let target: Anchor | null = null;
@@ -88,7 +98,7 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
         }
         const dir = target ? { x: target.pos.x - launcher.pos.x, y: target.pos.y - launcher.pos.y } : { x: 0, y: 1 };
         const len = Math.hypot(dir.x, dir.y) || 1;
-        sim.release({ x: (-dir.x / len) * PULL_MAX * 0.7, y: (-dir.y / len) * PULL_MAX * 0.7 });
+        sim.release(bestLaunch(s, tuning) ?? { x: (-dir.x / len) * PULL_MAX * 0.7, y: (-dir.y / len) * PULL_MAX * 0.7 });
         launchedStep = s.step;
         launchedY = launcher.pos.y;
       }
@@ -108,10 +118,12 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
     }
     sim.step();
     maxSpeed = Math.max(maxSpeed, Math.hypot(sim.state.hero.vel.x, sim.state.hero.vel.y));
-    for (const e of sim.drain()) {
+    const events = sim.drain();
+    for (const e of events) {
       if (e.type === 'release' && e.perfect) perfect += 1;
       if (e.type === 'death') cause = e.cause;
     }
+    if (trace) trace(sim.state, events);
   }
   const t = sim.state.step * tuning.stepSeconds;
   return { height: sim.state.height, seconds: t, catches, perfect, maxSpeed, hold: catches ? holdTotal / catches : 0, alive: sim.state.status === 'alive', won: sim.state.status === 'won', cause };

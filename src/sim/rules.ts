@@ -170,9 +170,10 @@ export function release(state: SimState, tuning: Tuning, events: RuleEvent[], fo
   const held = (state.step - state.attachStep) * tuning.stepSeconds;
   state.hero.vel = releaseVelocity(state, tuning);
   if (kind === 'booster') events.push({ type: 'boost' });
-  // Un lancer ne se juge pas : la série de parfaits reste ce qu'elle est.
+  // Un lancer ne se juge pas : la série de parfaits reste ce qu'elle est. Un lâcher parfait monte le combo ; un lâcher
+  // correct ne le casse plus, il le fait redescendre de `comboMissPenalty` crans ; seules les erreurs réelles le remettent à zéro.
   const perfect = kind !== 'lanceur' && isPerfectRelease(state.hero.vel.x, state.hero.vel.y, tuning, state.env);
-  if (kind !== 'lanceur') state.combo = perfect ? state.combo + 1 : 0;
+  if (kind !== 'lanceur') state.combo = perfect ? state.combo + 1 : Math.max(0, state.combo - tuning.comboMissPenalty);
   state.pull = { x: 0, y: 0 };
   state.lastAnchorId = state.rope.anchorId;
   state.releaseStep = state.step;
@@ -297,7 +298,7 @@ export function applyPickups(state: SimState, tuning: Tuning, events: RuleEvent[
     if (pickup.taken || distance(pickup.pos, state.hero.pos) > tuning.heroRadius + tuning.pickupRadius) continue;
     pickup.taken = true;
     state.score += tuning.pickupScore * multiplier(state.combo, tuning);
-    events.push({ type: 'pickup', pickupId: pickup.id });
+    events.push({ type: 'pickup', pickupId: pickup.id, bonus: pickup.bonus === true });
   }
 }
 

@@ -1,11 +1,13 @@
 import type { Vec2 } from '../core/math/vec2';
 import { Music, silentAudio } from '../audio/music';
 import { SILENT_PULSE, pulseAt, syntheticRhythm, type Pulse, type Rhythm } from '../audio/rhythm';
+import { bestLaunch } from '../sim/pilot';
 import { silentRhythms, type RhythmSource } from '../audio/rhythms';
+import { cueFor, silentSfx, type SoundPlayer } from '../audio/sfx';
 import { LEVELS, levelById, type LevelDef } from '../data/levels';
 import { TITLE_TRACK, levelTrack, trackFamily, type MusicFamily, type TrackId } from '../data/musique';
 import { levelFor } from '../meta/levels';
-import { createProfile, endLevel, endRun, loadProfile, saveProfile, toggleTalisman, type LevelOutcome, type Profile, type ProfileStorage, type RunOutcome } from '../meta/profile';
+import { createProfile, endLevel, endRun, loadProfile, saveProfile, toggleTalisman, type LevelOutcome, type Profile, type ProfileStorage, type RunOutcome, type FreeStart } from '../meta/profile';
 import { RunTracker } from '../meta/runTracker';
 import { TALISMANS, applyTalismans, type TalismanId } from '../meta/talismans';
 import { freeRunStartY, isUnlocked, levelPlan, levelTuning, unlockedLevel, type LevelResult } from '../meta/traversee';
@@ -125,6 +127,9 @@ export interface DebugState {
   /** Réglage « Musique » du profil, et piste en cours de lecture, ou null. */
   readonly musicOn: boolean;
   readonly track: TrackId | null;
+  /** Réglage « Sons » et départ de la course libre. */
+  readonly sfxOn: boolean;
+  readonly freeStart: FreeStart;
   /** Famille de la musique voulue en ce moment, donc l'ambiance visée : la palette y arrive en fondu si elle vient de changer. */
   readonly palette: MusicFamily;
   /** Le pouls du moment : 1 sur un temps de la musique, retombe vers 0 ; et le tempo de la piste, 0 sans rythme. */
@@ -189,8 +194,8 @@ const EXTENT_REACH = 12;
 /** Marge au-delà du point le plus écarté, pour son anneau et un peu d'air. */
 const EXTENT_MARGIN = 1.2;
 
-/** Demi-largeur que l'écran doit montrer : jusqu'au point le plus écarté près du personnage. */
-function visibleExtent(state: SimState): number {
+/** Demi-largeur que l'écran doit montrer : jusqu'au point le plus écarté près du personnage. Exporté pour les tests, qui posent la caméra d'un coup. */
+export function visibleExtent(state: SimState): number {
   let extent = 0;
   for (const anchor of state.anchors) {
     if (Math.abs(anchor.pos.y - state.hero.pos.y) > EXTENT_REACH) continue;
@@ -250,6 +255,10 @@ export class Game {
 
   /** La musique : muette par défaut, branchée sur le navigateur par `main.ts`. */
   private readonly music: Music;
+  /** Les bruitages : muets par défaut, branchés par `main.ts`. */
+  private readonly sfx: SoundPlayer;
+  /** Après une reprise, le lever du doigt qui finit l'appui sur « Reprendre » ne doit pas lâcher la corde. */
+  private swallowRelease = false;
 
   /**
    * L'ambiance : la famille visée, la palette montrée en ce moment (celle de la
@@ -268,12 +277,13 @@ export class Game {
   private readonly metronome: Rhythm | null;
   private clock = 0;
 
-  constructor(view: GameView, settings: GameSettings, storage: ProfileStorage, music: Music = new Music(silentAudio()), rhythms: RhythmSource = silentRhythms()) {
+  constructor(view: GameView, settings: GameSettings, storage: ProfileStorage, music: Music = new Music(silentAudio()), rhythms: RhythmSource = silentRhythms(), sfx: SoundPlayer = silentSfx()) {
     this.view = view;
     this.settings = settings;
     this.storage = storage;
     this.music = music;
     this.rhythms = rhythms;
+    this.sfx = sfx;
     this.metronome = settings.pulseBpm === null ? null : syntheticRhythm(settings.pulseBpm);
     this.profile = loadProfile(storage);
     this.run = this.newFreeRun(settings.seed ?? randomSeed());
@@ -289,8 +299,15 @@ export class Game {
   press(x?: number, y?: number): void {
     // Le premier geste du joueur : le navigateur permet enfin le son.
     this.music.unlock();
+    this.sfx.unlock();
     this.finger = x === undefined || y === undefined ? null : { from: { x, y }, at: { x, y } };
     if (this.screen === 'playing') {
+      // Le bouton de pause, seul bouton de la partie : un appui dessus n'accroche pas.
+      if (x !== undefined && y !== undefined && this.view.hitTest(x, y) === 'pause') {
+        this.finger = null;
+        this.pause();
+        return;
+      }
       this.run.sim.press();
       return;
     }
@@ -308,7 +325,37 @@ export class Game {
         return this.pressWon(button);
       case 'talismans':
         return this.pressTalismans(button);
+      case 'paused':
+        return this.pressPaused(button);
     }
+  }
+
+  /**
+   * La pause : la partie s'arrête là où elle est, corde comprise. Depuis le
+   * bouton de pause, quand l'application passe en arrière-plan, ou quand le
+   * système annule le geste. Hors partie, sans effet.
+   */
+  pause(): void {
+    if (this.screen !== 'playing') return;
+    this.screen = 'paused';
+    this.finger = null;
+  }
+
+  /**
+   * La reprise, sur le bouton « Reprendre » : le lever du doigt qui finit cet
+   * appui est avalé, pour ne pas lâcher une corde tenue ni lancer un lanceur. Le
+   * joueur reprend la corde en main en appuyant de nouveau.
+   */
+  resume(): void {
+    if (this.screen !== 'paused') return;
+    this.screen = 'playing';
+    this.swallowRelease = true;
+  }
+
+  /** Pause : « Reprendre » reprend, « Quitter » revient au titre ; un appui ailleurs ne fait rien. */
+  private pressPaused(button: ButtonId | null): void {
+    if (button === 'resume') this.resume();
+    else if (button === 'quit') this.restart();
   }
 
   /** Le doigt glisse, à cette position en pixels CSS. Sans effet tant qu'aucun doigt n'est posé avec une position. */
@@ -319,13 +366,20 @@ export class Game {
   /**
    * Le doigt se lève : le personnage est libéré avec sa vitesse du moment. Depuis
    * un lanceur, il est lancé à l'opposé de la traction : `pull` (mètres de
-   * monde, y vers le haut) si on la donne, sinon celle du doigt, sinon la
-   * dernière visée. Ailleurs, la traction ne compte pas.
+   * monde, y vers le haut) si on la donne, sinon celle de la dernière image,
+   * exactement celle que le joueur voit (le zoom de la caméra bouge d'une image
+   * à l'autre : relire le doigt ici lancerait un peu à côté de l'ombre
+   * prédictive). Ailleurs, la traction ne compte pas.
    */
   release(pull?: Vec2): void {
+    if (this.swallowRelease) {
+      this.swallowRelease = false;
+      this.finger = null;
+      return;
+    }
     if (this.screen === 'playing') {
       const { sim } = this.run;
-      sim.release(heldKind(sim.state) === 'lanceur' ? (pull ?? this.fingerPull()) : undefined);
+      sim.release(heldKind(sim.state) === 'lanceur' ? (pull ?? sim.state.pull) : undefined);
     }
     this.finger = null;
   }
@@ -409,6 +463,7 @@ export class Game {
     effects.update(dt, env.wind.x);
     const track = this.wantedTrack();
     this.music.setEnabled(this.profile.music);
+    this.sfx.setEnabled(this.profile.sfx);
     this.music.play(track);
     this.music.update(dt);
     // L'ambiance suit la piste voulue, que la musique joue ou non.
@@ -421,7 +476,9 @@ export class Game {
       tracker.handle(event);
       if (event.type === 'death') this.conclude(event.cause);
       if (event.type === 'finish') this.conclude(null);
-      if (event.type === 'pickup') this.run.pickupsTaken += 1;
+      if (event.type === 'pickup' && !event.bonus) this.run.pickupsTaken += 1;
+      const cue = cueFor(event);
+      if (cue) this.sfx.play(cue);
       if (event.type === 'event') this.announce(event.kind, event.phase);
       // Un niveau porte déjà son nom : pas de bannière de palier.
       if (event.type !== 'tier' || this.run.level === null) effects.handle(event, heroOnScreen);
@@ -452,6 +509,11 @@ export class Game {
     if (position && rhythm) return pulseAt(rhythm, position.time);
     if (this.metronome) return pulseAt(this.metronome, this.clock);
     return SILENT_PULSE;
+  }
+
+  /** La traction qui, depuis le lanceur tenu, lance vers un point au-dessus à travers le mur (celle que le vérificateur a prouvée), ou null. Pour les pilotes de test. */
+  launchAim(): Vec2 | null {
+    return bestLaunch(this.run.sim.state, this.run.tuning);
   }
 
   /** Les points d'accroche encore là, pour un pilote de test qui doit viser (un lanceur, un trou dans un mur). */
@@ -494,6 +556,8 @@ export class Game {
       testMode: this.settings.testMode,
       musicOn: this.profile.music,
       track: this.music.playing,
+      sfxOn: this.profile.sfx,
+      freeStart: this.profile.freeStart,
       palette: trackFamily(this.wantedTrack()),
       pulse: this.pulse.beat,
       bpm: this.pulse.bpm,
@@ -535,7 +599,7 @@ export class Game {
 
   /** Course libre neuve sur une graine, depuis la zone la plus haute franchie, avec les talismans équipés. */
   private newFreeRun(seed: number): Run {
-    const plan: CoursePlan = { kind: 'infinite', startY: freeRunStartY(this.profile) };
+    const plan: CoursePlan = { kind: 'infinite', startY: this.profile.freeStart === 'ground' ? 0 : freeRunStartY(this.profile) };
     return this.buildRun(null, seed, applyTalismans(this.settings.tuning, this.profile.equipped), plan);
   }
 
@@ -589,7 +653,23 @@ export class Game {
     else if (button === 'levels') this.openLevels();
     else if (button === 'free') this.playFree();
     else if (button === 'music') this.toggleMusic();
+    else if (button === 'sfx') this.toggleSfx();
+    else if (button === 'start') this.toggleFreeStart();
     else this.startLevel(unlockedLevel(this.profile), true);
+  }
+
+  /** Le réglage « Sons » du titre : coupe ou remet les bruitages, et s'en souvient dans le profil. */
+  private toggleSfx(): void {
+    this.profile = { ...this.profile, sfx: !this.profile.sfx };
+    saveProfile(this.storage, this.profile);
+    this.sfx.setEnabled(this.profile.sfx);
+  }
+
+  /** Le départ de la course libre, du titre : avancé (là où la progression l'ouvre) ou du sol, pour réapprendre en douceur. */
+  private toggleFreeStart(): void {
+    this.profile = { ...this.profile, freeStart: this.profile.freeStart === 'advanced' ? 'ground' : 'advanced' };
+    saveProfile(this.storage, this.profile);
+    this.run = this.newFreeRun(this.freeSeed());
   }
 
   /** Le réglage « Musique » du titre : coupe ou remet la musique, et s'en souvient dans le profil. */
@@ -695,7 +775,7 @@ export class Game {
     const stats = tracker.stats(sim.state, tuning);
     let outcome: RunOutcome | LevelOutcome;
     if (level) {
-      this.run.result = { won: cause === null, pickupsTaken: stats.pickups, pickupsTotal: sim.state.course.pickupsTotal, perfectStreak: stats.perfectStreak };
+      this.run.result = { won: cause === null, pickupsTaken: stats.requiredPickups, pickupsTotal: sim.state.course.pickupsTotal, perfectStreak: stats.perfectStreak };
       outcome = endLevel(this.profile, level, stats, sim.state.score, this.run.result);
     } else {
       outcome = endRun(this.profile, stats, sim.state.score);

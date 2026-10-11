@@ -1,5 +1,6 @@
 import type { LevelDef } from '../data/levels';
 import type { MissionDef } from '../meta/missions';
+import type { FreeStart } from '../meta/profile';
 import { talismanById, type TalismanId } from '../meta/talismans';
 import { PERFECT_STREAK_STAR, starChecks, type LevelResult } from '../meta/traversee';
 import type { EventKind } from '../sim/events';
@@ -36,6 +37,39 @@ export function missionDoneLine(def: MissionDef): string {
 export function levelTitle(level: LevelDef): string {
   return `Niveau ${level.id} · ${level.name}`;
 }
+
+/** « Rang 4 » : le rang du grimpeur, sur le titre, à la fin d'une partie et sur la ligne d'un talisman verrouillé. Jamais « Niveau », qui désigne un niveau de la traversée. */
+export function rankLabel(rank: number): string {
+  return `Rang ${rank}`;
+}
+
+/** « Rang 4 ! » : le rang gagné, sur l'écran de fin. */
+export function rankUpLine(rank: number): string {
+  return `${rankLabel(rank)} !`;
+}
+
+/** « Continuer · Niveau 3 · Les enseignes » : l'action principale du titre, qui reprend au niveau le plus avancé jouable. */
+export function continueLabel(level: LevelDef): string {
+  return `Continuer · ${levelTitle(level)}`;
+}
+
+/** Le réglage « Musique » du titre : « Musique : oui » ou « Musique : non ». */
+export function musicLabel(on: boolean): string {
+  return on ? 'Musique : oui' : 'Musique : non';
+}
+
+/** Le réglage « Sons » (bruitages) du titre : « Sons : oui » ou « Sons : non ». */
+export function sfxLabel(on: boolean): string {
+  return on ? 'Sons : oui' : 'Sons : non';
+}
+
+/** Le réglage « Départ » de la course libre : « Départ : avancé » (là où la progression l'ouvre) ou « Départ : du sol ». */
+export function startLabel(start: FreeStart): string {
+  return start === 'ground' ? 'Départ : du sol' : 'Départ : avancé';
+}
+
+/** La ligne d'aide du voile de pause : la corde ne se reprend pas toute seule. */
+export const PAUSE_HELP = 'Reprends la corde en appuyant de nouveau';
 
 /** « 3 · Les enseignes » : une ligne de la liste des niveaux. */
 export function levelRowTitle(level: LevelDef): string {
@@ -101,11 +135,11 @@ export interface Announcement {
 /** Annonce du début des événements, hors le vent, dont la phrase dépend du côté. */
 const STARTS: Record<Exclude<EventKind, 'vent'>, Announcement> = {
   bascule: { title: 'La bascule !', detail: 'Le niveau tourne' },
-  panne: { title: 'Panne de lampadaires', detail: 'Vise de mémoire' },
+  panne: { title: 'Panne de lumière', detail: 'Vise de mémoire' },
   pluie: { title: 'Pluie d\'étoiles', detail: 'Cueille-les au vol' },
   alerte: { title: 'Alerte !', detail: 'La brume accélère' },
   cable: { title: 'Câbles', detail: 'Les accroches glissent' },
-  traversiere: { title: 'Traversières !', detail: 'Les prises balaient la ville' },
+  traversiere: { title: 'Traversières !', detail: 'Les prises balaient toute la largeur' },
 };
 
 /** Les événements dont la fin se remarque : ceux qui ont changé la façon de jouer. */

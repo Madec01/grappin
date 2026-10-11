@@ -168,11 +168,29 @@ const SHAPES: Record<Archetype, { dy: readonly [number, number]; dx: readonly [n
   lanceur: { dy: [0.55, 0.9], dx: [0.4, 1] },
 };
 
-/** Le mur à trou d'un lanceur : hauteur au-dessus du lanceur, demi-largeur du trou, et hauteur du point suivant au-dessus du mur (hors zone de pendaison). */
+/**
+ * Le mur à trou d'un lanceur : hauteur au-dessus du lanceur, demi-largeur du
+ * trou, et hauteur du point suivant au-dessus du mur (hors zone de pendaison).
+ *
+ * Le trou est toujours DÉCALÉ du lanceur (retour du propriétaire : « le
+ * lanceur est trop facile, viser n'apporte pas assez ») : un tir vertical bute
+ * sur le mur, il faut choisir un angle. Dès que les fourches sont permises, une
+ * fois sur deux le mur a DEUX trous : un large, sûr, d'un côté, et un étroit de
+ * l'autre, surmonté d'une étoile ; les deux routes se rejoignent plus haut, et
+ * le vérificateur exige qu'un lancer attrape chacune.
+ */
 const WALL_RISE_MIN = 4.5;
 const WALL_RISE_RANGE = 1.5;
 const GAP_HALF_WIDTH = 1.2;
+const SAFE_GAP_HALF_WIDTH = 1.4;
+const TIGHT_GAP_HALF_WIDTH = 0.9;
 const ABOVE_WALL = 4.2;
+/** Décalage du centre du trou par rapport au lanceur, en mètres : au moins le demi-trou large plus le personnage et une marge. */
+const GAP_OFFSET_MIN = 1.9;
+const GAP_OFFSET_MAX = 2.7;
+/** Hauteur de l'étoile de la route étroite au-dessus du mur, et du point où les deux routes se rejoignent au-dessus des sorties. */
+const TIGHT_STAR_ABOVE_WALL = 1.3;
+const MERGE_ABOVE_EXITS = 3.2;
 
 /**
  * Construit un segment depuis le dernier point connu (`from`), ou depuis le
@@ -241,17 +259,42 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
       continue;
     }
     if (archetype === 'lanceur' && !launcherDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > 11) {
-      // Lanceur : le dernier point devient un lanceur, un mur à trou le surplombe, et la chaîne reprend au-dessus du mur.
-      anchors[anchors.length - 1] = makeAnchor(ids, cur, 'lanceur');
+      // Lanceur : le dernier point devient un lanceur, un mur à trou décalé le surplombe, et la chaîne reprend au-dessus du mur.
+      const launcher = makeAnchor(ids, cur, 'lanceur');
+      anchors[anchors.length - 1] = launcher;
       const wallY = cur.y + WALL_RISE_MIN + WALL_RISE_RANGE * rng.next();
-      const gapX = clampX(cur.x + (rng.next() - 0.5) * 2 * Math.max(0, halfWidth - 2.2), halfWidth);
       const wallX = halfWidth + WALL_MARGIN;
-      fixed.push({ id: ids.obstacle, x0: -wallX, y0: wallY, x1: gapX - GAP_HALF_WIDTH, y1: wallY + OBSTACLE_THICKNESS });
-      ids.obstacle += 1;
-      fixed.push({ id: ids.obstacle, x0: gapX + GAP_HALF_WIDTH, y0: wallY, x1: wallX, y1: wallY + OBSTACLE_THICKNESS });
-      ids.obstacle += 1;
-      cur = { x: clampX(gapX + (rng.next() - 0.5) * 1.6, halfWidth), y: wallY + ABOVE_WALL };
-      anchors.push(makeAnchor(ids, cur));
+      const wall = (x0: number, x1: number): void => {
+        fixed.push({ id: ids.obstacle, x0, y0: wallY, x1, y1: wallY + OBSTACLE_THICKNESS });
+        ids.obstacle += 1;
+      };
+      // Le trou part du côté où il y a le plus de place, toujours décalé : un tir vertical bute sur le mur.
+      const side = cur.x > 0 ? -1 : 1;
+      const offset = GAP_OFFSET_MIN + (GAP_OFFSET_MAX - GAP_OFFSET_MIN) * rng.next();
+      const gapX = clampX(cur.x + side * offset, halfWidth);
+      // Deux routes quand les fourches sont permises et qu'il reste de la place de l'autre côté pour un second trou décalé.
+      const roomBehind = halfWidth - Math.abs(cur.x) >= GAP_OFFSET_MIN + TIGHT_GAP_HALF_WIDTH;
+      const twoRoutes = profile.split && junctionId === null && roomBehind && rng.next() < 0.5;
+      if (twoRoutes) {
+        const tightX = clampX(cur.x - side * (GAP_OFFSET_MIN + (GAP_OFFSET_MAX - GAP_OFFSET_MIN) * rng.next()), halfWidth);
+        const [left, right] = gapX < tightX ? [{ x: gapX, half: SAFE_GAP_HALF_WIDTH }, { x: tightX, half: TIGHT_GAP_HALF_WIDTH }] : [{ x: tightX, half: TIGHT_GAP_HALF_WIDTH }, { x: gapX, half: SAFE_GAP_HALF_WIDTH }];
+        wall(-wallX, left.x - left.half);
+        wall(left.x + left.half, right.x - right.half);
+        wall(right.x + right.half, wallX);
+        const safe = makeAnchor(ids, { x: gapX, y: wallY + ABOVE_WALL });
+        const tech = makeAnchor(ids, { x: tightX, y: wallY + ABOVE_WALL });
+        pickups.push(makePickup(ids, { x: tightX, y: wallY + OBSTACLE_THICKNESS + TIGHT_STAR_ABOVE_WALL }));
+        cur = { x: clampX((gapX + tightX) / 2, halfWidth), y: wallY + ABOVE_WALL + MERGE_ABOVE_EXITS };
+        const merge = makeAnchor(ids, cur);
+        anchors.push(safe, tech, merge);
+        junctionId = launcher.id;
+        branchIds = [safe.id, tech.id];
+      } else {
+        wall(-wallX, gapX - GAP_HALF_WIDTH);
+        wall(gapX + GAP_HALF_WIDTH, wallX);
+        cur = { x: clampX(gapX + (rng.next() - 0.5) * 1.0, halfWidth), y: wallY + ABOVE_WALL };
+        anchors.push(makeAnchor(ids, cur));
+      }
       launcherDone = true;
       continue;
     }
@@ -307,10 +350,21 @@ const SPECIAL_CLEARANCE = 1.6;
  * la visée peut la préférer. Chacune est insérée juste après son point, pour
  * garder la liste à peu près ordonnée par hauteur et le sommet en dernier.
  */
+/**
+ * La bande de tir de chaque lanceur : de juste sous lui jusqu'au-dessus du point
+ * où la chaîne reprend par-dessus son mur. Rien d'autre que le mur ne s'y pose :
+ * ni obstacle tiré au sort, ni prise spéciale, qui n'aurait pas de sortie.
+ */
+function launchBands(anchors: readonly Anchor[]): { readonly y0: number; readonly y1: number }[] {
+  return anchors.filter((a) => a.kind === 'lanceur').map((a) => ({ y0: a.pos.y - 1, y1: a.pos.y + WALL_RISE_MIN + WALL_RISE_RANGE + ABOVE_WALL + 1 }));
+}
+
 function addSpecialAnchors(rng: Rng, ids: IdCounters, anchors: Anchor[], profile: TierProfile, halfWidth: number): void {
   const wanted: Anchor['kind'][] = [...Array<Anchor['kind']>(profile.eclipse).fill('eclipse'), ...Array<Anchor['kind']>(profile.electric).fill('electrique')];
   if (wanted.length === 0 || anchors.length < 5) return;
   const farEnough = (pos: Vec2): boolean => anchors.every((a) => Math.hypot(a.pos.x - pos.x, a.pos.y - pos.y) >= SPECIAL_CLEARANCE);
+  const bands = launchBands(anchors);
+  const inBand = (pos: Vec2): boolean => bands.some((band) => pos.y > band.y0 && pos.y < band.y1);
   for (const kind of wanted) {
     for (let attempt = 0; attempt < 6; attempt += 1) {
       // Jamais sur le premier ni le dernier point, ni sur un point qui glisse.
@@ -319,11 +373,13 @@ function addSpecialAnchors(rng: Rng, ids: IdCounters, anchors: Anchor[], profile
       const here = anchors[i]!;
       const after = anchors[i + 1]!;
       if (here.cable || before.cable || after.cable) continue;
+      // Jamais autour d'un lanceur ni dans sa bande de tir : sous le mur, une prise n'aurait pas de sortie.
+      if (before.kind === 'lanceur' || here.kind === 'lanceur' || after.kind === 'lanceur') continue;
       const pos =
         kind === 'eclipse'
           ? { x: clampX((before.pos.x + after.pos.x) / 2 + (rng.next() - 0.5) * 1.2, halfWidth), y: here.pos.y + ECLIPSE_RISE }
           : { x: clampX(here.pos.x + (here.pos.x > 0 ? -1 : 1) * ELECTRIC_OFFSET, halfWidth), y: here.pos.y + ELECTRIC_RISE };
-      if (!farEnough(pos)) continue;
+      if (!farEnough(pos) || inBand(pos)) continue;
       anchors.splice(i + 1, 0, makeAnchor(ids, pos, kind));
       break;
     }
@@ -407,6 +463,9 @@ function placeObstacles(
 ): Obstacle[] {
   const wallX = halfWidth + WALL_MARGIN;
   const obstacles: Obstacle[] = [...fixed];
+  // Entre un lanceur et la chaîne qui reprend au-dessus de son mur, aucun obstacle tiré au sort : le couloir du tir, décalé, doit rester libre.
+  const bands = launchBands(anchors);
+  const inLaunchBand = (box: Obstacle): boolean => bands.some((band) => box.y1 > band.y0 && box.y0 < band.y1);
   const { env, entryEnv } = context;
   // Un point qui glisse est tenu à l'écart partout où il passe : à ses deux bouts et au milieu. Autour d'un lanceur, rien jusqu'où la traction recule le personnage.
   const clearOf = (pos: Vec2, box: Obstacle): boolean => circleBoxGap(pos, 0, box) >= OBSTACLE_CLEARANCE && !underAnchor(pos, box, env);
@@ -414,6 +473,7 @@ function placeObstacles(
     anchors.every((a) => (a.kind === 'lanceur' ? circleBoxGap(a.pos, LANCEUR_CLEARANCE, box) > 0 : (a.cable ? [a.cable.from, a.pos, a.cable.to] : [a.pos]).every((pos) => clearOf(pos, box)))) &&
     pickups.every((p) => circleBoxGap(p.pos, 0, box) >= PICKUP_CLEARANCE) &&
     (from === null || (circleBoxGap(from, 0, box) >= OBSTACLE_CLEARANCE && !underAnchor(from, box, env) && !underAnchor(from, box, entryEnv))) &&
+    !inLaunchBand(box) &&
     obstacles.every((o) => box.y1 < o.y0 - 1 || box.y0 > o.y1 + 1);
   // Les obstacles vivent entre deux mètres au-dessus du départ et deux mètres sous le sommet du segment,
   // jamais au-dessus : un segment trop court pour cela n'en reçoit aucun.

@@ -28,7 +28,7 @@ const plain = (spacing: number): TierProfile => ({ spacing, obstacles: 0, split:
 export const LEVELS: readonly LevelDef[] = [
   {
     id: 1,
-    name: 'Les toits',
+    name: 'Les premiers anneaux',
     intro: 'Garde le doigt posé pour prendre de l\'élan, relâche en montant.',
     seed: 1001,
     startY: 0,
@@ -39,7 +39,7 @@ export const LEVELS: readonly LevelDef[] = [
   },
   {
     id: 2,
-    name: 'Les gouttières',
+    name: 'La chaîne',
     intro: 'Des corniches à frôler, et une première fourche : la route haute porte une étoile.',
     seed: 1002,
     startY: 90,
@@ -50,7 +50,7 @@ export const LEVELS: readonly LevelDef[] = [
   },
   {
     id: 3,
-    name: 'Les enseignes',
+    name: 'Les lueurs',
     intro: 'Des couloirs d\'étoiles, et une pluie d\'étoiles à cueillir au vol.',
     seed: 1003,
     startY: 200,
@@ -61,8 +61,8 @@ export const LEVELS: readonly LevelDef[] = [
   },
   {
     id: 4,
-    name: 'Les clochers',
-    intro: 'Les accroches en pointillés cassent après une seconde. Et les lampadaires ont des pannes.',
+    name: 'Les arcs',
+    intro: 'Les accroches en pointillés cassent après une seconde. Et la lumière a des pannes.',
     seed: 1004,
     startY: 320,
     endY: 450,
@@ -72,7 +72,7 @@ export const LEVELS: readonly LevelDef[] = [
   },
   {
     id: 5,
-    name: 'Les antennes',
+    name: 'Les flèches',
     intro: 'Les accroches à chevron propulsent le lâcher. Attention : le niveau va basculer.',
     seed: 1005,
     startY: 450,
@@ -83,7 +83,7 @@ export const LEVELS: readonly LevelDef[] = [
   },
   {
     id: 6,
-    name: 'Les grues',
+    name: 'Les bras',
     intro: 'Un champ de dalles à frôler sans toucher, et un coup de vent.',
     seed: 1006,
     startY: 590,
@@ -105,7 +105,7 @@ export const LEVELS: readonly LevelDef[] = [
   },
   {
     id: 8,
-    name: 'Les toits, de nuit',
+    name: 'Les anneaux, de nuit',
     intro: 'Plus espacé, plus rapide, et le niveau bascule de l\'autre côté.',
     seed: 1008,
     startY: 900,
@@ -116,7 +116,7 @@ export const LEVELS: readonly LevelDef[] = [
   },
   {
     id: 9,
-    name: 'Les gouttières, de nuit',
+    name: 'La chaîne, de nuit',
     intro: 'Trois obstacles par segment, du vent, une pluie d\'étoiles et des câbles.',
     seed: 1009,
     startY: 1070,
@@ -138,7 +138,7 @@ export const LEVELS: readonly LevelDef[] = [
   },
   {
     id: 11,
-    name: 'Les passerelles',
+    name: 'Les rails',
     intro: 'Le lanceur : accroche-toi, tire le doigt à l\'opposé, relâche. Vise le trou du mur.',
     seed: 1011,
     startY: 1450,
@@ -149,7 +149,7 @@ export const LEVELS: readonly LevelDef[] = [
   },
   {
     id: 12,
-    name: 'Les cheminées',
+    name: 'Les colonnes',
     intro: 'Des murs à trou entre les dalles, et une pluie d\'étoiles à mi-chemin.',
     seed: 1012,
     startY: 1630,
@@ -160,8 +160,8 @@ export const LEVELS: readonly LevelDef[] = [
   },
   {
     id: 13,
-    name: 'Les tours',
-    intro: 'Les traversières balaient la ville, puis le vent se lève.',
+    name: 'Les verticales',
+    intro: 'Les traversières balaient toute la largeur, puis le vent se lève.',
     seed: 1013,
     startY: 1820,
     endY: 2020,
@@ -171,7 +171,7 @@ export const LEVELS: readonly LevelDef[] = [
   },
   {
     id: 14,
-    name: 'La centrale',
+    name: 'La décharge',
     intro: 'Des prises électriques partout : attrape-les calmes, lâche avant la charge. Et une panne.',
     seed: 1014,
     startY: 2020,
@@ -182,7 +182,7 @@ export const LEVELS: readonly LevelDef[] = [
   },
   {
     id: 15,
-    name: 'Les enseignes, de nuit',
+    name: 'Les lueurs, de nuit',
     intro: 'Des éclipses pour aller plus vite, une alerte qui presse.',
     seed: 1015,
     startY: 2220,
@@ -193,7 +193,7 @@ export const LEVELS: readonly LevelDef[] = [
   },
   {
     id: 16,
-    name: 'Le pont',
+    name: 'L\'arche',
     intro: 'Le niveau bascule : lance de côté. Puis des câbles.',
     seed: 1016,
     startY: 2430,
@@ -215,7 +215,7 @@ export const LEVELS: readonly LevelDef[] = [
   },
   {
     id: 18,
-    name: 'Le phare',
+    name: 'La balise',
     intro: 'Dans le noir, vise de mémoire ; puis les traversières.',
     seed: 1018,
     startY: 2870,

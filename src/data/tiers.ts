@@ -4,12 +4,12 @@
  * et se changent ici sans toucher au code.
  */
 export const TIER_NAMES: readonly string[] = [
-  'Les toits',
-  'Les gouttières',
-  'Les enseignes',
-  'Les clochers',
-  'Les antennes',
-  'Les grues',
+  'Les premiers anneaux',
+  'La chaîne',
+  'Les lueurs',
+  'Les arcs',
+  'Les flèches',
+  'Les bras',
   'Les nuages',
 ];
 

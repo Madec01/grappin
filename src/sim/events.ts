@@ -161,7 +161,7 @@ export function applyEvents(state: SimState, tuning: Tuning, events: RuleEvent[]
   if (raining && state.step % Math.round(RAIN_EVERY_SECONDS / dt) === 0) {
     const rng = createRng(state.course.seed);
     rng.setState(state.rainRng);
-    const star: Pickup = { id: state.course.ids.pickup, pos: { x: -4 + 8 * rng.next(), y: state.hero.pos.y + RAIN_ABOVE_HERO }, taken: false, vel: { x: 0, y: -RAIN_FALL_SPEED } };
+    const star: Pickup = { id: state.course.ids.pickup, pos: { x: -4 + 8 * rng.next(), y: state.hero.pos.y + RAIN_ABOVE_HERO }, taken: false, vel: { x: 0, y: -RAIN_FALL_SPEED }, bonus: true };
     state.course.ids.pickup += 1;
     state.pickups.push(star);
     state.rainRng = rng.getState();

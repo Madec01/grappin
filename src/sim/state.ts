@@ -41,6 +41,8 @@ export interface Pickup {
   pos: Vec2;
   taken: boolean;
   readonly vel?: Vec2;
+  /** Étoile de pluie : un bonus de score, qui ne compte pas parmi les étoiles requises d'un niveau. */
+  readonly bonus?: true;
 }
 
 export interface Rope {
@@ -79,7 +81,7 @@ export type RuleEvent =
   | { readonly type: 'boost' }
   | { readonly type: 'break'; readonly anchorId: number }
   | { readonly type: 'graze'; readonly obstacleId: number }
-  | { readonly type: 'pickup'; readonly pickupId: number }
+  | { readonly type: 'pickup'; readonly pickupId: number; readonly bonus: boolean }
   | { readonly type: 'tier'; readonly tier: number; readonly name: string }
   | { readonly type: 'death'; readonly height: number; readonly cause: 'fog' | 'fall' }
   /** Choc contre un obstacle : rebond, corde lâchée, série à zéro, étourdi un instant. */

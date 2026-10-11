@@ -98,3 +98,28 @@ describe('suivi du pointeur', () => {
     expect(calls).toEqual([]);
   });
 });
+
+describe('annulation du geste', () => {
+  it('avec un gestionnaire d\'annulation, pointercancel l\'appelle au lieu de relâcher ; la perte de capture relâche toujours', () => {
+    const { element, fire } = fakeTarget();
+    const calls: string[] = [];
+    trackPointer(element, {
+      onPress: () => calls.push('press'),
+      onMove: () => calls.push('move'),
+      onRelease: () => calls.push('release'),
+      onCancel: () => calls.push('cancel'),
+    });
+    fire('pointerdown', { clientX: 10, clientY: 20 });
+    fire('pointercancel', { clientX: 10, clientY: 20 });
+    // Le geste est fini : un lever qui suivrait ne relâche pas une seconde fois.
+    fire('pointerup', { clientX: 10, clientY: 20 });
+    expect(calls).toEqual(['press', 'cancel']);
+    fire('pointerdown', { clientX: 10, clientY: 20 });
+    fire('lostpointercapture', { clientX: 10, clientY: 20 });
+    expect(calls).toEqual(['press', 'cancel', 'press', 'release']);
+    // Une annulation d'un autre pointeur ne compte pas.
+    fire('pointerdown', { clientX: 10, clientY: 20 });
+    fire('pointercancel', { pointerId: 2 });
+    expect(calls).toEqual(['press', 'cancel', 'press', 'release', 'press']);
+  });
+});

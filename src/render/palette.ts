@@ -5,13 +5,13 @@ import { mixColor } from './sling';
  * Les palettes d'ambiance : une par famille de musique (voir `trackFamily`).
  *
  * Une palette ne change que ce qui est ambiant, jamais ce qui porte un sens.
- * Elle donne le fond nuit, les lignes d'altitude, les silhouettes de ville, le
+ * Elle donne le fond nuit, les lignes d'altitude, les structures du décor, le
  * tube et le halo des points normaux, de la corde, du personnage et de l'anneau
  * de visée, la brume, l'accent de l'interface, les traînées de vent et les
  * rails des câbles. Le langage du jeu reste, lui, dans `COLOR` (style.ts) et ne
  * bouge jamais : étoiles jaunes, fragile magenta, propulseur cyan vif, prise
  * électrique orange puis rouge, prise à éclipse violette, lanceur vert d'eau,
- * obstacles et bords de la ville rouge-magenta, textes blancs.
+ * obstacles et bords de la zone jouable rouge-magenta, textes blancs.
  *
  * Pour que l'ambiance ne se confonde jamais avec une espèce de prise, le halo
  * ambiant reste hors des couleurs d'espèce (un test le garde) : les points
@@ -25,7 +25,7 @@ export interface Palette {
   /** Lignes d'altitude et leur étiquette : à peine plus claires que le fond. */
   readonly altitudeLine: number;
   readonly altitudeLabel: number;
-  /** Silhouettes de ville : contour très fin, jamais de concurrence avec les points. */
+  /** Structures abstraites du décor (colonnes, cadres, rails) : contour très fin, jamais de concurrence avec les points. */
   readonly city: number;
   /** Dalle du toit de départ. */
   readonly roofFill: number;

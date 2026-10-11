@@ -124,10 +124,23 @@ Critère de sortie : chaque contrainte passe le vérificateur et ne dégrade pas
 ## Phase 7 — Confort — v0.7 — en cours
 
 - Installable sur le téléphone (application web installable, hors-ligne) : livré le 11 octobre 2026 en 0.7.0.
-- L'ambiance qui pulse au rythme de la musique : livré le 11 octobre 2026 en 0.8.0, réglages à affiner sur retour.
+- L'ambiance qui pulse au rythme de la musique : livré le 11 octobre 2026 en 0.8.0 et 0.8.1, réglages à affiner sur retour.
+- Pause et reprise maîtrisée, réglage Sons, départ de course libre au choix : livrés en 0.9.0.
 - Mode facile avec ombre prédictive longue, ligne de record, statistiques de fin de partie, davantage de niveaux.
 
 Critère de sortie : un nouveau joueur choisit son confort sans aide.
+
+## Programme du brief du 11 octobre 2026 — lots 0 à 6
+
+Le brief complet du propriétaire (synthèse des échanges du 11 octobre 2026) remplace, pour la suite, les phases 7 et 8 ci-dessus. Décision prioritaire : univers abstrait, sans ville. Le suivi idée par idée est dans `docs/BACKLOG.md`, « Programme du brief ».
+
+- **Lot 0 — Vérification et cadrage minimaliste — livré en 0.9.0.** Inventaire du dépôt, trois incohérences reproduites et corrigées (B-007, B-008, B-009), direction artistique mise à jour, suivi des idées établi.
+- **Lot 1 — Plaisir du geste et lanceur utile — en cours, cœur livré en 0.9.0.** Lanceur à trou décalé et à deux routes, premiers bruitages, combo parfait/correct/erreur, pause et reprise, départ de course libre au choix, titre « Continuer ». Restent : le passage sous un plafond (L4), l'apprentissage par l'action, l'aide visuelle de la fenêtre de lâcher.
+- **Lot 2 — Premier ensemble de nouvelles interactions — v0.10.** Surfaces de rebond, parois cassables, roue motorisée, courants et couloirs d'accélération, zone de freinage, portes intermittentes puis obstacle tournant, anneaux de précision, scènes d'apprentissage.
+- **Lot 3 — Transformations principales du terrain — v0.11.** Serpentin, accordéon, poche de faible gravité ; annonces, entrées, sorties, caméra ; générateur et vérificateur adaptés.
+- **Lot 4 — Infini mieux rythmé et progression durable — v0.12.** Alternance difficulté/risque/récompense/respiration, secteurs abstraits et fourches enrichies, contrats renouvelables, talismans complémentaires et choix en partie, parcours du jour et fantôme, déblocages visuels abstraits, intensité des pulsations réglable, vérification mobile.
+- **Lot 5 — Extension mécanique et terrain avancé — v0.13.** Aimant, prise interrupteur, rail de lancement, lien élastique, plafond, faille, carrousel, structure dépliante, convoyeur, passages qui se referment, puits, tunnel descendant, descente contrôlée.
+- **Lot 6 — Deux billes et combinaisons expertes — v0.14.** Duo alterné et bille écho en prototypes comparés sur téléphone, intégration de l'approche concluante, combinaisons avancées, longues parties et reprises de sauvegarde.
 
 ## Phase 8 — Polish et publication — v1.0
 

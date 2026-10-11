@@ -7,7 +7,7 @@ import { PULL_MAX } from '../sim/launcher';
 import { WORLD_HALF_WIDTH, multiplier } from '../sim/rules';
 import type { Anchor, AnchorKind, RuleEvent, SimState } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
-import type { ButtonId, ButtonRect } from './buttons';
+import { pauseRect, type ButtonId, type ButtonRect } from './buttons';
 import type { Camera, ViewBounds } from './camera';
 import { bandsInView, cityBand } from './city';
 import { electricState, type ElectricState } from '../sim/cycles';
@@ -30,10 +30,10 @@ import { COLOR, GlowText, PALETTES, makeText, readSafeInset, starPoints, type Pa
  * aucun filtre de flou. Les formes regroupées par couleur, le nombre d'ordres
  * de dessin reste de l'ordre de la centaine par image. Règle de lisibilité :
  * rien de ce qui est dessiné ici ne masque jamais une accroche ni un danger ;
- * le décor de ville est le plus discret des tracés, dessous tout le reste.
+ * le décor de structures abstraites est le plus discret des tracés, dessous tout le reste.
  *
  * Deux sortes de couleurs : le langage du jeu (espèces de prises, étoiles,
- * obstacles, bords de la ville), fixe dans `COLOR`, et l'ambiance, que la
+ * obstacles, bords de la zone jouable), fixe dans `COLOR`, et l'ambiance, que la
  * palette de l'image donne et qui change avec la musique (voir palette.ts).
  * Rien d'ambiant n'est figé à la construction : les dessins relisent la palette
  * à chaque image, et les textes que la palette teinte n'ont qu'une teinte à
@@ -53,7 +53,7 @@ import { COLOR, GlowText, PALETTES, makeText, readSafeInset, starPoints, type Pa
  */
 
 /** Écran du jeu à habiller : le rendu ne sait que l'afficher, c'est le jeu qui le choisit. */
-export type GameScreen = 'title' | 'levels' | 'playing' | 'dead' | 'won' | 'talismans';
+export type GameScreen = 'title' | 'levels' | 'playing' | 'paused' | 'dead' | 'won' | 'talismans';
 
 /** Ce qui a tué le personnage. */
 export type DeathCause = Extract<RuleEvent, { type: 'death' }>['cause'];
@@ -232,12 +232,22 @@ const HELD_PULSE_HZ = 2.5;
 const FOG_ALPHA = 0.85;
 const FOG_BANDS: readonly { readonly depth: number; readonly alpha: number }[] = [{ depth: 28, alpha: 0.13 }];
 
-/** Silhouettes de ville : elles défilent à cette part de la vitesse du monde (de la profondeur), et s'éclaircissent vers l'avant : opacité par rang. */
+/** Structures abstraites du décor : elles défilent à cette part de la vitesse du monde (de la profondeur), et s'éclaircissent vers l'avant : opacité par rang. */
 const CITY_PARALLAX = 0.6;
 const CITY_ROW_ALPHA: readonly number[] = [1, 0.8, 0.6];
-/** Bords de la ville : le néon rouge sombre est discret, et une très légère teinte rougit l'extérieur. */
+/** Bords de la zone jouable : le néon rouge sombre est discret, et une très légère teinte rougit l'extérieur. */
 const EDGE_STRENGTH = 0.7;
 const EDGE_TINT_ALPHA = 0.05;
+
+/**
+ * Bouton de pause : deux barres de tube, centrées dans leur zone de toucher
+ * (voir `pauseRect`). Largeur du trait, hauteur d'une barre et écart de leurs
+ * axes, en pixels CSS ; et l'espace laissé entre la zone et le multiplicateur.
+ */
+const PAUSE_BAR_WIDTH = 4;
+const PAUSE_BAR_HEIGHT = 20;
+const PAUSE_BAR_STEP = 13;
+const PAUSE_MULTIPLIER_GAP = 6;
 
 /** Mise en page de l'interface, en pixels CSS. */
 const HUD_SIDE_MARGIN = 16;
@@ -258,7 +268,7 @@ const GOAL_GAP = 8;
 
 const DEATH_MESSAGES: Record<DeathCause, string> = {
   fog: "La brume t'a rattrapé",
-  fall: 'Tombé hors de la ville',
+  fall: 'Tombé dans le vide',
 };
 
 /** Couleur du cœur et du halo d'une espèce d'accroche. */
@@ -390,6 +400,13 @@ export class Renderer {
   private readonly multiplierText = makeText('', 30, COLOR.white, { bold: true });
   private readonly scoreText = makeText('', 20, COLOR.textDim);
   private readonly testTag = makeText('MODE TEST', 13, COLOR.textDim, { bold: true });
+  /** Le bouton de pause : le halo, que l'accent de la palette teinte, sous le cœur des deux barres. Tracés une fois par taille d'écran. */
+  private readonly pauseIcon = new Container();
+  private readonly pauseHalo = new Graphics();
+  private readonly pauseCore = new Graphics();
+  /** Sa zone de toucher, et vrai tant qu'elle est montrée, c'est-à-dire pendant la partie seulement. */
+  private pauseZone: ButtonRect = pauseRect(0, 0);
+  private pauseShown = false;
   /** La bannière : texte blanc au léger halo de l'accent, qui change rarement (un palier, un événement), si bien que le flou ne coûte presque rien. */
   private readonly bannerText = new GlowText('', BANNER_FONT_SIZE, COLOR.text, PALETTES.menu.accent, { bold: true, outlined: true });
   /** Seconde ligne de la bannière : sa largeur de retour à la ligne est fixée par `layout()`. */
@@ -409,7 +426,7 @@ export class Renderer {
   /** Tube du point normal : cœur et halo (couleur d'effet) de la palette. */
   private normalTube: Tube = { color: PALETTES.menu.tube, halo: PALETTES.menu.halo };
 
-  /** Titre, niveaux, fin de partie, victoire et talismans, par-dessus tout le reste. */
+  /** Titre, niveaux, fin de partie, victoire, talismans et pause, par-dessus tout le reste. */
   private readonly screens = new Screens();
 
   /** Dimensions pour lesquelles la mise en page a été calculée. */
@@ -424,7 +441,8 @@ export class Renderer {
     this.app = app;
 
     this.tintTexts();
-    this.hud.addChild(this.heightText, this.goalText, this.multiplierText, this.scoreText, this.testTag);
+    this.pauseIcon.addChild(this.pauseHalo, this.pauseCore);
+    this.hud.addChild(this.heightText, this.goalText, this.multiplierText, this.scoreText, this.testTag, this.pauseIcon);
     this.multiplierText.anchor.set(1, 0);
     this.testTag.anchor.set(0.5, 0);
     this.heightText.anchor.set(0, 0);
@@ -497,14 +515,16 @@ export class Renderer {
     this.app.ticker.add((ticker) => callback(ticker.elapsedMS / 1000));
   }
 
-  /** Boutons de l'écran affiché, en pixels CSS : ceux que la dernière image a dessinés. */
+  /** Boutons de l'écran affiché, en pixels CSS : ceux que la dernière image a dessinés. Pendant la partie, le seul bouton est celui de la pause. */
   buttons(): readonly ButtonRect[] {
-    return this.screens.buttons();
+    return this.pauseShown ? [this.pauseZone] : this.screens.buttons();
   }
 
   /** Le bouton ou la ligne de talisman sous un point de l'écran, en pixels CSS, pour l'écran courant ; null ailleurs. */
   hitTest(x: number, y: number): ButtonId | null {
-    return this.screens.hitTest(x, y);
+    if (!this.pauseShown) return this.screens.hitTest(x, y);
+    const zone = this.pauseZone;
+    return x >= zone.x && x <= zone.x + zone.width && y >= zone.y && y <= zone.y + zone.height ? zone.id : null;
   }
 
   /** Met la scène à jour pour l'état donné ; PixiJS la rend juste après. */
@@ -563,6 +583,7 @@ export class Renderer {
   private tintTexts(): void {
     const { accent, halo, altitudeLabel } = this.palette;
     this.multiplierText.tint = accent;
+    this.pauseHalo.tint = accent;
     this.bannerText.glow = this.glow;
     this.bannerDetail.glow = this.glow;
     this.finishLabel.glow = halo;
@@ -583,8 +604,11 @@ export class Renderer {
     this.world.position.set(width / 2, height / 2);
 
     const top = Math.max(HUD_MIN_TOP, readSafeInset('top') + HUD_SAFE_GAP);
+    this.pauseZone = pauseRect(width, top);
+    this.drawPauseIcon(this.pauseZone);
     this.heightText.position.set(HUD_SIDE_MARGIN, top);
-    this.multiplierText.position.set(width - HUD_SIDE_MARGIN, top + 8);
+    // Le multiplicateur se tient à gauche du bouton de pause, qui a le coin.
+    this.multiplierText.position.set(this.pauseZone.x - PAUSE_MULTIPLIER_GAP, top + 8);
     this.scoreText.position.set(HUD_SIDE_MARGIN, top + HEIGHT_FONT_SIZE * 1.2);
     this.testTag.position.set(width / 2, top);
     this.bannerText.position.set(width / 2, top + BANNER_OFFSET);
@@ -592,13 +616,27 @@ export class Renderer {
     this.bannerDetail.wrapWidth = width - 2 * BANNER_SIDE_MARGIN;
   }
 
+  /** Les deux barres du bouton de pause, au centre de sa zone : tracées une fois, quand la taille de l'écran change. */
+  private drawPauseIcon(zone: ButtonRect): void {
+    const centerX = zone.x + zone.width / 2;
+    const centerY = zone.y + zone.height / 2;
+    const bars = [-1, 1].map((side) => ({ x: centerX + (side * PAUSE_BAR_STEP) / 2, top: centerY - PAUSE_BAR_HEIGHT / 2, bottom: centerY + PAUSE_BAR_HEIGHT / 2 }));
+    const tube = { color: COLOR.hot, halo: COLOR.white, width: PAUSE_BAR_WIDTH, cap: 'round' as const, spread: MARK_SPREAD };
+    this.pauseHalo.clear();
+    this.pauseCore.clear();
+    for (const bar of bars) {
+      neonLine(this.pauseHalo, { x: bar.x, y: bar.top }, { x: bar.x, y: bar.bottom }, { ...tube, pass: 'halo' });
+      neonLine(this.pauseCore, { x: bar.x, y: bar.top }, { x: bar.x, y: bar.bottom }, { ...tube, pass: 'core' });
+    }
+  }
+
   /**
-   * Silhouettes de ville : toits et antennes en contour très fin, sur les
-   * côtés, hors de la largeur jouable, tout au fond. Elles défilent un peu moins
-   * vite que le monde pour la profondeur, d'après la hauteur seule : la ville
-   * est la même à chaque partie (voir city.ts). Sur le temps, les immeubles
-   * dansent : ceux d'index pair s'allument sur les temps pairs, les impairs sur
-   * les autres, en deux lots de couleur par rang au plus ; sans temps, un seul.
+   * Structures abstraites : colonnes, cadres ouverts et rails en contour très
+   * fin, sur les côtés, hors de la largeur jouable, tout au fond. Elles défilent
+   * un peu moins vite que le monde pour la profondeur, d'après la hauteur seule :
+   * le décor est le même à chaque partie (voir city.ts). Sur le temps, elles
+   * dansent : celles d'index pair s'allument sur les temps pairs, les impaires
+   * sur les autres, en deux lots de couleur par rang au plus ; sans temps, un seul.
    */
   private drawCity(camera: Camera, view: ViewBounds): void {
     const g = this.city.clear();
@@ -609,13 +647,13 @@ export class Renderer {
     // Par rang, puis par lot de couleur : sans danse, tout est dans le premier lot, comme avant.
     const rows: Vec2[][][][] = CITY_ROW_ALPHA.map(() => [[], []]);
     for (let band = first; band <= last; band += 1) {
-      cityBand(band).forEach((building, index) => {
+      cityBand(band).forEach((structure, index) => {
         const lot = lots === null ? 0 : (band + index) & 1;
-        for (const line of building.lines) {
+        for (const line of structure.lines) {
           const drawn = line.map((point) => camera.worldToScreen({ x: point.x, y: point.y + shift }));
           // Hors de la vue de côté (les rangs lointains n'y entrent que caméra dézoomée), on ne trace rien.
           if (drawn.every((point) => point.x < view.left) || drawn.every((point) => point.x > view.right)) continue;
-          rows[building.row]?.[lot]?.push(drawn);
+          rows[structure.row]?.[lot]?.push(drawn);
         }
       });
     }
@@ -631,7 +669,7 @@ export class Renderer {
   }
 
   /**
-   * Les bords de la ville, à ± `WORLD_HALF_WIDTH` : deux traits verticaux de
+   * Les bords de la zone jouable, à ± `WORLD_HALF_WIDTH` : deux traits verticaux de
    * néon rouge sombre, au-delà desquels le personnage tombe. On ne les voit que
    * lorsque la vue les atteint, caméra dézoomée ou monde basculé.
    */
@@ -1175,12 +1213,16 @@ export class Renderer {
   }
 
   /**
-   * Hauteur en grand à gauche, multiplicateur à droite, score dessous ; seulement
-   * en cours de partie, l'écran de fin redit hauteur et score. Dans un niveau,
-   * la hauteur se compte depuis le toit et l'objectif la suit : « 32 / 70 m ».
+   * Hauteur en grand à gauche, multiplicateur à côté du bouton de pause, score
+   * dessous ; seulement en cours de partie, et figés sous le voile de la pause :
+   * l'écran de fin redit hauteur et score. Dans un niveau, la hauteur se
+   * compte depuis le toit et l'objectif la suit : « 32 / 70 m ». Le bouton de
+   * pause, lui, n'est là que pendant la partie.
    */
   private drawHud(state: SimState, frame: GameFrame, tuning: Tuning): void {
-    this.hud.visible = frame.screen === 'playing';
+    this.pauseShown = frame.screen === 'playing';
+    this.pauseIcon.visible = this.pauseShown;
+    this.hud.visible = this.pauseShown || frame.screen === 'paused';
     if (!this.hud.visible) return;
     this.testTag.visible = frame.testMode;
     this.goalText.visible = state.finishY !== null;
@@ -1227,6 +1269,9 @@ export class Renderer {
         return { kind: 'won', score: state.score, outcome: frame.outcome, result: frame.result };
       case 'playing':
         return { kind: 'none' };
+      case 'paused':
+        // La partie reste visible, figée, sous le voile.
+        return { kind: 'paused' };
     }
   }
 }

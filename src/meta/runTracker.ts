@@ -13,6 +13,7 @@ export class RunTracker {
   private bestPerfectStreak = 0;
   private grazes = 0;
   private pickups = 0;
+  private requiredPickups = 0;
   private bestCombo = 0;
   private fragileReleases = 0;
   private boosters = 0;
@@ -23,7 +24,8 @@ export class RunTracker {
         if (!event.forced && event.held >= 1) this.holds += 1;
         if (!event.forced && event.kind === 'fragile') this.fragileReleases += 1;
         if (!event.forced && event.kind === 'booster') this.boosters += 1;
-        this.perfectStreak = event.perfect ? this.perfectStreak + 1 : 0;
+        // Un lancer ne se juge pas : la série de parfaits reste ce qu'elle est, comme dans les règles.
+        if (event.kind !== 'lanceur') this.perfectStreak = event.perfect ? this.perfectStreak + 1 : 0;
         this.bestPerfectStreak = Math.max(this.bestPerfectStreak, this.perfectStreak);
         this.bestCombo = Math.max(this.bestCombo, event.combo);
         break;
@@ -32,6 +34,7 @@ export class RunTracker {
         break;
       case 'pickup':
         this.pickups += 1;
+        if (!event.bonus) this.requiredPickups += 1;
         break;
       default:
         break;
@@ -46,6 +49,7 @@ export class RunTracker {
       grazes: this.grazes,
       height: state.height - state.groundY,
       pickups: this.pickups,
+      requiredPickups: this.requiredPickups,
       combo: this.bestCombo,
       fragileReleases: this.fragileReleases,
       boosters: this.boosters,

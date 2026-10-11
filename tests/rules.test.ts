@@ -69,7 +69,7 @@ describe('lâcher parfait et combo', () => {
     expect(isPerfectRelease(1.5, 1.5, T)).toBe(false);
   });
 
-  it('un lâcher parfait monte le combo, un lâcher raté le remet à zéro', () => {
+  it('un lâcher parfait monte le combo ; un lâcher correct le fait redescendre d\'un cran, sans le casser ; à zéro il y reste', () => {
     const sim = new Simulation(1);
     sim.press();
     sim.state.hero.vel = { x: 5, y: 5 };
@@ -77,10 +77,25 @@ describe('lâcher parfait et combo', () => {
     expect(sim.state.combo).toBe(1);
     expect(sim.drain().at(-1)).toMatchObject({ type: 'release', perfect: true, combo: 1, forced: false });
     sim.step();
+    sim.state.combo = 3;
+    sim.state.rope = { anchorId: sim.state.anchors[0]!.id, length: 3 };
+    sim.state.hero.vel = { x: 5, y: -5 };
+    sim.release();
+    expect(sim.state.combo).toBe(2);
+    expect(sim.drain().at(-1)).toMatchObject({ type: 'release', perfect: false, combo: 2 });
+    sim.step();
+    sim.state.combo = 0;
     sim.state.rope = { anchorId: sim.state.anchors[0]!.id, length: 3 };
     sim.state.hero.vel = { x: 5, y: -5 };
     sim.release();
     expect(sim.state.combo).toBe(0);
+    // Avec `comboMissPenalty` à 0, un lâcher correct garde le combo tel quel.
+    const keep = new Simulation(1, withTuning(T, { comboMissPenalty: 0 }));
+    keep.press();
+    keep.state.combo = 5;
+    keep.state.hero.vel = { x: 5, y: -5 };
+    keep.release();
+    expect(keep.state.combo).toBe(5);
   });
 
   it('le multiplicateur est plafonné', () => {

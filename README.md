@@ -37,6 +37,9 @@ Des paramètres d'adresse permettent de régler le jeu sans toucher au code :
 - `?graine=12` rejoue toujours le même parcours.
 - La musique est celle du propriétaire (dépôt Way), une piste par niveau, dans `public/musique/`. À côté de chaque piste, son fichier de rythme (`<piste>.rythme.json`, produit par `npm run rythme`) fait pulser l'ambiance et les éléments du jeu au tempo ; musique coupée, rien ne pulse.
 - `?pouls=120` fait battre un métronome visuel à ce tempo, sans son : pour regarder le pouls, et pour les tests.
+- Les bruitages du geste sont synthétisés (aucun fichier) ; « Sons : oui/non » sur le titre les coupe. « Départ : avancé / du sol » choisit d'où part la course libre.
+- Pause : le bouton en haut à droite pendant la partie, ou automatiquement quand l'application passe en arrière-plan ; « Reprendre » ne lâche jamais la corde, on la reprend en main en appuyant de nouveau.
+- `?comboMissPenalty=0` garde le multiplicateur tel quel sur un lâcher correct (1 par défaut : il redescend d'un cran ; les chocs et décharges le remettent à zéro).
 - `?test=1` ouvre le mode test : tous les niveaux se jouent sans les avoir débloqués, la liste des niveaux dit les événements de chacun, et la progression se fait sur un profil à part, sans toucher à la vraie. En ligne : https://madec01.github.io/grappin/?test=1
 - Dans la console du navigateur, `__grappin.resetProfile()` efface la progression, `__grappin.profile()` l'affiche.
 - Tout réglage de `src/sim/tuning.ts` se surcharge par son nom, par exemple `?gravity=9&ropeMax=6&kickSpeed=4`.

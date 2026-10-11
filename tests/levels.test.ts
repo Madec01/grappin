@@ -8,7 +8,7 @@ import { DEFAULT_TUNING } from '../src/sim/tuning';
 import type { RunStats } from '../src/meta/missions';
 
 const T = DEFAULT_TUNING;
-const quietRun: RunStats = { holds: 0, perfectStreak: 0, grazes: 0, height: 0, pickups: 0, combo: 0, fragileReleases: 0, boosters: 0, seconds: 0 };
+const quietRun: RunStats = { holds: 0, perfectStreak: 0, grazes: 0, height: 0, pickups: 0, requiredPickups: 0, combo: 0, fragileReleases: 0, boosters: 0, seconds: 0 };
 
 describe('les vingt niveaux', () => {
   it('se suivent sans trou, avec des graines distinctes et des profils complets', () => {
@@ -21,7 +21,7 @@ describe('les vingt niveaux', () => {
       expect(level.endY - level.startY).toBeLessThanOrEqual(260);
       expect(level.profile.archetypes.length).toBeGreaterThan(0);
     }
-    expect(levelById(3)?.name).toBe('Les enseignes');
+    expect(levelById(3)?.name).toBe('Les lueurs');
   });
 
   it('chaque niveau s\'engendre en entier à sa création, vérifié, avec une ligne d\'arrivée et un toit de départ', () => {

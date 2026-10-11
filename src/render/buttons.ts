@@ -12,9 +12,13 @@ export type LevelButtonId = `niveau-${number}`;
 /**
  * Un bouton ou une ligne sur laquelle on peut taper : un bouton nommé, un
  * niveau débloqué de la liste, ou un talisman débloqué. « suite » et
- * « precedents » tournent les pages de la liste des niveaux.
+ * « precedents » tournent les pages de la liste des niveaux. Sur le titre,
+ * « continue » est l'action principale (elle joue le niveau le plus avancé,
+ * comme un appui hors bouton), « music », « sfx » et « start » les trois
+ * réglages ; « pause » est le seul bouton de la partie, « resume » et « quit »
+ * ceux du voile de pause.
  */
-export type ButtonId = 'talismans' | 'levels' | 'free' | 'music' | 'next' | 'replay' | 'back' | 'suite' | 'precedents' | LevelButtonId | TalismanId;
+export type ButtonId = 'continue' | 'talismans' | 'levels' | 'free' | 'music' | 'sfx' | 'start' | 'pause' | 'resume' | 'quit' | 'next' | 'replay' | 'back' | 'suite' | 'precedents' | LevelButtonId | TalismanId;
 
 /** Rectangle d'un bouton, en pixels CSS de l'écran. */
 export interface ButtonRect {
@@ -23,6 +27,20 @@ export interface ButtonRect {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+}
+
+/**
+ * Zone de toucher du bouton de pause : un carré de 48 px de côté (jamais moins
+ * de 44 px, la taille d'un doigt), collé au coin haut droit de la partie.
+ * `top` est l'ordonnée de la première ligne de l'interface, déjà sous
+ * l'encoche : la zone ne la dépasse que de quatre pixels.
+ */
+export const PAUSE_TOUCH = 48;
+const PAUSE_SIDE_MARGIN = 10;
+const PAUSE_RISE = 4;
+
+export function pauseRect(width: number, top: number): ButtonRect {
+  return { id: 'pause', x: width - PAUSE_SIDE_MARGIN - PAUSE_TOUCH, y: top - PAUSE_RISE, width: PAUSE_TOUCH, height: PAUSE_TOUCH };
 }
 
 const LEVEL_PREFIX = 'niveau-';

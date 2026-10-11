@@ -2,6 +2,34 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.9.0] — 2026-10-11 — Lot 1 du brief : un lanceur qui se vise, des bruitages, la pause, un univers abstrait
+
+Le propriétaire a remis un brief complet (synthèse des échanges du 11 octobre 2026, voir `docs/BACKLOG.md`, « Programme du brief »). Décision prioritaire : abandonner le thème de la ville, garder un univers abstrait, minimaliste et lumineux. Ce lot couvre le lot 0 (inventaire, incohérences, direction artistique) et le cœur du lot 1.
+
+### Modifié
+
+- **Le lanceur se vise pour de bon.** Le trou du mur est toujours décalé du lanceur (de 1,9 à 2,7 m) : un tir vertical bute sur le mur, il faut choisir un angle. Une fois sur deux, quand les fourches sont permises, le mur a deux trous : un large et sûr (2,8 m) d'un côté, un étroit (1,8 m) de l'autre, surmonté d'une étoile ; les deux routes se rejoignent plus haut, et le vérificateur exige qu'un lancer attrape chacune. Entre un lanceur et la reprise de la chaîne, plus aucun obstacle tiré au sort ni prise spéciale : le couloir du tir reste libre. Le vérificateur essaie désormais trente-trois directions par pas de cinq degrés et quatre forces (la précision raisonnable d'un pouce), et les pilotes automatiques tirent la traction prouvée (`sim/pilot.ts`, `window.__grappin.launchAim()`).
+- **Combo : parfait, correct, erreur.** Un lâcher correct ne casse plus le multiplicateur : il le fait redescendre d'un cran (`comboMissPenalty`, 1 par défaut, 0 pour le garder tel quel) ; seules les erreurs réelles (choc, décharge) le remettent à zéro. La série de parfaits reste à part, et un lancer ne la coupe plus.
+- **Univers abstrait.** Les noms des niveaux et des paliers ne parlent plus de ville : Les premiers anneaux, La chaîne, Les lueurs, Les arcs, Les flèches, Les bras, Les nuages, Les anneaux de nuit, La chaîne de nuit, Le sommet, Les rails, Les colonnes, Les verticales, La décharge, Les lueurs de nuit, L'arche, L'orage, La balise, Le vertige, Le ciel. Les silhouettes d'immeubles laissent place à des structures géométriques abstraites, qui dansent toujours avec la musique.
+
+### Ajouté
+
+- **Bruitages du geste**, sans aucun fichier : accroche, lâcher, parfait (dont la note monte d'un demi-ton par parfait d'affilée), lancer, propulsion, étoile (plus haute pour une étoile de pluie), frôlement, choc, décharge, casse, brume, chute, arrivée, palier ; synthétisés par Web Audio au premier geste. Réglage « Sons : oui/non » sur le titre, gardé dans le profil.
+- **Pause et reprise maîtrisée.** Un bouton de pause pendant la partie ; la partie se met aussi en pause toute seule quand l'application passe en arrière-plan ou quand le système annule le geste. Le jeu reste visible, figé, corde comprise. « Reprendre » reprend sans lâcher la corde ni lancer (le lever du doigt qui finit cet appui est avalé) ; le joueur reprend la corde en main en appuyant de nouveau. « Quitter » revient au titre.
+- **Départ de la course libre au choix** sur le titre : avancé (là où la progression l'ouvre) ou du sol, pour réapprendre en douceur. Gardé dans le profil.
+- **Titre** : l'action principale se lit « Continuer · Niveau N · nom », et le rang du grimpeur s'appelle « Rang ».
+
+### Corrigé
+
+- B-007 : un lancer remettait à zéro la série de parfaits des objectifs, alors que les règles la gardaient.
+- B-008 : les étoiles de pluie comptaient parmi les étoiles requises d'un niveau et pouvaient compenser des étoiles fixes manquées pour « toutes les étoiles ». Elles comptent pour le score et les missions, plus pour l'étoile du niveau.
+- B-009 : un profil qui avait fini tout le catalogue de missions se voyait réinjecter les trois premières au chargement.
+
+### Technique
+
+- `src/audio/sfx.ts` (recettes, `cueFor`, lecteur Web Audio ou muet), `src/sim/pilot.ts` (`bestLaunch`), `Profile.sfx` et `Profile.freeStart`, `GameScreen` 'paused', boutons 'pause', 'resume', 'quit', 'sfx', 'start' ; `pointer.ts` distingue l'annulation du geste (`onCancel`) du lâcher ; `visibilitychange` met en pause. Tests : incohérences A, B, C ; lanceur décalé et deux routes ; combo ; bruitages ; pause ; annulation ; pilote qui tire la traction prouvée.
+- B-010 relevé (ouvert) : la vérification d'un segment ne connaît pas les points du segment suivant, qui peuvent attirer la visée au vol et faire perdre à un point sa sortie « propre » ; un point sur plusieurs milliers, toléré et compté par le test des deux cents graines.
+
 ## [0.8.1] — 2026-10-11 — Des couleurs qui changent à chaque temps
 
 Demande du propriétaire : « dynamique pour les couleurs, pas lent ; un jeu hyper dynamique visuellement ».

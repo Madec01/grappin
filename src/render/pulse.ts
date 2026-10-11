@@ -18,7 +18,7 @@ import { mixColor } from './sling';
  * qui changent vite : la couleur d'effet change donc à chaque temps, parmi les
  * trois couleurs d'effet de la palette (A sur le temps fort, puis B, C, B), le
  * temps fort frappe plus fort que les trois autres, et le fond, la crête de
- * brume, la dalle du toit et la ville prennent la couleur du moment.
+ * brume, la dalle du toit et les structures du décor prennent la couleur du moment.
  *
  * Règle absolue : au silence (`SILENT_PULSE`, ou tout pouls sans temps ni graves),
  * rien ne change. Chaque multiplicateur y vaut exactement 1, chaque ajout
@@ -44,7 +44,7 @@ export const PULSE = {
   fogSheet: { bass: 0.08 },
   /** Dalle du toit de départ et plateformes : part de couleur d'effet prise sur le temps (× force). */
   roof: { beat: 0.15 },
-  /** Ville : part de la couleur d'effet mélangée aux traits avec les graves, et, sur les immeubles qui dansent, part de la couleur d'effet sur le temps (× force). */
+  /** Structures du décor (`city`) : part de la couleur d'effet mélangée aux traits avec les graves, et, sur celles qui dansent, part de la couleur d'effet sur le temps (× force). */
   city: { bass: 0.7, dance: 1 },
   /** Halo des tubes ambiants : de combien la portée et l'intensité grandissent sur le temps (× force). */
   halo: { spread: 0.7, strength: 1 },
@@ -129,8 +129,8 @@ export function effectColor(palette: Palette, pulse: Pulse): number {
  * La palette dans laquelle le pouls la plonge : le fond monte vers la brume sur
  * le temps et avec les graves (jamais de plus de `PULSE.background.max`) et se
  * teinte de la couleur d'effet, la crête de brume prend la couleur d'effet et
- * s'éclaire sur le temps, la dalle du toit se teinte sur le temps, la ville se
- * teinte vers la couleur d'effet avec les graves, et le halo ambiant est la
+ * s'éclaire sur le temps, la dalle du toit se teinte sur le temps, les structures
+ * du décor se teintent vers la couleur d'effet avec les graves, et le halo ambiant est la
  * couleur d'effet. Le reste (lignes d'altitude, cœur du tube, accent) ne bouge
  * pas. Au silence, la palette reçue elle-même (`===`), si bien que le rendu la
  * reconnaît à son identité.
@@ -217,8 +217,8 @@ export function uiGlow(palette: Palette, pulse: Pulse): number {
 }
 
 /**
- * Les deux lots de couleur de la ville, pour des immeubles qui dansent : les
- * immeubles d'index pair s'allument vers la couleur d'effet sur les temps pairs
+ * Les deux lots de couleur du décor, pour des structures qui dansent : les
+ * structures d'index pair s'allument vers la couleur d'effet sur les temps pairs
  * de la mesure (0 et 2), les impairs sur les temps impairs (1 et 3), puis
  * retombent avec le temps. `palette` est celle que le pouls a déjà teintée : son
  * halo est la couleur d'effet. Rend `[pairs, impairs]`, ou null quand rien ne

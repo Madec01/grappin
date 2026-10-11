@@ -34,7 +34,9 @@ export interface RunStats {
   readonly grazes: number;
   /** Mètres grimpés depuis le toit de départ de la partie. */
   readonly height: number;
+  /** Étoiles ramassées, pluie comprise ; et seulement celles du parcours, les seules qui comptent pour l'étoile « toutes les étoiles » d'un niveau. */
   readonly pickups: number;
+  readonly requiredPickups: number;
   readonly combo: number;
   /** Lâchers volontaires depuis une accroche fragile, avant qu'elle casse. */
   readonly fragileReleases: number;

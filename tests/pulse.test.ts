@@ -337,7 +337,7 @@ describe('le pouls dans la palette', () => {
   });
 });
 
-describe('les immeubles qui dansent', () => {
+describe('les structures du décor qui dansent', () => {
   const palette = pulsedPalette(PALETTES.biome2, pulse({ beat: 1, strength: 1, count: 4, inBar: 0, bpm: 120 }));
 
   it('les pairs s\'allument sur les temps pairs, les impairs sur les autres, avec deux couleurs au plus', () => {

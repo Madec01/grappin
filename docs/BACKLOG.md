@@ -25,6 +25,56 @@ Quatre idées de prises, données après le test des niveaux, validées par le p
 3. **Prises piégées**. Deux propositions, à choisir ou cumuler. La **prise électrique** : un point qui se charge par cycles, visible au grésillement du néon ; l'attraper chargé électrocute (mort nouvelle, « Électrocuté »), l'attraper éteint est normal. Le **leurre** : un point qui ressemble presque à un vrai, à un détail près (néon qui tremble), et qui lâche le personnage quatre dixièmes de seconde après la prise. Avis : l'électrique est le plus clair et se marie avec l'idée 2 ; le leurre punit l'inattention, ce qui peut agacer, à doser rarement. Dans les deux cas, le vérificateur ignore ces points pour prouver le passage : le niveau reste toujours faisable sans eux. Coût : moyen.
 4. **Prises de plus en plus écartées sur la largeur**. Proposition : un réglage d'écartement par palier en course libre (le déport de côté grandit avec la hauteur, jusqu'à toute la largeur de ± 4 m) et par niveau dans les traversées. Avis : c'est le levier de difficulté le plus naturel, le vérificateur garantit que cela reste franchissable. Attention à la caméra : écartées, les prises sortent de l'écran au zoom 1 ; le dézoom par la vitesse existe déjà, à compléter par un dézoom par l'écartement. Coût : faible.
 
+## Programme du brief du 11 octobre 2026 — suivi idée par idée
+
+Le brief complet du propriétaire (synthèse des échanges du 11 octobre 2026) est la référence de la suite. Statuts : **existant** (déjà dans le jeu avant le brief), **fait** (livré, version), **à faire** (retenu, pas commencé), **prototype** (à essayer dans une scène dédiée avant de l'intégrer), **à revoir** (dépend d'un retour du propriétaire ou d'un prototype). Rien n'est supprimé en silence : une idée moins prioritaire reste ici.
+
+| Idée | Section du brief | Statut |
+|---|---|---|
+| Univers abstrait, sans ville ; noms et illustrations urbains rendus abstraits | 2 | fait (0.9.0 : noms des niveaux et paliers, structures à la place des silhouettes) ; à poursuivre à chaque remaniement |
+| Incohérence A : lancer et série de parfaits | 4 | fait (0.9.0, B-007) |
+| Incohérence B : étoiles de pluie et « toutes les étoiles » | 4 | fait (0.9.0, B-008) |
+| Incohérence C : missions réinjectées en fin de catalogue | 4 | fait (0.9.0, B-009) |
+| Documents en retard sur le code | 4 | fait (0.9.0, README, GDD, ARCHITECTURE, ROADMAP à jour) |
+| Bruitages du geste | 5 | fait (0.9.0, synthèse Web Audio) ; montée sonore pendant une série : fait (la note du parfait monte) |
+| Aides visuelles : trajectoire plus explicite au début, fenêtre de lâcher montrée | 5 | à faire (lot 1) |
+| Combo parfait / correct / erreur | 5 | fait en prototype (0.9.0, `comboMissPenalty`) ; à revoir sur ressenti |
+| Lanceur L1 ouverture décalée | 6 | fait (0.9.0) |
+| Lanceur L2 deux ouvertures (sûre / étroite étoilée) | 6 | fait (0.9.0) |
+| Lanceur L4 passage sous un plafond | 6 | à faire (lot 1) |
+| Lanceur L3 ouverture mobile, L5 tir avec rebond | 6 | à faire (lot 2, avec portes et surfaces de rebond) |
+| P1 Roue motorisée | 7 | à faire (lot 2) |
+| P2 Rail de lancement | 7 | à faire (lot 5) |
+| P3 Aimant de trajectoire | 7 | à faire (lot 5) |
+| P4 Lien élastique | 7 | prototype (lot 5) |
+| P5 Prise interrupteur | 7 | à faire (lot 5) |
+| Z1 Courant ascendant, Z2 courant latéral, Z3 couloir d'accélération, Z4 zone de freinage | 8 | à faire (lot 2) |
+| O1 Portes intermittentes, O2 obstacles tournants, O3 surfaces de rebond, O4 parois cassables, O5 anneaux de précision | 9 | à faire (lot 2) |
+| O6 Passage qui se referme | 9 | à faire (lot 5) |
+| H1 Puits de chute, H2 tunnel descendant, règles de la brume en descente | 10 | à faire (lot 5) |
+| D1 Duo alterné, D2 bille écho | 11 | prototype (lot 6) |
+| T1 Serpentin, T3 accordéon, T6 faible gravité | 12 | à faire (lot 3) |
+| T2 Plafond, T4 faille, T5 carrousel | 12 | à faire (lot 5) |
+| T8 Structure dépliante, T9 convoyeur, T7 descente contrôlée | 12 | à faire (lot 5) |
+| Combinaisons du catalogue (section 13) | 13 | à faire après apprentissage de chaque élément |
+| Enchaînement difficulté / risque / récompense / respiration, secteurs abstraits, fourches enrichies | 14 | à faire (lot 4) |
+| Départ avancé facultatif | 14 | fait (0.9.0, « Départ : avancé / du sol ») |
+| Mécaniques introduites selon l'apprentissage, pas l'altitude | 14 | à faire (lot 4) |
+| Talismans M1 à M4, choix d'amélioration en partie | 15 | à faire (lot 4) |
+| Contrats renouvelables après le catalogue | 15 | à faire (lot 4) |
+| Déblocages visuels abstraits (traînées, cordes, formes de bille) | 15 | à revoir (constellation : adaptation possible, non validée) |
+| Parcours du jour, fantôme personnel | 16 | à faire (lot 4) |
+| Accueil « Continuer », « Rang » distinct de « Niveau » | 17 | fait (0.9.0) |
+| Tutoriel par l'action, aides qui s'effacent | 17 | à faire (lot 1 ou 4) |
+| Pause, reprise maîtrisée | 17 | fait (0.9.0) |
+| Intensité des pulsations réglable, indépendante de la musique | 17 | à faire (lot 4) |
+| Options pour téléphones modestes, validation mobile réelle | 17 | à faire (lot 4) ; les performances réelles restent à mesurer sur appareil |
+| Vérification à cheval sur deux segments (B-010) | 18 | à faire (avec le générateur du lot 3) |
+| Scènes déterministes de démonstration par mécanique | 18 | à faire (lot 2, avec chaque nouveauté) |
+| Robots à jour des nouvelles règles | 18 | fait pour le lanceur (0.9.0 : traction prouvée, temps de visée, `playRobot` traçable) ; à faire : éviter les prises électriques ou les lâcher avant la charge (le robot s'y fait décharger et retombe sur le mur du lanceur, niveau 14) |
+
+Choses à ne pas présenter comme des nouveautés : génération infinie, mode niveaux, événements, trajectoire prédictive, talismans (existants) ; vibrations (écartées) ; morts instantanées sur obstacle (ne pas rétablir) ; filet permanent (non retenu).
+
 ## Suites de l'installation sur téléphone (0.7.0)
 
 - **Bouton « Installer » sur le titre.** Sur Android, Chrome signale quand l'installation est possible (`beforeinstallprompt`) : un bouton du titre pourrait la déclencher sans passer par le menu ; sur iPhone, un rappel « Partager → Sur l'écran d'accueil ». À faire quand les écrans seront libres.

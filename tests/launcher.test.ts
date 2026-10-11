@@ -46,9 +46,9 @@ describe('lanceur : traction et lancer', () => {
     expect(launchVelocity({ x: 0, y: 0 }, turned)).toEqual({ x: -LAUNCH_MIN_SPEED, y: 0 });
   });
 
-  it('l\'éventail du vérificateur couvre le demi-plan du haut à trois forces', () => {
+  it('l\'éventail du vérificateur couvre le demi-plan du haut par pas de cinq degrés, à quatre forces', () => {
     const pulls = launchSet(STILL);
-    expect(pulls).toHaveLength(17 * 3);
+    expect(pulls).toHaveLength(33 * 4);
     for (const pull of pulls) {
       const v = launchVelocity(pull, STILL);
       expect(v.y).toBeGreaterThan(0);
@@ -138,27 +138,76 @@ describe('lanceur : vérification et génération', () => {
     expect(canExit(launcher, [launcher, tooHigh], [], null, T)).toBe(false);
   });
 
-  it('le motif lanceur apparaît dès le palier 2 : un lanceur, un mur à trou au-dessus, la chaîne reprend plus haut, et tout reste prouvé', () => {
+  /** Le profil d'un niveau de test, fourches permises ou non. */
+  const plan = (split: boolean) => ({ kind: 'level' as const, levelId: 93, startY: 0, endY: 120, profile: { spacing: 4, obstacles: 1, split, fragileChance: 0, boosters: 0, archetypes: ['lanceur' as const], spread: 1.2, electric: 0, eclipse: 0 }, events: [] });
+
+  /** Les pans du mur à trou d'un lanceur : les obstacles sur la ligne du mur, entre 4,5 et 6 m au-dessus de lui, qui touchent les bords de la zone. */
+  function wallOf(launcher: Anchor, obstacles: readonly Obstacle[]): Obstacle[] {
+    const edge = obstacles.find((o) => o.y0 > launcher.pos.y + 4.4 && o.y0 < launcher.pos.y + 6.1 && (o.x0 < -4 || o.x1 > 4));
+    if (!edge) return [];
+    return obstacles.filter((o) => o.y0 === edge.y0).sort((p, q) => p.x0 - q.x0);
+  }
+
+  it('le motif lanceur apparaît dès le palier 2 : un lanceur, un mur à trou DÉCALÉ au-dessus (un tir vertical bute), la chaîne reprend plus haut, et tout reste prouvé', () => {
     expect(tierProfile(1).archetypes).not.toContain('lanceur');
     expect(tierProfile(2).archetypes).toContain('lanceur');
     let launchers = 0;
     for (let seed = 1; seed <= 16; seed += 1) {
-      const sim = new Simulation(seed, T, { kind: 'level', levelId: 93, startY: 0, endY: 120, profile: { spacing: 4, obstacles: 1, split: false, fragileChance: 0, boosters: 0, archetypes: ['lanceur'], spread: 1.2, electric: 0, eclipse: 0 }, events: [] });
+      const sim = new Simulation(seed, T, plan(false));
       const { anchors, obstacles } = sim.state;
       const found = anchors.filter((a) => a.kind === 'lanceur');
       launchers += found.length;
       expect(sim.state.course.unverified, `graine ${seed}`).toBe(0);
       for (const l of found) {
-        // Un mur à trou entre 4,5 et 6 m au-dessus : deux pans sur la même ligne, séparés d'un trou de 2,4 m.
-        const pans = obstacles.filter((o) => o.y0 > l.pos.y + 4.4 && o.y0 < l.pos.y + 6.1);
+        // Sans fourche : deux pans sur la même ligne, séparés d'un trou de 2,4 m.
+        const pans = wallOf(l, obstacles);
         expect(pans.length, `graine ${seed}, lanceur ${l.id}`).toBe(2);
-        const [a, b] = pans.sort((p, q) => p.x0 - q.x0);
-        expect(b!.x0 - a!.x1).toBeCloseTo(2.4, 6);
-        expect(a!.y0).toBe(b!.y0);
+        const [a, b] = pans as [Obstacle, Obstacle];
+        expect(b.x0 - a.x1).toBeCloseTo(2.4, 6);
+        // Le trou est décalé : la colonne au-dessus du lanceur, à la largeur du personnage, est bouchée.
+        const gapX = (a.x1 + b.x0) / 2;
+        expect(Math.abs(gapX - l.pos.x), `graine ${seed}, lanceur ${l.id}`).toBeGreaterThanOrEqual(1.9 - 1e-6);
+        expect(pans.some((pan) => pan.x0 <= l.pos.x - T.heroRadius && pan.x1 >= l.pos.x + T.heroRadius), `graine ${seed}, lanceur ${l.id}`).toBe(true);
         // Un point au-dessus du mur, à portée d'un lancer.
-        expect(anchors.some((n) => n.pos.y > a!.y1 + 3 && n.pos.y < a!.y1 + 6)).toBe(true);
+        expect(anchors.some((n) => n.pos.y > a.y1 + 3 && n.pos.y < a.y1 + 6)).toBe(true);
       }
     }
     expect(launchers).toBeGreaterThan(16);
+  });
+
+  it('fourches permises : une fois sur deux, deux trous, un large et sûr, un étroit surmonté d\'une étoile, et le vérificateur exige qu\'un lancer attrape chaque route', () => {
+    let twoRoutes = 0;
+    let oneRoute = 0;
+    for (let seed = 1; seed <= 24; seed += 1) {
+      const sim = new Simulation(seed, T, plan(true));
+      const { anchors, obstacles, pickups } = sim.state;
+      expect(sim.state.course.unverified, `graine ${seed}`).toBe(0);
+      for (const l of anchors.filter((a) => a.kind === 'lanceur')) {
+        // Au-dessus de la ligne d'arrivée, les étoiles sont retirées (0.6.3) : un lanceur tout en haut ne se juge pas ici.
+        if (l.pos.y + 8 > 120) continue;
+        const pans = wallOf(l, obstacles);
+        if (pans.length === 2) {
+          oneRoute += 1;
+          continue;
+        }
+        expect(pans.length, `graine ${seed}, lanceur ${l.id}`).toBe(3);
+        twoRoutes += 1;
+        const [a, b, c] = pans as [Obstacle, Obstacle, Obstacle];
+        const gaps = [b.x0 - a.x1, c.x0 - b.x1].sort((p, q) => p - q);
+        expect(gaps[0]).toBeCloseTo(1.8, 6);
+        expect(gaps[1]).toBeCloseTo(2.8, 6);
+        // Les deux trous sont décalés du lanceur, de part et d'autre.
+        const centres = [(a.x1 + b.x0) / 2, (b.x1 + c.x0) / 2];
+        for (const x of centres) expect(Math.abs(x - l.pos.x), `graine ${seed}`).toBeGreaterThanOrEqual(1.9 - 1e-6);
+        expect((centres[0]! - l.pos.x) * (centres[1]! - l.pos.x)).toBeLessThan(0);
+        // L'étoile est juste au-dessus du trou étroit.
+        const tightX = b.x0 - a.x1 < c.x0 - b.x1 ? centres[0]! : centres[1]!;
+        expect(pickups.some((s) => Math.abs(s.pos.x - tightX) < 1e-6 && s.pos.y > a.y1 && s.pos.y < a.y1 + 2)).toBe(true);
+        // Une sortie au-dessus de chaque trou, et le lanceur est la fourche dont les deux branches sont exigées.
+        for (const x of centres) expect(anchors.some((n) => Math.abs(n.pos.x - x) < 1e-6 && n.pos.y > a.y1 + 3 && n.pos.y < a.y1 + 6)).toBe(true);
+      }
+    }
+    expect(twoRoutes).toBeGreaterThan(4);
+    expect(oneRoute).toBeGreaterThan(4);
   });
 });

@@ -9,7 +9,7 @@ import { DEFAULT_TUNING, withTuning } from '../src/sim/tuning';
 
 const T = DEFAULT_TUNING;
 
-const quietRun: RunStats = { holds: 0, perfectStreak: 0, grazes: 0, height: 0, pickups: 0, combo: 0, fragileReleases: 0, boosters: 0, seconds: 0 };
+const quietRun: RunStats = { holds: 0, perfectStreak: 0, grazes: 0, height: 0, pickups: 0, requiredPickups: 0, combo: 0, fragileReleases: 0, boosters: 0, seconds: 0 };
 
 describe('niveaux', () => {
   it('le niveau 1 est gratuit, les suivants se méritent de plus en plus', () => {
@@ -158,8 +158,8 @@ describe('suiveur de partie', () => {
     release(false, 1.5, 'fragile');
     release(true, 1.1, 'fragile', true);
     tracker.handle({ type: 'graze', obstacleId: 1 });
-    tracker.handle({ type: 'pickup', pickupId: 1 });
-    tracker.handle({ type: 'pickup', pickupId: 2 });
+    tracker.handle({ type: 'pickup', pickupId: 1, bonus: false });
+    tracker.handle({ type: 'pickup', pickupId: 2, bonus: false });
     const sim = new Simulation(1);
     sim.state.height = 42;
     sim.state.step = 1200;
@@ -209,5 +209,42 @@ describe('réglage musique', () => {
     const legacy = { ...createProfile() } as Record<string, unknown>;
     delete legacy['music'];
     expect(loadProfile(memoryStorage(JSON.stringify(legacy))).music).toBe(true);
+  });
+});
+
+describe('incohérences du brief du 11 octobre 2026', () => {
+  it('A : un lancer ne coupe pas la série de parfaits du suiveur, comme il ne coupe pas le combo des règles', () => {
+    const tracker = new RunTracker();
+    tracker.handle({ type: 'release', perfect: true, combo: 1, held: 0.8, kind: 'normal', forced: false });
+    tracker.handle({ type: 'release', perfect: false, combo: 1, held: 0.3, kind: 'lanceur', forced: false });
+    tracker.handle({ type: 'release', perfect: true, combo: 2, held: 0.9, kind: 'normal', forced: false });
+    const sim = new Simulation(1);
+    // Deux parfaits d'affilée, le lancer entre eux n'ayant rien coupé.
+    expect(tracker.stats(sim.state, T).perfectStreak).toBe(2);
+    // Un lâcher ordinaire manqué, lui, coupe la série : la meilleure reste à deux.
+    tracker.handle({ type: 'release', perfect: false, combo: 0, held: 0.9, kind: 'normal', forced: false });
+    tracker.handle({ type: 'release', perfect: true, combo: 1, held: 0.9, kind: 'normal', forced: false });
+    expect(tracker.stats(sim.state, T).perfectStreak).toBe(2);
+  });
+
+  it('B : une étoile de pluie compte pour les missions, pas parmi les étoiles requises d\'un niveau', () => {
+    const tracker = new RunTracker();
+    tracker.handle({ type: 'pickup', pickupId: 1, bonus: false });
+    tracker.handle({ type: 'pickup', pickupId: 2, bonus: true });
+    tracker.handle({ type: 'pickup', pickupId: 3, bonus: true });
+    const sim = new Simulation(1);
+    const stats = tracker.stats(sim.state, T);
+    expect(stats.pickups).toBe(3);
+    expect(stats.requiredPickups).toBe(1);
+  });
+
+  it('C : un profil qui a fini tout le catalogue de missions reste sans mission active ; un profil neuf reçoit les trois premières', () => {
+    const done = { ...createProfile(), missions: [], completedMissions: MISSIONS.map((m) => m.id) };
+    expect(loadProfile(memoryStorage(JSON.stringify(done))).missions).toEqual([]);
+    // Un catalogue presque fini : la seule mission restante, et pas une réinjection des premières.
+    const almost = { ...createProfile(), missions: [], completedMissions: MISSIONS.slice(1).map((m) => m.id) };
+    expect(loadProfile(memoryStorage(JSON.stringify(almost))).missions).toEqual([{ id: MISSIONS[0]!.id, progress: 0 }]);
+    const blank = { ...createProfile(), missions: [], completedMissions: [] };
+    expect(loadProfile(memoryStorage(JSON.stringify(blank))).missions).toEqual(createProfile().missions);
   });
 });

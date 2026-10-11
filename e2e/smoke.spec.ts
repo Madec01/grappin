@@ -7,9 +7,11 @@ import { LEVELS, levelById } from '../src/data/levels';
  * graine d'URL est respectée, un pilote automatique grimpe sans erreur, la
  * progression (expérience, sauvegarde, talismans, boutons, niveaux et étoiles)
  * tient d'une partie et d'un rechargement à l'autre, la bascule du niveau 5
- * se joue sans erreur, la liste des niveaux se tourne en deux pages, et le
+ * se joue sans erreur, la liste des niveaux se tourne en deux pages, le
  * lanceur se tire au doigt (souris et toucher) puis se franchit au pilote
- * automatique. Tout passe par `window.__grappin`.
+ * automatique, la pause fige la partie et se reprend sans lâcher la corde, et
+ * les réglages du titre (Sons, Départ) survivent au rechargement. Tout passe
+ * par `window.__grappin`.
  */
 
 const CENTER = { x: 195, y: 422 };
@@ -147,7 +149,10 @@ function autopilot(targetHeight: number, limitMs: number, targetLevelHeight = In
           holdSince = now;
         }
       } else if (s.attached && s.heldKind === 'lanceur') {
-        if (now - holdSince > 150) {
+        // Le temps d'être tiré jusqu'au lanceur et de bander la fronde ; puis la traction prouvée par le vérificateur
+        // (le trou du mur est décalé : viser au jugé ne suffit plus), au jugé vers le point le plus proche sinon.
+        if (now - holdSince > 350) {
+          const aim = api.launchAim();
           let best = null;
           for (const a of api.anchors()) {
             if (a.kind !== 'normal' || a.y < s.pos.y + 1) continue;
@@ -155,7 +160,8 @@ function autopilot(targetHeight: number, limitMs: number, targetLevelHeight = In
             if (!best || d < best.d) best = { x: a.x - s.pos.x, y: a.y - s.pos.y, d };
           }
           const dir = best || { x: 0, y: 1, d: 1 };
-          api.release((-dir.x / dir.d) * 1.75, (-dir.y / dir.d) * 1.75);
+          if (aim) api.release(aim.x, aim.y);
+          else api.release((-dir.x / dir.d) * 1.75, (-dir.y / dir.d) * 1.75);
           launchedAt = now;
           launches += 1;
         }
@@ -320,10 +326,108 @@ test('les boutons répondent au toucher : Talismans, une ligne, Retour, puis un 
 
   await tapButton(page, 'back');
   await expect.poll(async () => (await state(page)).screen).toBe('title');
-  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual(['levels', 'free', 'talismans', 'music']);
+  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual(['continue', 'levels', 'free', 'talismans', 'music', 'sfx', 'start']);
 
   await page.touchscreen.tap(CENTER.x, CENTER.y);
   await expect.poll(async () => (await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
+test('titre : l\'action principale « Continuer » joue le niveau le plus avancé', async ({ page }) => {
+  const errors = watchErrors(page);
+  await open(page, '/?graine=3');
+  await page.evaluate(() => window.__grappin!.resetProfile());
+  await tapButton(page, 'continue');
+  await expect.poll(async () => (await state(page)).screen).toBe('playing');
+  expect(await state(page)).toMatchObject({ mode: 'level', levelId: 1 });
+  expect(errors).toEqual([]);
+});
+
+test('titre : Sons et Départ se basculent et survivent au rechargement', async ({ page }) => {
+  const errors = watchErrors(page);
+  await open(page, '/?graine=3');
+  await page.evaluate(() => window.__grappin!.resetProfile());
+  expect(await state(page)).toMatchObject({ screen: 'title', musicOn: true, sfxOn: true, freeStart: 'advanced' });
+
+  // Chaque bouton ne change que son réglage : la musique reste comme elle est.
+  await tapButton(page, 'sfx');
+  await expect.poll(async () => (await state(page)).sfxOn).toBe(false);
+  await tapButton(page, 'start');
+  await expect.poll(async () => (await state(page)).freeStart).toBe('ground');
+  expect(await state(page)).toMatchObject({ screen: 'title', musicOn: true, sfxOn: false, freeStart: 'ground' });
+
+  await page.reload();
+  await page.waitForFunction(() => window.__grappin !== undefined);
+  expect(await state(page)).toMatchObject({ screen: 'title', musicOn: true, sfxOn: false, freeStart: 'ground' });
+  expect(await profile(page)).toMatchObject({ sfx: false, freeStart: 'ground' });
+
+  // Et dans l'autre sens : un second appui remet chacun comme avant.
+  await tapButton(page, 'sfx');
+  await expect.poll(async () => (await state(page)).sfxOn).toBe(true);
+  await tapButton(page, 'start');
+  await expect.poll(async () => (await state(page)).freeStart).toBe('advanced');
+  await page.reload();
+  await page.waitForFunction(() => window.__grappin !== undefined);
+  expect(await state(page)).toMatchObject({ screen: 'title', sfxOn: true, freeStart: 'advanced' });
+  expect(errors).toEqual([]);
+});
+
+test('pause : le bouton met en pause, le pas de simulation ne bouge plus, Reprendre reprend, et le lever du doigt qui finit l\'appui sur Reprendre ne lâche pas la corde', async ({ page }) => {
+  const errors = watchErrors(page);
+  await open(page, '/?graine=3');
+  await page.evaluate(() => window.__grappin!.resetProfile());
+  await page.evaluate(() => window.__grappin!.playFree());
+  await expect.poll(async () => (await state(page)).screen).toBe('playing');
+  await page.evaluate(() => window.__grappin!.press());
+  await expect.poll(async () => (await state(page)).attached, { timeout: 2000 }).toBe(true);
+
+  // Pendant la partie, le seul bouton est celui de la pause : dans le coin haut droit, assez grand pour un doigt.
+  await expect.poll(async () => (await buttons(page)).map((button) => button.id), { timeout: 2000 }).toEqual(['pause']);
+  const [pause] = await buttons(page);
+  expect(pause!.width).toBeGreaterThanOrEqual(44);
+  expect(pause!.height).toBeGreaterThanOrEqual(44);
+  expect(pause!.x + pause!.width).toBeLessThanOrEqual(390);
+  expect(pause!.x).toBeGreaterThan(195);
+  expect(pause!.y).toBeLessThan(100);
+
+  await tapButton(page, 'pause');
+  await expect.poll(async () => (await state(page)).screen, { timeout: 2000 }).toBe('paused');
+  // Le voile a ses deux boutons, et rien ne bouge derrière : ni le pas de simulation, ni la corde.
+  await expect.poll(async () => (await buttons(page)).map((button) => button.id), { timeout: 2000 }).toEqual(['resume', 'quit']);
+  const frozen = await state(page);
+  expect(frozen.attached).toBe(true);
+  await page.waitForTimeout(300);
+  const later = await state(page);
+  expect(later.step).toBe(frozen.step);
+  expect(later.attached).toBe(true);
+  expect(later.pos).toEqual(frozen.pos);
+
+  // Un appui ailleurs ne fait rien.
+  await page.touchscreen.tap(CENTER.x, CENTER.y);
+  expect((await state(page)).screen).toBe('paused');
+
+  // Reprendre : le doigt qui se lève pour finir cet appui n'est pas un lâcher.
+  await tapButton(page, 'resume');
+  await expect.poll(async () => (await state(page)).screen, { timeout: 2000 }).toBe('playing');
+  expect((await state(page)).attached).toBe(true);
+  await expect.poll(async () => (await state(page)).step, { timeout: 2000 }).toBeGreaterThan(frozen.step);
+  expect((await state(page)).attached).toBe(true);
+
+  // Un vrai lever du doigt, ensuite, lâche bien la corde.
+  await page.evaluate(() => window.__grappin!.release());
+  expect((await state(page)).attached).toBe(false);
+  expect(errors).toEqual([]);
+});
+
+test('pause : Quitter revient au titre', async ({ page }) => {
+  const errors = watchErrors(page);
+  await open(page, '/?graine=3');
+  await page.evaluate(() => window.__grappin!.playFree());
+  await expect.poll(async () => (await state(page)).screen).toBe('playing');
+  await tapButton(page, 'pause');
+  await expect.poll(async () => (await state(page)).screen, { timeout: 2000 }).toBe('paused');
+  await tapButton(page, 'quit');
+  await expect.poll(async () => (await state(page)).screen, { timeout: 2000 }).toBe('title');
   expect(errors).toEqual([]);
 });
 

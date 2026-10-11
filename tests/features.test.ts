@@ -136,7 +136,7 @@ describe('obstacles, étoiles et paliers', () => {
     sim.state.course.lastY = 0;
     sim.step();
     expect(sim.state.tier).toBe(1);
-    expect(sim.drain().find((e) => e.type === 'tier')).toMatchObject({ type: 'tier', tier: 1, name: 'Les gouttières' });
+    expect(sim.drain().find((e) => e.type === 'tier')).toMatchObject({ type: 'tier', tier: 1, name: 'La chaîne' });
   });
 });
 

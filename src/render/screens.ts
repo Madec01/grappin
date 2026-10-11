@@ -1,4 +1,4 @@
-import { Container, Graphics } from 'pixi.js';
+import { Container, Graphics, type Text } from 'pixi.js';
 import { LEVELS, levelById, type LevelDef } from '../data/levels';
 import { levelFor, levelProgress } from '../meta/levels';
 import { missionById, type MissionDef } from '../meta/missions';
@@ -6,13 +6,13 @@ import { showsHint, type LevelOutcome, type Profile, type RunOutcome } from '../
 import { TALISMANS, slotsFor, type Talisman } from '../meta/talismans';
 import { starsOf, unlockedLevel, type LevelResult } from '../meta/traversee';
 import { levelButton, levelPageCount, levelsOfPage, type ButtonId, type ButtonRect } from './buttons';
-import { type StarLine, equippedLine, levelEvents, levelPageLabel, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, slotsLine, starLines } from './labels';
+import { PAUSE_HELP, type StarLine, continueLabel, equippedLine, levelEvents, levelPageLabel, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, musicLabel, rankLabel, rankUpLine, sfxLabel, slotsLine, starLines, startLabel } from './labels';
 import { neonBar, neonPoly, neonPolyline, neonRoundRect } from './neon';
 import { COLOR, GlowText, makeText, readSafeInset, starPoints, type Palette } from './style';
 
 /**
  * Les écrans posés sur le jeu : titre, liste des niveaux, fin de partie,
- * victoire et talismans. Un voile nuit, des textes blancs, des formes à contour
+ * victoire, talismans et pause. Un voile nuit, des textes blancs, des formes à contour
  * néon fin : boutons, lignes équipées, étoiles, barre d'expérience. Un écran
  * n'est dessiné qu'une fois par vue et par taille d'écran : ses halos ne
  * coûtent rien à l'image.
@@ -50,7 +50,9 @@ export type OverlayView =
       readonly outcome: RunOutcome;
     }
   | { readonly kind: 'won'; readonly score: number; readonly outcome: LevelOutcome; readonly result: LevelResult }
-  | { readonly kind: 'talismans'; readonly profile: Profile };
+  | { readonly kind: 'talismans'; readonly profile: Profile }
+  /** La pause : la partie reste visible, figée, sous un voile léger. */
+  | { readonly kind: 'paused' };
 
 /** Marges et mise en page, en pixels CSS. */
 const SIDE_MARGIN = 20;
@@ -63,14 +65,49 @@ const BLOCK_GAP = 24;
 const SHADE_ALPHA = 0.74;
 /** Les écrans des talismans, des niveaux et de la victoire portent beaucoup de texte : voile plus dense. */
 const SHADE_ALPHA_DENSE = 0.9;
+/** La pause ne porte presque pas de texte et la partie figée doit rester lisible dessous : voile plus léger. */
+const SHADE_ALPHA_PAUSE = 0.6;
 const DENSE_VIEWS: ReadonlySet<OverlayView['kind']> = new Set(['talismans', 'levels', 'won']);
 
-/** Boutons : 56 px de haut, soit plus que les 44 px d'un doigt même réduits d'un cinquième. */
-const BUTTON_WIDTH = 220;
-const BUTTON_HEIGHT = 56;
-const BUTTON_RADIUS = 12;
-const BUTTON_EDGE_WIDTH = 1.5;
-const BUTTON_FONT_SIZE = 22;
+/**
+ * Les cinq sortes de boutons. Le bouton ordinaire fait 56 px de haut, soit plus
+ * que les 44 px d'un doigt même réduits d'un cinquième ; les plus petits (les
+ * réglages du titre, « Quitter ») restent à 44 px au moins, en pixels de bloc.
+ *  - `normal` : le bouton centré du titre et des écrans de fin ;
+ *  - `primary` : l'action principale du titre, sur toute la largeur, au fond allumé ;
+ *  - `large` : « Reprendre », grand pour le pouce ;
+ *  - `access` : les accès du titre, trois côte à côte ;
+ *  - `quiet` : les réglages et « Quitter », au contour discret et au texte atténué.
+ */
+type ButtonLook = 'normal' | 'primary' | 'large' | 'access' | 'quiet';
+
+interface ButtonStyle {
+  /** Largeur d'un bouton seul, réduite à celle du bloc s'il est plus étroit. */
+  readonly width: number;
+  readonly height: number;
+  readonly radius: number;
+  readonly fontSize: number;
+  readonly edgeWidth: number;
+  /** Contour : l'accent de la palette en néon, ou le bleu sombre des lignes au repos. */
+  readonly edge: 'accent' | 'quiet';
+  readonly fill: number;
+  readonly fillAlpha: number;
+  readonly textColor: number;
+  /** Le libellé passe à la ligne s'il est plus large que le bouton (sinon il rétrécit pour y tenir). */
+  readonly wrap: boolean;
+}
+
+const BUTTON_STYLES: Record<ButtonLook, ButtonStyle> = {
+  normal: { width: 220, height: 56, radius: 12, fontSize: 22, edgeWidth: 1.5, edge: 'accent', fill: COLOR.panel, fillAlpha: 0.9, textColor: COLOR.text, wrap: false },
+  primary: { width: Number.POSITIVE_INFINITY, height: 64, radius: 14, fontSize: 19, edgeWidth: 2, edge: 'accent', fill: COLOR.panelEquipped, fillAlpha: 0.95, textColor: COLOR.text, wrap: true },
+  large: { width: 300, height: 72, radius: 16, fontSize: 28, edgeWidth: 2, edge: 'accent', fill: COLOR.panelEquipped, fillAlpha: 0.95, textColor: COLOR.text, wrap: false },
+  access: { width: Number.POSITIVE_INFINITY, height: 52, radius: 12, fontSize: 16, edgeWidth: 1.5, edge: 'accent', fill: COLOR.panel, fillAlpha: 0.9, textColor: COLOR.text, wrap: false },
+  quiet: { width: 160, height: 44, radius: 10, fontSize: 14, edgeWidth: 1.5, edge: 'quiet', fill: COLOR.panel, fillAlpha: 0.55, textColor: COLOR.textDim, wrap: false },
+};
+/** Marge intérieure d'un libellé de bouton, de chaque côté. */
+const BUTTON_TEXT_PAD = 6;
+/** Écart entre les trois réglages du titre : plus serré que celui des autres boutons. */
+const SETTINGS_GAP = 8;
 
 const BAR_WIDTH = 220;
 const BAR_HEIGHT = 10;
@@ -152,6 +189,14 @@ function drawPadlock(g: Graphics, x: number, y: number): void {
     .lineTo(x + LOCK_WIDTH - LOCK_SHACKLE_INSET, y + LOCK_SHACKLE)
     .stroke({ width: 2, color: COLOR.textLocked });
   g.roundRect(x, y + LOCK_SHACKLE, LOCK_WIDTH, LOCK_BODY, 3).fill(COLOR.textLocked);
+}
+
+/** Un libellé que seul un point médian (« · ») peut couper : « Niveau 1 » et le nom d'un niveau ne se séparent jamais, les espaces d'un segment devenant insécables. */
+function keepSegments(label: string): string {
+  return label
+    .split(' · ')
+    .map((segment) => segment.replaceAll(' ', '\u00A0'))
+    .join(' · ');
 }
 
 /** Un bloc d'écran : une pile verticale de textes et de formes, avec les boutons qu'elle porte. */
@@ -239,46 +284,70 @@ class Column {
     this.cursor += Math.max(label.height, done.height);
   }
 
-  /** Le fond sombre d'un bouton de `width` pixels, de gauche `x`, au curseur, et son contour de néon fin, qui prend l'accent. */
-  private buttonFrame(x: number, width: number): void {
-    const panel = new Graphics().roundRect(x, this.cursor, width, BUTTON_HEIGHT, BUTTON_RADIUS).fill({ color: COLOR.panel, alpha: 0.9 });
+  /** Le fond d'un bouton de `width` pixels, de gauche `x`, au curseur, et son contour : de néon fin qui prend l'accent, ou discret. */
+  private buttonFrame(x: number, width: number, style: ButtonStyle): void {
+    const panel = new Graphics().roundRect(x, this.cursor, width, style.height, style.radius).fill({ color: style.fill, alpha: style.fillAlpha });
+    if (style.edge === 'quiet') {
+      panel.stroke({ width: style.edgeWidth, color: COLOR.panelEdge });
+      this.root.addChild(panel);
+      return;
+    }
     const edge = this.accented(new Graphics());
-    neonRoundRect(edge, x, this.cursor, width, BUTTON_HEIGHT, BUTTON_RADIUS, { color: COLOR.white, halo: COLOR.white, width: BUTTON_EDGE_WIDTH, spread: UI_SPREAD, strength: UI_STRENGTH });
+    neonRoundRect(edge, x, this.cursor, width, style.height, style.radius, { color: COLOR.white, halo: COLOR.white, width: style.edgeWidth, spread: UI_SPREAD, strength: UI_STRENGTH });
     this.root.addChild(panel, edge);
   }
 
-  /** Bouton centré, sur fond nuit, au contour de néon fin. */
-  button(id: ButtonId, label: string): void {
-    const x = (this.width - BUTTON_WIDTH) / 2;
-    this.buttonFrame(x, BUTTON_WIDTH);
-    const text = makeText(label, BUTTON_FONT_SIZE, COLOR.text, { bold: true });
+  /** Le libellé d'un bouton de `width` pixels, à sa taille : `fit` dit de combien il faut le réduire (1 s'il tient) pour qu'il tienne dans son bouton. */
+  private buttonLabel(label: string, width: number, style: ButtonStyle): { readonly text: Text; readonly fit: number } {
+    const room = width - 2 * BUTTON_TEXT_PAD;
+    const text = style.wrap ? makeText(keepSegments(label), style.fontSize, style.textColor, { bold: true, wrap: room }) : makeText(label, style.fontSize, style.textColor, { bold: true });
     text.anchor.set(0.5);
-    text.position.set(this.width / 2, this.cursor + BUTTON_HEIGHT / 2);
+    return { text, fit: Math.min(1, room / text.width, (style.height - 8) / text.height) };
+  }
+
+  /** Pose le libellé `text`, réduit de `fit`, au centre du bouton de gauche `x` et de largeur `width` qui est au curseur. */
+  private placeLabel(text: Text, fit: number, x: number, width: number, style: ButtonStyle): void {
+    text.scale.set(fit);
+    text.position.set(x + width / 2, this.cursor + style.height / 2);
     this.root.addChild(text);
-    this.buttons.push({ id, x, y: this.cursor, width: BUTTON_WIDTH, height: BUTTON_HEIGHT });
-    this.cursor += BUTTON_HEIGHT;
+  }
+
+  /** Bouton centré, sur fond nuit, au contour de néon fin. `look` en change la taille et l'allure. */
+  button(id: ButtonId, label: string, look: ButtonLook = 'normal'): void {
+    const style = BUTTON_STYLES[look];
+    const width = Math.min(this.width, style.width);
+    const x = (this.width - width) / 2;
+    const { text, fit } = this.buttonLabel(label, width, style);
+    this.buttonFrame(x, width, style);
+    this.placeLabel(text, fit, x, width, style);
+    this.buttons.push({ id, x, y: this.cursor, width, height: style.height });
+    this.cursor += style.height;
   }
 
   /**
-   * Plusieurs boutons côte à côte sur la largeur du bloc, séparés de `BUTTON_GAP`,
+   * Plusieurs boutons côte à côte sur la largeur du bloc, séparés de `gap`,
    * chacun large selon son poids : de quoi garder « Retour » et le bouton d'une
-   * page sur une seule ligne.
+   * page sur une seule ligne, ou les accès et les réglages du titre. Sur un
+   * écran étroit, tous les libellés rétrécissent d'autant : le plus long en
+   * décide, aucun ne dépasse son bouton et tous gardent la même taille.
    */
-  buttonRow(items: readonly { readonly id: ButtonId; readonly label: string; readonly weight: number }[]): void {
+  buttonRow(items: readonly { readonly id: ButtonId; readonly label: string; readonly weight: number }[], look: ButtonLook = 'normal', gap: number = BUTTON_GAP): void {
+    const style = BUTTON_STYLES[look];
     const total = items.reduce((sum, item) => sum + item.weight, 0);
-    const room = this.width - BUTTON_GAP * (items.length - 1);
-    let x = 0;
-    for (const item of items) {
+    const room = this.width - gap * (items.length - 1);
+    const cells = items.map((item) => {
       const width = (room * item.weight) / total;
-      this.buttonFrame(x, width);
-      const text = makeText(item.label, BUTTON_FONT_SIZE, COLOR.text, { bold: true });
-      text.anchor.set(0.5);
-      text.position.set(x + width / 2, this.cursor + BUTTON_HEIGHT / 2);
-      this.root.addChild(text);
-      this.buttons.push({ id: item.id, x, y: this.cursor, width, height: BUTTON_HEIGHT });
-      x += width + BUTTON_GAP;
+      return { item, width, ...this.buttonLabel(item.label, width, style) };
+    });
+    const fit = Math.min(...cells.map((cell) => cell.fit));
+    let x = 0;
+    for (const { item, width, text } of cells) {
+      this.buttonFrame(x, width, style);
+      this.placeLabel(text, fit, x, width, style);
+      this.buttons.push({ id: item.id, x, y: this.cursor, width, height: style.height });
+      x += width + gap;
     }
-    this.cursor += BUTTON_HEIGHT;
+    this.cursor += style.height;
   }
 
   /**
@@ -301,7 +370,7 @@ class Column {
 
   /**
    * Une ligne de talisman : nom, description plus petite et plus grise, et à
-   * droite « Équipé » ou le niveau qui le débloque. Équipée, elle a un fond plus
+   * droite « Équipé » ou le rang qui le débloque. Équipée, elle a un fond plus
    * clair ; verrouillée, elle est grisée et n'est pas un bouton.
    */
   talisman(talisman: Talisman, equipped: boolean, locked: boolean): void {
@@ -310,7 +379,7 @@ class Column {
     name.position.set(ROW_PADDING, this.cursor + ROW_PADDING);
     const description = makeText(talisman.description, 13, locked ? COLOR.textLocked : COLOR.textFaint, { wrap: this.width - 2 * ROW_PADDING, align: 'left' });
     description.position.set(ROW_PADDING, name.y + name.height + 2);
-    const tag = locked ? makeText(`Niveau ${talisman.level}`, 15, COLOR.textLocked) : equipped ? makeText('Équipé', 16, COLOR.text, { bold: true }) : null;
+    const tag = locked ? makeText(rankLabel(talisman.level), 15, COLOR.textLocked) : equipped ? makeText('Équipé', 16, COLOR.text, { bold: true }) : null;
     tag?.anchor.set(1, 0);
     tag?.position.set(this.width - ROW_PADDING, name.y + 2);
 
@@ -418,20 +487,15 @@ function buildTitle(profile: Profile, width: number, testMode: boolean): Layout 
     upper.line(TEST_MODE_LINE, 15, COLOR.textDim);
   }
   upper.gap(16);
-  upper.line(`Niveau ${progress.level}`, 24, COLOR.text, true);
+  upper.line(rankLabel(progress.level), 24, COLOR.text, true);
   upper.gap(8);
   upper.bar(progress.ratio);
   if (profile.bestHeight > 0) {
     upper.gap(14);
     upper.line(`Meilleure montée : ${Math.floor(profile.bestHeight)} m`, 18, COLOR.textDim);
   }
-  // Le niveau qu'un appui va jouer, puis les étoiles gagnées sur l'ensemble de la traversée.
-  const next = levelById(unlockedLevel(profile));
-  if (next) {
-    upper.gap(14);
-    upper.line(levelTitle(next), 20, COLOR.text, true);
-  }
-  upper.gap(4);
+  // Les étoiles gagnées sur l'ensemble de la traversée.
+  upper.gap(14);
   upper.starCount(
     LEVELS.reduce((sum, level) => sum + starsOf(profile, level.id), 0),
     LEVELS.length * STARS_PER_LEVEL,
@@ -447,23 +511,26 @@ function buildTitle(profile: Profile, width: number, testMode: boolean): Layout 
       upper.mission(mission.def, mission.progress);
     });
 
+  // Le bas, sous le pouce : l'action principale (le niveau le plus avancé jouable), puis les trois accès, puis, petits, les trois réglages.
   const lower = new Column(width);
   lower.line(equippedLine(profile.equipped), 16, COLOR.textDim);
   lower.gap(14);
-  lower.button('levels', 'Niveaux');
-  lower.gap(BUTTON_GAP);
-  lower.button('free', 'Course libre');
-  lower.gap(BUTTON_GAP);
-  lower.button('talismans', 'Talismans');
-  lower.gap(BUTTON_GAP);
-  lower.button('music', profile.music ? 'Musique : oui' : 'Musique : non');
-  lower.gap(22);
-  lower.line('Toucher pour jouer', 24, COLOR.textDim);
+  const next = levelById(unlockedLevel(profile));
+  if (next) lower.button('continue', continueLabel(next), 'primary');
   if (showsHint(profile)) {
     lower.gap(10);
     lower.line(HINT, 16, COLOR.textDim);
   }
+  lower.gap(BUTTON_GAP);
+  lower.buttonRow(weighted([['levels', 'Niveaux'], ['free', 'Course libre'], ['talismans', 'Talismans']]), 'access');
+  lower.gap(18);
+  lower.buttonRow(weighted([['music', musicLabel(profile.music)], ['sfx', sfxLabel(profile.sfx)], ['start', startLabel(profile.freeStart)]], 2), 'quiet', SETTINGS_GAP);
   return { upper, lower, align: 'center' };
+}
+
+/** Des boutons de rangée dont le poids suit la longueur du libellé (plus `extra` caractères de marge) : chacun a la place de son texte. */
+function weighted(items: readonly (readonly [ButtonId, string])[], extra = 0): { id: ButtonId; label: string; weight: number }[] {
+  return items.map(([id, label]) => ({ id, label, weight: label.length + extra }));
 }
 
 /**
@@ -520,7 +587,7 @@ function describeOutcome(upper: Column, score: number, outcome: RunOutcome, news
   }
   if (outcome.levelAfter > outcome.levelBefore) {
     upper.gap(18);
-    upper.line(`Niveau ${outcome.levelAfter} !`, 30, COLOR.text, true, 'accent');
+    upper.line(rankUpLine(outcome.levelAfter), 30, COLOR.text, true, 'accent');
     for (const talisman of outcome.unlocked) {
       upper.gap(6);
       upper.line(`Débloqué : ${talisman.name}`, 20, COLOR.text);
@@ -591,6 +658,23 @@ function buildTalismans(profile: Profile, width: number): Layout {
   return { upper, lower, align: 'top' };
 }
 
+/**
+ * La pause : un titre, et sous le pouce « Reprendre », grand, sa ligne d'aide,
+ * puis, plus discret et plus bas pour ne pas se toucher par erreur, « Quitter ».
+ */
+function buildPaused(width: number): Layout {
+  const upper = new Column(width);
+  upper.line('Pause', 44, COLOR.text, true, 'accent');
+
+  const lower = new Column(width);
+  lower.button('resume', 'Reprendre', 'large');
+  lower.gap(14);
+  lower.line(PAUSE_HELP, 16, COLOR.textDim);
+  lower.gap(40);
+  lower.button('quit', 'Quitter', 'quiet');
+  return { upper, lower, align: 'center' };
+}
+
 function buildLayout(view: Exclude<OverlayView, { kind: 'none' }>, width: number): Layout {
   switch (view.kind) {
     case 'title':
@@ -603,7 +687,15 @@ function buildLayout(view: Exclude<OverlayView, { kind: 'none' }>, width: number
       return buildWon(view.score, view.outcome, view.result, width);
     case 'talismans':
       return buildTalismans(view.profile, width);
+    case 'paused':
+      return buildPaused(width);
   }
+}
+
+/** Opacité du voile d'une vue. */
+function shadeAlpha(view: OverlayView): number {
+  if (view.kind === 'paused') return SHADE_ALPHA_PAUSE;
+  return DENSE_VIEWS.has(view.kind) ? SHADE_ALPHA_DENSE : SHADE_ALPHA;
 }
 
 /** Deux vues disent-elles la même chose ? Comparaison champ à champ : les profils et issues sont remplacés, jamais modifiés. */
@@ -667,7 +759,7 @@ export class Screens {
     this.shownHeight = height;
 
     // Le voile est blanc : sa teinte, celle du fond, se pose à chaque image.
-    this.shade.rect(0, 0, width, height).fill({ color: COLOR.white, alpha: DENSE_VIEWS.has(view.kind) ? SHADE_ALPHA_DENSE : SHADE_ALPHA });
+    this.shade.rect(0, 0, width, height).fill({ color: COLOR.white, alpha: shadeAlpha(view) });
 
     const contentWidth = Math.min(width - 2 * SIDE_MARGIN, MAX_WIDTH);
     const { upper, lower, align } = buildLayout(view, contentWidth);

@@ -23,6 +23,9 @@ export interface LevelRecord {
   readonly bestScore: number;
 }
 
+/** Où part la course libre : au départ avancé que la progression débloque, ou du sol. */
+export type FreeStart = 'advanced' | 'ground';
+
 export interface Profile {
   readonly version: typeof PROFILE_VERSION;
   readonly xp: number;
@@ -37,6 +40,9 @@ export interface Profile {
   readonly levels: Record<string, LevelRecord>;
   /** Réglage : la musique joue. Vrai par défaut. */
   readonly music: boolean;
+  /** Réglage « Sons » : les bruitages du geste. */
+  readonly sfx: boolean;
+  readonly freeStart: FreeStart;
 }
 
 /** Lecture et écriture d'un texte : `localStorage` dans le navigateur, une mémoire dans les tests. */
@@ -61,6 +67,8 @@ export function createProfile(): Profile {
     completedMissions: [],
     levels: {},
     music: true,
+    sfx: true,
+    freeStart: 'advanced',
   };
 }
 
@@ -121,11 +129,14 @@ export function loadProfile(storage: ProfileStorage): Profile {
       bestHeight: raw.bestHeight,
       bestScore: raw.bestScore,
       equipped: equipped.slice(0, slotsFor(levelFor(raw.xp))),
-      missions: missions.length > 0 ? missions : fresh.missions,
+      // Un profil qui n'a jamais rien accompli repart sur les premières missions ; sinon ses missions actives, même aucune : le catalogue fini reste fini.
+      missions: missions.length > 0 || completedMissions.length > 0 ? missions : fresh.missions,
       completedMissions,
       levels,
       // Un profil d'avant ce réglage n'a pas la clé : la musique joue.
       music: raw.music !== false,
+      sfx: raw.sfx !== false,
+      freeStart: raw.freeStart === 'ground' ? 'ground' : 'advanced',
     };
     return refillMissions(profile);
   } catch {

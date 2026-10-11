@@ -118,7 +118,10 @@ async function autoplay(page: Page, seconds: number, untilHeight = Infinity, unt
           holdSince = now;
         }
       } else if (s.attached && s.heldKind === 'lanceur') {
-        if (now - holdSince > 150) {
+        // Le temps d'être tiré jusqu'au lanceur et de bander la fronde ; puis la traction prouvée par le vérificateur
+        // (le trou du mur est décalé : viser au jugé ne suffit plus), au jugé vers le point le plus proche sinon.
+        if (now - holdSince > 350) {
+          const aim = api.launchAim();
           let best = null;
           for (const a of api.anchors()) {
             if (a.kind !== 'normal' || a.y < s.pos.y + 1) continue;
@@ -126,7 +129,8 @@ async function autoplay(page: Page, seconds: number, untilHeight = Infinity, unt
             if (!best || d < best.d) best = { x: a.x - s.pos.x, y: a.y - s.pos.y, d };
           }
           const dir = best || { x: 0, y: 1, d: 1 };
-          api.release((-dir.x / dir.d) * 1.75, (-dir.y / dir.d) * 1.75);
+          if (aim) api.release(aim.x, aim.y);
+          else api.release((-dir.x / dir.d) * 1.75, (-dir.y / dir.d) * 1.75);
           launchedAt = now;
         }
       } else if (s.attached && now - holdSince > 80) {
@@ -292,7 +296,17 @@ async function main(): Promise<void> {
       await testPage.waitForFunction(() => window.__grappin?.state().screen === 'playing');
       await testPage.mouse.move(250, 640);
       await testPage.mouse.down();
-      await testPage.waitForFunction(() => window.__grappin?.state().heldKind === 'lanceur');
+      // Le parcours du niveau 14 peut changer (réglages des niveaux, générateur) : sans lanceur sous le doigt, la prise est omise plutôt que de bloquer le banc.
+      const held = await testPage
+        .waitForFunction(() => window.__grappin?.state().heldKind === 'lanceur', undefined, { timeout: 5000 })
+        .then(() => true)
+        .catch(() => false);
+      if (!held) {
+        console.warn(`${name} : pas de lanceur à saisir au départ du niveau 14, prise omise`);
+        await testPage.mouse.up();
+        await testPage.evaluate(() => window.__grappin!.restart());
+        return;
+      }
       if (to) await testPage.mouse.move(to.x, to.y, { steps: 4 });
       await testPage.waitForTimeout(250);
       if (lift) {
@@ -377,6 +391,24 @@ async function main(): Promise<void> {
     await ending.waitForFunction(() => window.__grappin?.state().screen === 'dead', undefined, { timeout: 20_000 });
     await ending.waitForTimeout(200);
     await ending.screenshot({ path: join(outDir, '07-fin.png') });
+
+    // La pause : une partie en cours, le doigt posé (la corde tenue), puis le bouton de pause en haut à droite. Le jeu reste visible,
+    // figé, sous le voile ; « Reprendre » tombe sous le pouce, « Quitter » est plus discret, plus bas.
+    const pausePage = await context.newPage();
+    await pausePage.goto(`http://localhost:${PORT}/?graine=${seed}`);
+    await pausePage.waitForFunction(() => window.__grappin?.state().screen === 'title');
+    await pausePage.evaluate(() => window.__grappin!.playFree());
+    await pausePage.waitForFunction(() => window.__grappin?.state().screen === 'playing');
+    await pausePage.evaluate(() => window.__grappin!.press());
+    await pausePage.waitForTimeout(700);
+    await tapButton(pausePage, 'pause');
+    await pausePage.waitForFunction(() => window.__grappin?.state().screen === 'paused');
+    await pausePage.waitForFunction(() => window.__grappin?.buttons().some((b) => b.id === 'resume'));
+    await pausePage.waitForTimeout(200);
+    await pausePage.screenshot({ path: join(outDir, '25-pause.png') });
+    const paused = await pausePage.evaluate(() => window.__grappin!.state());
+    console.log(`Pause : écran ${paused.screen}, pas ${paused.step}, corde ${paused.attached ? 'tenue' : 'lâchée'}`);
+    await pausePage.close();
 
     // Les ambiances : une image par famille de musique (niveaux 1, 3, 5, 7 et 9), après une seconde et demie de jeu, soit le fondu fini.
     // Le temps de jeu se compte en pas de simulation (cent vingt par seconde) et non à l'horloge : le rendu logiciel est lent, et le jeu

@@ -49,8 +49,8 @@ describe('texte d\'un événement', () => {
   });
 
   it('annonce une étoile par son réglage de score, pas par une valeur codée', () => {
-    expect(floatingTextFor({ type: 'pickup', pickupId: 1 }, DEFAULT_TUNING)).toBe('+10');
-    expect(floatingTextFor({ type: 'pickup', pickupId: 1 }, { ...DEFAULT_TUNING, pickupScore: 25 })).toBe('+25');
+    expect(floatingTextFor({ type: 'pickup', pickupId: 1, bonus: false }, DEFAULT_TUNING)).toBe('+10');
+    expect(floatingTextFor({ type: 'pickup', pickupId: 1, bonus: false }, { ...DEFAULT_TUNING, pickupScore: 25 })).toBe('+25');
   });
 
   it('annonce un lâcher parfait avec le multiplicateur qu\'il vient de gagner, plafond compris', () => {
@@ -64,7 +64,7 @@ describe('texte d\'un événement', () => {
     expect(floatingTextFor({ type: 'release', perfect: false, combo: 0, held: 1, kind: 'normal', forced: false }, DEFAULT_TUNING)).toBeNull();
     expect(floatingTextFor({ type: 'attach', anchorId: 1 }, DEFAULT_TUNING)).toBeNull();
     expect(floatingTextFor({ type: 'kick' }, DEFAULT_TUNING)).toBeNull();
-    expect(floatingTextFor(tier(1, 'Les gouttières'), DEFAULT_TUNING)).toBeNull();
+    expect(floatingTextFor(tier(1, 'La chaîne'), DEFAULT_TUNING)).toBeNull();
     expect(floatingTextFor({ type: 'death', height: 10, cause: 'fog' }, DEFAULT_TUNING)).toBeNull();
   });
 });
@@ -125,7 +125,7 @@ describe('textes flottants', () => {
     const effects = new Effects(DEFAULT_TUNING);
     effects.handle({ type: 'boost' }, HERO);
     effects.handle(perfect(1), HERO);
-    effects.handle({ type: 'pickup', pickupId: 1 }, HERO);
+    effects.handle({ type: 'pickup', pickupId: 1, bonus: false }, HERO);
     const [first, second, third] = effects.texts;
     expect(first!.y - second!.y).toBe(26);
     expect(second!.y - third!.y).toBe(26);
@@ -173,8 +173,8 @@ describe('bannière de palier', () => {
   it('annonce le nom et la hauteur, 2 s de temps réel, puis disparaît', () => {
     const effects = new Effects(DEFAULT_TUNING);
     expect(effects.banner).toBeNull();
-    effects.handle(tier(1, 'Les gouttières'), HERO);
-    expect(effects.banner).toMatchObject({ text: 'Les gouttières · 50 m', age: 0 });
+    effects.handle(tier(1, 'La chaîne'), HERO);
+    expect(effects.banner).toMatchObject({ text: 'La chaîne · 50 m', age: 0 });
     expect(effects.texts).toHaveLength(0);
 
     effects.update(1.99);
@@ -185,16 +185,16 @@ describe('bannière de palier', () => {
 
   it('calcule la hauteur avec le réglage de hauteur de palier', () => {
     const effects = new Effects({ ...DEFAULT_TUNING, tierHeight: 4 });
-    effects.handle(tier(2, 'Les enseignes'), HERO);
-    expect(effects.banner?.text).toBe('Les enseignes · 8 m');
+    effects.handle(tier(2, 'Les lueurs'), HERO);
+    expect(effects.banner?.text).toBe('Les lueurs · 8 m');
   });
 
   it('un palier neuf remplace la bannière encore à l\'écran', () => {
     const effects = new Effects(DEFAULT_TUNING);
-    effects.handle(tier(1, 'Les gouttières'), HERO);
+    effects.handle(tier(1, 'La chaîne'), HERO);
     effects.update(1);
-    effects.handle(tier(2, 'Les enseignes'), HERO);
-    expect(effects.banner).toMatchObject({ text: 'Les enseignes · 100 m', age: 0 });
+    effects.handle(tier(2, 'Les lueurs'), HERO);
+    expect(effects.banner).toMatchObject({ text: 'Les lueurs · 100 m', age: 0 });
   });
 });
 
@@ -202,8 +202,8 @@ describe('intro d\'un niveau', () => {
   it('annonce le titre et une seconde ligne, 3 s de temps réel, puis disparaît', () => {
     expect(INTRO_SECONDS).toBe(3);
     const effects = new Effects(DEFAULT_TUNING);
-    effects.intro('Niveau 3 · Les enseignes', 'Des couloirs d\'étoiles.');
-    expect(effects.banner).toMatchObject({ text: 'Niveau 3 · Les enseignes', detail: 'Des couloirs d\'étoiles.', seconds: INTRO_SECONDS, age: 0 });
+    effects.intro('Niveau 3 · Les lueurs', 'Des couloirs d\'étoiles.');
+    expect(effects.banner).toMatchObject({ text: 'Niveau 3 · Les lueurs', detail: 'Des couloirs d\'étoiles.', seconds: INTRO_SECONDS, age: 0 });
 
     effects.update(2.99);
     expect(effects.banner).not.toBeNull();
@@ -213,20 +213,20 @@ describe('intro d\'un niveau', () => {
 
   it('une bannière de palier n\'a pas de seconde ligne et dure 2 s', () => {
     const effects = new Effects(DEFAULT_TUNING);
-    effects.handle(tier(1, 'Les gouttières'), HERO);
+    effects.handle(tier(1, 'La chaîne'), HERO);
     expect(effects.banner).toMatchObject({ detail: null, seconds: BANNER_SECONDS });
   });
 
   it('remplace la bannière en cours, et un palier neuf la remplace à son tour', () => {
     const effects = new Effects(DEFAULT_TUNING);
-    effects.handle(tier(1, 'Les gouttières'), HERO);
+    effects.handle(tier(1, 'La chaîne'), HERO);
     effects.update(1);
-    effects.intro('Niveau 1 · Les toits', 'Garde le doigt posé.');
-    expect(effects.banner).toMatchObject({ text: 'Niveau 1 · Les toits', age: 0 });
+    effects.intro('Niveau 1 · Les premiers anneaux', 'Garde le doigt posé.');
+    expect(effects.banner).toMatchObject({ text: 'Niveau 1 · Les premiers anneaux', age: 0 });
 
     effects.update(1);
-    effects.handle(tier(2, 'Les enseignes'), HERO);
-    expect(effects.banner).toMatchObject({ text: 'Les enseignes · 100 m', detail: null, age: 0 });
+    effects.handle(tier(2, 'Les lueurs'), HERO);
+    expect(effects.banner).toMatchObject({ text: 'Les lueurs · 100 m', detail: null, age: 0 });
   });
 });
 
@@ -259,7 +259,7 @@ describe('annonce d\'un événement de niveau', () => {
 
   it('peut n\'avoir qu\'un titre, et remplace la bannière en cours', () => {
     const effects = new Effects(DEFAULT_TUNING);
-    effects.intro('Niveau 5 · Les antennes', 'Attention.');
+    effects.intro('Niveau 5 · Les flèches', 'Attention.');
     effects.update(1);
     effects.announce('Retour au calme', null);
     expect(effects.banner).toMatchObject({ text: 'Retour au calme', detail: null, age: 0 });

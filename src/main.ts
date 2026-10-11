@@ -1,6 +1,7 @@
 import { Game, readSettings, type DebugAnchor, type DebugState } from './app/game';
 import { Music, browserAudio } from './audio/music';
 import { browserRhythms } from './audio/rhythms';
+import { browserSfx } from './audio/sfx';
 import { trackPointer } from './input/pointer';
 import { STORAGE_KEY, TEST_STORAGE_KEY, browserStorage, type Profile } from './meta/profile';
 import type { TalismanId } from './meta/talismans';
@@ -39,6 +40,8 @@ declare global {
       playFree: () => void;
       /** Les points d'accroche encore là, en mètres de monde : de quoi viser un trou dans un mur. Pour les tests de bout en bout et le banc de captures. */
       anchors: () => DebugAnchor[];
+      /** La traction prouvée depuis le lanceur tenu (voir `sim/pilot.ts`), ou null : pour les pilotes de test. */
+      launchAim: () => { x: number; y: number } | null;
     };
   }
 }
@@ -48,10 +51,14 @@ async function start(): Promise<void> {
   const renderer = await Renderer.create();
   // Le mode test joue sur son propre profil : la vraie progression n'en sait rien.
   // La musique vit dans public/musique, servie sous la base du site.
-  const game = new Game(renderer, settings, browserStorage(settings.testMode ? TEST_STORAGE_KEY : STORAGE_KEY), new Music(browserAudio(import.meta.env.BASE_URL)), browserRhythms(import.meta.env.BASE_URL));
+  const game = new Game(renderer, settings, browserStorage(settings.testMode ? TEST_STORAGE_KEY : STORAGE_KEY), new Music(browserAudio(import.meta.env.BASE_URL)), browserRhythms(import.meta.env.BASE_URL), browserSfx());
 
   renderer.onFrame((elapsedSeconds) => game.frame(elapsedSeconds));
-  trackPointer(renderer.canvas, { onPress: (x, y) => game.press(x, y), onMove: (x, y) => game.move(x, y), onRelease: () => game.release() });
+  trackPointer(renderer.canvas, { onPress: (x, y) => game.press(x, y), onMove: (x, y) => game.move(x, y), onRelease: () => game.release(), onCancel: () => game.pause() });
+  // L'application passe en arrière-plan (appel, autre application, écran éteint) : la partie se met en pause, elle reprend sur un bouton.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) game.pause();
+  });
 
   window.__grappin = {
     version: __APP_VERSION__,
@@ -67,6 +74,7 @@ async function start(): Promise<void> {
     playLevel: (id: number) => game.playLevel(id),
     playFree: () => game.playFree(),
     anchors: () => game.anchors(),
+    launchAim: () => game.launchAim(),
   };
 }
 

@@ -60,6 +60,13 @@ export interface Tuning {
   /** Multiplicateur = 1 + comboStep × combo, plafonné. */
   readonly comboStep: number;
   readonly comboMaxMultiplier: number;
+  /**
+   * Ce qu'un lâcher correct (ni parfait, ni une erreur) coûte au combo, en
+   * crans : 0 le garde tel quel, 1 le fait doucement redescendre ; une erreur
+   * réelle (choc, décharge) le remet toujours à zéro. Prototype du brief du 11
+   * octobre 2026 : parfait, correct, erreur.
+   */
+  readonly comboMissPenalty: number;
   /** Accroche fragile : elle casse après ce temps de tenue, en secondes. */
   readonly fragileSeconds: number;
   /** Accroche propulseuse : la vitesse au lâcher est multipliée par ce facteur. */
@@ -118,6 +125,7 @@ export const DEFAULT_TUNING: Tuning = {
   perfectMaxSlope: 1.7321,
   perfectMinSpeed: 3,
   comboStep: 0.25,
+  comboMissPenalty: 1,
   comboMaxMultiplier: 5,
   fragileSeconds: 1,
   boostFactor: 1.35,

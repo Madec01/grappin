@@ -15,6 +15,8 @@ export interface PointerHandlers {
   /** Le pointeur actif a bougé. Jamais appelé sans doigt posé, ni pour un autre pointeur que le premier. */
   readonly onMove: (x: number, y: number) => void;
   readonly onRelease: (x: number, y: number) => void;
+  /** Le geste est annulé par le système (changement d'application, capture perdue) : ce n'est pas un lâcher voulu. Sans lui, c'en est un. */
+  readonly onCancel?: () => void;
 }
 
 export function trackPointer(target: HTMLElement, handlers: PointerHandlers): void {
@@ -49,8 +51,16 @@ export function trackPointer(target: HTMLElement, handlers: PointerHandlers): vo
     const { x, y } = local(event);
     handlers.onMove(x, y);
   });
+  /** Le geste annulé par le système : le jeu peut préférer se mettre en pause plutôt que lâcher. */
+  const cancel = (event: PointerEvent): void => {
+    if (event.pointerId !== activeId) return;
+    if (!handlers.onCancel) return end(event);
+    activeId = null;
+    handlers.onCancel();
+  };
+
   target.addEventListener('pointerup', end);
-  target.addEventListener('pointercancel', end);
+  target.addEventListener('pointercancel', cancel);
   // Perte du pointeur sans pointerup (changement d'onglet, capture retirée) : on relâche.
   target.addEventListener('lostpointercapture', end);
   // Un appui long ne doit jamais ouvrir le menu contextuel du navigateur.

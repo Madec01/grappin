@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LEVELS } from '../src/data/levels';
-import { LEVELS_PER_PAGE, levelButton, levelOfButton, levelPageCount, levelsOfPage, pageOfLevel } from '../src/render/buttons';
+import { LEVELS_PER_PAGE, PAUSE_TOUCH, levelButton, levelOfButton, levelPageCount, levelsOfPage, pageOfLevel, pauseRect } from '../src/render/buttons';
 
 describe('boutons des niveaux', () => {
   it('une ligne de la liste porte le numéro de son niveau et le rend', () => {
@@ -10,7 +10,7 @@ describe('boutons des niveaux', () => {
   });
 
   it('les autres boutons, et l\'absence de bouton, ne désignent aucun niveau', () => {
-    for (const id of ['talismans', 'levels', 'free', 'next', 'replay', 'back', 'suite', 'precedents', 'treuil'] as const) expect(levelOfButton(id)).toBeNull();
+    for (const id of ['continue', 'talismans', 'levels', 'free', 'music', 'sfx', 'start', 'pause', 'resume', 'quit', 'next', 'replay', 'back', 'suite', 'precedents', 'treuil'] as const) expect(levelOfButton(id)).toBeNull();
     expect(levelOfButton(null)).toBeNull();
   });
 });
@@ -40,5 +40,29 @@ describe('pages de la liste des niveaux', () => {
     expect(levelsOfPage(-1)).toEqual([]);
     expect(pageOfLevel(0)).toBe(0);
     expect(pageOfLevel(99)).toBe(0);
+  });
+});
+
+describe('bouton de pause', () => {
+  it('a une zone de toucher d\'au moins 44 px, carrée', () => {
+    const zone = pauseRect(390, 24);
+    expect(zone.id).toBe('pause');
+    expect(PAUSE_TOUCH).toBeGreaterThanOrEqual(44);
+    expect(zone.width).toBeGreaterThanOrEqual(44);
+    expect(zone.height).toBeGreaterThanOrEqual(44);
+    expect(zone.width).toBe(zone.height);
+  });
+
+  it('se tient dans le coin haut droit, à l\'écran, sous l\'encoche, pour toutes les largeurs de téléphone', () => {
+    for (const width of [320, 360, 390, 430]) {
+      // `top` est la première ligne de l'interface : au moins 24 px, plus bas sous une encoche.
+      for (const top of [24, 59, 70]) {
+        const zone = pauseRect(width, top);
+        expect(zone.x).toBeGreaterThan(width / 2);
+        expect(zone.x + zone.width).toBeLessThanOrEqual(width);
+        expect(zone.y).toBeGreaterThanOrEqual(top - 4 - 1e-9);
+        expect(zone.y).toBeLessThan(top);
+      }
+    }
   });
 });

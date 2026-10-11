@@ -10,8 +10,8 @@ import { Container, Text, type TextStyleOptions } from 'pixi.js';
  * couleur de son halo (voir neon.ts).
  *
  * Deux sortes de couleurs. `COLOR`, ici, est le langage du jeu : ce qui porte
- * un sens (étoiles, espèces de prises, obstacles, bords de la ville, textes) se
- * lit pareil sur toutes les musiques. Ce qui est ambiant (fond, ville, brume,
+ * un sens (étoiles, espèces de prises, obstacles, bords de la zone jouable, textes) se
+ * lit pareil sur toutes les musiques. Ce qui est ambiant (fond, structures du décor, brume,
  * tube et halo des points normaux, accent de l'interface) change avec la
  * famille de la musique et vit dans les palettes (palette.ts).
  */
@@ -19,7 +19,7 @@ import { Container, Text, type TextStyleOptions } from 'pixi.js';
 export { PALETTES, mixPalette, paletteFor, type Palette } from './palette';
 
 export const COLOR = {
-  /** Bords de la ville à ± 14 m : néon rouge sombre, la frontière de la chute. */
+  /** Bords de la zone jouable à ± 14 m : néon rouge sombre, la frontière de la chute. */
   cityEdge: 0xb3263f,
 
   /** Blanc pur : ce que la palette teinte (un dessin blanc, multiplié par une teinte, prend cette teinte). */

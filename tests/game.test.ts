@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PULSE_BPM, Game, PALETTE_FADE_SECONDS, readSettings } from '../src/app/game';
+import { DEFAULT_PULSE_BPM, Game, PALETTE_FADE_SECONDS, readSettings, visibleExtent } from '../src/app/game';
 import { Music, type AudioPlayer } from '../src/audio/music';
 import { BEAT_DECAY, SILENT_PULSE, pulseAt, syntheticRhythm, type Pulse } from '../src/audio/rhythm';
 import { fixedRhythms, type RhythmSource } from '../src/audio/rhythms';
+import type { Cue, SoundPlayer } from '../src/audio/sfx';
 import { loadProfile as loadSavedProfile } from '../src/meta/profile';
 import { LEVELS, levelById } from '../src/data/levels';
 import { createProfile, loadProfile, memoryStorage, saveProfile, type LevelOutcome, type Profile, type ProfileStorage, type RunOutcome } from '../src/meta/profile';
@@ -56,7 +57,7 @@ function profileWith(xp: number, equipped: TalismanId[] = []): Profile {
 }
 
 /** Jeu relié à un faux rendu qui note ce qu'on lui demande de dessiner, et à un stockage mémoire, vide ou garni d'un profil. */
-function makeGame(search = '', saved?: Profile, music?: Music, rhythms?: RhythmSource): { game: Game; seen: Seen; storage: ProfileStorage } {
+function makeGame(search = '', saved?: Profile, music?: Music, rhythms?: RhythmSource, sfx?: SoundPlayer): { game: Game; seen: Seen; storage: ProfileStorage } {
   const seen: Seen = {
     screens: [],
     lastCause: null,
@@ -107,7 +108,7 @@ function makeGame(search = '', saved?: Profile, music?: Music, rhythms?: RhythmS
   };
   const storage = memoryStorage();
   if (saved) saveProfile(storage, saved);
-  return { game: new Game(view, readSettings(search), storage, music, rhythms), seen, storage };
+  return { game: new Game(view, readSettings(search), storage, music, rhythms, sfx), seen, storage };
 }
 
 /** Comme `makeGame`, mais la course libre est déjà lancée, sans appui d'accroche : l'URL (brume, hauteur des paliers, graine) y règne, ce qu'un niveau ne permet pas. */
@@ -323,6 +324,7 @@ describe('jeu', () => {
         'fogFactor',
         'fogY',
         'freeRunStartY',
+        'freeStart',
         'goal',
         'gravityX',
         'gravityY',
@@ -346,6 +348,7 @@ describe('jeu', () => {
         'score',
         'screen',
         'seed',
+        'sfxOn',
         'stars',
         'step',
         'targetId',
@@ -429,8 +432,8 @@ describe('ce que le jeu sait de la route haute', () => {
     const { game, seen } = makeFreeGame('?graine=3&tierHeight=4');
     playPilot(game, 60);
     expect([...seen.texts].some((text) => text.startsWith('Parfait ×'))).toBe(true);
-    expect(seen.banners.has('Les gouttières · 4 m')).toBe(true);
-    expect(seen.banners.has('Les enseignes · 8 m')).toBe(true);
+    expect(seen.banners.has('La chaîne · 4 m')).toBe(true);
+    expect(seen.banners.has('Les lueurs · 8 m')).toBe(true);
   });
 });
 
@@ -858,7 +861,7 @@ describe('niveaux : annonce', () => {
     const { game, seen } = makeGame('', clearedProfile(2));
     game.playLevel(3);
     game.frame(0.05);
-    expect(seen.lastBanner).toBe('Niveau 3 · Les enseignes');
+    expect(seen.lastBanner).toBe('Niveau 3 · Les lueurs');
     expect(seen.lastBannerDetail).toBe(levelOf(3).intro);
 
     for (let frames = 0; frames < 28; frames += 1) game.frame(0.1);
@@ -873,7 +876,7 @@ describe('niveaux : annonce', () => {
     level.game.playLevel(3);
     for (let frames = 0; frames < 20; frames += 1) level.game.frame(0.1);
     expect(level.game.debugState().tier).toBeGreaterThan(0);
-    expect([...level.seen.banners]).toEqual(['Niveau 3 · Les enseignes']);
+    expect([...level.seen.banners]).toEqual(['Niveau 3 · Les lueurs']);
 
     const free = makeGame('', clearedProfile(2));
     free.game.playFree();
@@ -1212,7 +1215,7 @@ describe('niveaux : événements', () => {
     game.frame(0.05);
     expect(game.debugState().lightsOff).toBe(false);
     climbTo(game, seen, 26);
-    expect(seen.lastBanner).toBe('Panne de lampadaires');
+    expect(seen.lastBanner).toBe('Panne de lumière');
     expect(seen.lastBannerDetail).toBe('Vise de mémoire');
     expect(game.debugState().lightsOff).toBe(true);
 
@@ -1278,7 +1281,7 @@ describe('niveaux : événements', () => {
     game.playLevel(5);
     game.frame(0.05);
     expect(seen.camera!.angle).toBe(0);
-    expect(seen.lastBanner).toBe('Niveau 5 · Les antennes');
+    expect(seen.lastBanner).toBe('Niveau 5 · Les flèches');
   });
 });
 
@@ -1312,7 +1315,29 @@ function launcherGame(): ReturnType<typeof makeGame> {
   const made = makeGame('?test=1');
   expect(made.game.playLevel(14)).toBe(true);
   made.game.frame(0.001);
-  return made;
+  // Le personnage est posé juste sous le premier lanceur du niveau, où que le générateur l'ait mis : c'est lui que l'appui
+  // accroche. Le parcours se génère devant le personnage : on le monte par bonds jusqu'à ce qu'un lanceur apparaisse.
+  const state = made.seen.state!;
+  for (let bound = 0; bound < 24; bound += 1) {
+    const launcher = state.anchors.filter((anchor) => anchor.kind === 'lanceur').sort((a, b) => a.pos.y - b.pos.y)[0];
+    if (launcher) {
+      // Tout près du lanceur : le tirage jusqu'à lui est fini dès les premiers pas, comme pour une vraie accroche.
+      state.fogY = launcher.pos.y - 40;
+      // Le personnage est tenu sous le lanceur, la caméra posée d'un coup sur lui (comme au départ d'une partie) : plus aucun
+      // glissement de zoom, et la visée se fixe sur le lanceur, le plus proche.
+      for (let i = 0; i < 6; i += 1) {
+        state.hero = { pos: { x: launcher.pos.x, y: launcher.pos.y - 0.6 }, vel: { x: 0, y: 0 }, grounded: false };
+        state.fogY = launcher.pos.y - 40;
+        made.seen.camera!.snap(state.hero.pos, state.hero.vel, state.env, visibleExtent(state));
+        made.game.frame(1 / 60);
+      }
+      return made;
+    }
+    state.hero = { pos: { x: 0, y: state.hero.pos.y + 10 }, vel: { x: 0, y: 0 }, grounded: false };
+    state.fogY = state.hero.pos.y - 40;
+    made.game.frame(0.05);
+  }
+  throw new Error('Pas de lanceur dans le niveau 14');
 }
 
 /** Pose le doigt en (100, 300) : accroche le lanceur. */
@@ -1333,11 +1358,15 @@ describe('lanceur : le doigt tire', () => {
     const state = game.debugState();
     expect(state.pullX).toBeCloseTo(1, 9);
     expect(state.pullY).toBeCloseTo(-2, 9);
-    // Une fois les pas passés, le personnage est affiché reculé de la traction, sous le lanceur.
+    // Une fois les pas passés, le personnage est affiché reculé de la traction, sous le lanceur. La traction se relit dans
+    // l'état : le zoom de la caméra glisse d'un millionième entre deux images, et la traction avec lui.
     game.frame(0.05);
+    const held = game.debugState();
     const launcher = seen.state!.anchors.find((anchor) => anchor.kind === 'lanceur')!;
-    expect(seen.state!.hero.pos.x).toBeCloseTo(launcher.pos.x + 1, 9);
-    expect(seen.state!.hero.pos.y).toBeCloseTo(launcher.pos.y - 2, 9);
+    expect(held.pullX).toBeCloseTo(1, 4);
+    expect(held.pullY).toBeCloseTo(-2, 4);
+    expect(seen.state!.hero.pos.x).toBeCloseTo(launcher.pos.x + held.pullX, 9);
+    expect(seen.state!.hero.pos.y).toBeCloseTo(launcher.pos.y + held.pullY, 9);
   });
 
   it('un doigt qui monte pousse le personnage au-dessus du lanceur, un doigt à gauche à gauche', () => {
@@ -1371,19 +1400,24 @@ describe('lanceur : le doigt tire', () => {
     const scale = seen.camera!.scale;
     game.move(FINGER.x + 1 * scale, FINGER.y + 2 * scale);
     game.frame(0.05);
+    // La traction de l'image, telle que l'état la lit (le zoom glisse d'un millionième entre deux images).
+    const held = game.debugState();
+    expect(held.pullX).toBeCloseTo(1, 4);
+    expect(held.pullY).toBeCloseTo(-2, 4);
     game.release();
     const state = game.debugState();
     expect(state.attached).toBe(false);
     expect(state.heldKind).toBeNull();
     expect(state.pullX).toBe(0);
-    // À l'opposé de (1, -2) : vers la gauche et vers le haut, à la vitesse de la traction de 2,24 m.
-    const speed = 6 + 9 * (Math.hypot(1, 2) / PULL_MAX);
-    expect(state.vel.x).toBeCloseTo((-1 / Math.hypot(1, 2)) * speed, 6);
-    expect(state.vel.y).toBeCloseTo((2 / Math.hypot(1, 2)) * speed, 6);
+    // À l'opposé de la traction : vers la gauche et vers le haut, à la vitesse de sa longueur (2,24 m).
+    const len = Math.hypot(held.pullX, held.pullY);
+    const speed = 6 + 9 * (len / PULL_MAX);
+    expect(state.vel.x).toBeCloseTo((-held.pullX / len) * speed, 6);
+    expect(state.vel.y).toBeCloseTo((-held.pullY / len) * speed, 6);
     const last = seen.state!.inputs.at(-1)!;
     expect(last.kind).toBe('release');
-    expect(last.pull!.x).toBeCloseTo(1, 6);
-    expect(last.pull!.y).toBeCloseTo(-2, 6);
+    expect(last.pull!.x).toBeCloseTo(held.pullX, 9);
+    expect(last.pull!.y).toBeCloseTo(held.pullY, 9);
   });
 
   it('relâcher sans glisser lance tout droit vers le haut, doucement', () => {
@@ -1523,7 +1557,8 @@ describe('lanceur : un pilote franchit un mur à trou', () => {
     // Le journal garde la traction du lancer : tirée vers le bas, et un peu à gauche pour passer à droite.
     const release = seen.state!.inputs.find((input) => input.kind === 'release' && input.pull);
     expect(release!.pull!.y).toBeLessThan(0);
-    expect(release!.pull!.x).toBeLessThan(0);
+    // Le trou est décalé : le tir qui passe n'est jamais vertical.
+    expect(Math.abs(release!.pull!.x)).toBeGreaterThan(0.1);
   });
 
   it('tout droit, le même lancer heurte le mur et rebondit : la visée compte', () => {
@@ -1550,7 +1585,8 @@ function aimAtNextAnchor(game: Game): boolean {
     if (!best || d < best.d) best = { x: anchor.x - s.pos.x, y: anchor.y - s.pos.y, d };
   }
   const dir = best ?? { x: 0, y: 1, d: 1 };
-  game.release({ x: (-dir.x / dir.d) * PULL_MAX * 0.7, y: (-dir.y / dir.d) * PULL_MAX * 0.7 });
+  // La traction que le vérificateur a prouvée (le trou est décalé : viser au jugé ne suffit plus) ; au jugé sinon.
+  game.release(game.launchAim() ?? { x: (-dir.x / dir.d) * PULL_MAX * 0.7, y: (-dir.y / dir.d) * PULL_MAX * 0.7 });
   return true;
 }
 
@@ -1906,5 +1942,138 @@ describe('pouls', () => {
     players[players.length - 1]!.currentTime = 2;
     game.frame(0.016);
     expect(seen.lastPulse).toBe(SILENT_PULSE);
+  });
+});
+
+describe('pause et reprise', () => {
+  /** Joue une partie, accroche, et attend que la corde tienne. */
+  function hanging(): ReturnType<typeof makeGame> {
+    const made = makeGame('?graine=3');
+    const { game } = made;
+    game.press(10, 10);
+    for (let i = 0; i < 30 && !game.debugState().attached; i += 1) game.frame(0.016);
+    expect(game.debugState()).toMatchObject({ screen: 'playing', attached: true });
+    return made;
+  }
+
+  it('la pause fige la partie, corde comprise ; hors partie elle ne fait rien', () => {
+    const { game } = hanging();
+    game.pause();
+    const { step } = game.debugState();
+    for (let i = 0; i < 10; i += 1) game.frame(0.016);
+    expect(game.debugState()).toMatchObject({ screen: 'paused', step, attached: true });
+    // Le lever du doigt pendant la pause (le système a annulé le geste) ne lâche pas la corde.
+    game.release();
+    game.frame(0.016);
+    expect(game.debugState().attached).toBe(true);
+    game.resume();
+    game.frame(0.016);
+    expect(game.debugState().screen).toBe('playing');
+    expect(game.debugState().step).toBeGreaterThan(step);
+    const { game: title } = makeGame('');
+    title.pause();
+    expect(title.debugState().screen).toBe('title');
+  });
+
+  it('le bouton de pause met en pause sans accrocher ; Reprendre reprend et avale le lever du doigt ; Quitter revient au titre', () => {
+    const { game, seen } = hanging();
+    game.release();
+    game.frame(0.016);
+    expect(game.debugState().attached).toBe(false);
+    seen.hit = () => 'pause';
+    game.press(300, 30);
+    expect(game.debugState().screen).toBe('paused');
+    // Reprendre : l'appui n'accroche rien, et le lever qui le finit est avalé.
+    seen.hit = () => 'resume';
+    game.press(195, 500);
+    expect(game.debugState().screen).toBe('playing');
+    game.release();
+    game.frame(0.016);
+    expect(game.debugState().attached).toBe(false);
+    // Un vrai appui ensuite accroche.
+    seen.hit = () => null;
+    game.press(195, 600);
+    for (let i = 0; i < 30 && !game.debugState().attached; i += 1) game.frame(0.016);
+    expect(game.debugState().attached).toBe(true);
+    game.pause();
+    seen.hit = () => 'quit';
+    game.press(195, 560);
+    expect(game.debugState().screen).toBe('title');
+  });
+
+  it('en pause, un appui ailleurs que sur un bouton ne fait rien', () => {
+    const { game, seen } = hanging();
+    game.pause();
+    seen.hit = () => null;
+    game.press(100, 100);
+    game.release();
+    game.frame(0.016);
+    expect(game.debugState()).toMatchObject({ screen: 'paused', attached: true });
+  });
+});
+
+describe('sons et départ', () => {
+  /** Un lecteur qui note ce qu'on lui demande. */
+  function recorder(): { player: SoundPlayer; played: Cue[]; enabled: boolean[]; readonly unlocked: number } {
+    const log = { played: [] as Cue[], enabled: [] as boolean[], unlocked: 0 };
+    const player: SoundPlayer = {
+      unlock: () => void (log.unlocked += 1),
+      play: (cue) => void log.played.push(cue),
+      setEnabled: (value) => void log.enabled.push(value),
+    };
+    return {
+      player,
+      played: log.played,
+      enabled: log.enabled,
+      get unlocked() {
+        return log.unlocked;
+      },
+    };
+  }
+
+  it('le premier appui permet le son ; accrocher et lâcher sonnent ; le réglage Sons coupe et se garde', () => {
+    const rec = recorder();
+    const { game, seen, storage } = makeGame('?graine=3', undefined, undefined, undefined, rec.player);
+    game.frame(0.016);
+    expect(rec.unlocked).toBe(0);
+    game.press(10, 10);
+    expect(rec.unlocked).toBe(1);
+    // L'accroche du départ est immédiate ; son événement sonne à l'image suivante.
+    game.frame(0.016);
+    for (let i = 0; i < 30 && !game.debugState().attached; i += 1) game.frame(0.016);
+    expect(rec.played.map((cue) => cue.id)).toContain('attach');
+    game.release();
+    game.frame(0.016);
+    expect(rec.played.map((cue) => cue.id).some((id) => id === 'release' || id === 'perfect')).toBe(true);
+    expect(rec.enabled.at(-1)).toBe(true);
+    game.restart();
+    game.frame(0.016);
+    seen.hit = () => 'sfx';
+    game.press(1, 1);
+    game.frame(0.016);
+    expect(game.debugState().sfxOn).toBe(false);
+    expect(rec.enabled.at(-1)).toBe(false);
+    expect(loadSavedProfile(storage).sfx).toBe(false);
+  });
+
+  it('le départ de la course libre se bascule entre avancé et du sol, et se garde', () => {
+    const { game, seen, storage } = makeGame('', clearedProfile(2));
+    game.frame(0.016);
+    expect(game.debugState()).toMatchObject({ freeStart: 'advanced' });
+    expect(game.debugState().freeRunStartY).toBeGreaterThan(0);
+    seen.hit = () => 'start';
+    game.press(1, 1);
+    game.frame(0.016);
+    expect(game.debugState().freeStart).toBe('ground');
+    expect(loadSavedProfile(storage).freeStart).toBe('ground');
+    seen.hit = () => 'free';
+    game.press(1, 1);
+    game.frame(0.016);
+    expect(game.debugState().screen).toBe('playing');
+    expect(seen.state!.hero.pos.y).toBeLessThan(5);
+    game.restart();
+    seen.hit = () => 'start';
+    game.press(1, 1);
+    expect(game.debugState().freeStart).toBe('advanced');
   });
 });

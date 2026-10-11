@@ -48,32 +48,48 @@ export function launchVelocity(pull: Vec2, env: Environment): Vec2 {
   return { x: v.x || 0, y: v.y || 0 };
 }
 
-/** (sinus, cosinus) des angles de −80° à 80° par pas de 10°, autour du haut : l'éventail des lancers que le vérificateur essaie. */
+/** (sinus, cosinus) des angles de −80° à 80° par pas de 5°, autour du haut : l'éventail des lancers que le vérificateur essaie. Un joueur vise en continu ; cinq degrés, c'est sa précision raisonnable au pouce. */
 const FAN: readonly (readonly [number, number])[] = [
   [-0.9848, 0.1736],
+  [-0.9659, 0.2588],
   [-0.9397, 0.342],
+  [-0.9063, 0.4226],
   [-0.866, 0.5],
+  [-0.8192, 0.5736],
   [-0.766, 0.6428],
+  [-0.7071, 0.7071],
   [-0.6428, 0.766],
+  [-0.5736, 0.8192],
   [-0.5, 0.866],
+  [-0.4226, 0.9063],
   [-0.342, 0.9397],
+  [-0.2588, 0.9659],
   [-0.1736, 0.9848],
+  [-0.0872, 0.9962],
   [0, 1],
+  [0.0872, 0.9962],
   [0.1736, 0.9848],
+  [0.2588, 0.9659],
   [0.342, 0.9397],
+  [0.4226, 0.9063],
   [0.5, 0.866],
+  [0.5736, 0.8192],
   [0.6428, 0.766],
+  [0.7071, 0.7071],
   [0.766, 0.6428],
+  [0.8192, 0.5736],
   [0.866, 0.5],
+  [0.9063, 0.4226],
   [0.9397, 0.342],
+  [0.9659, 0.2588],
   [0.9848, 0.1736],
 ];
-/** Les forces essayées : minimale, moyenne, maximale, en longueur de traction. */
-const STRENGTHS: readonly number[] = [PULL_MIN, (PULL_MIN + PULL_MAX) / 2, PULL_MAX];
+/** Les forces essayées, en longueur de traction : minimale, deux intermédiaires, maximale. */
+const STRENGTHS: readonly number[] = [PULL_MIN, PULL_MIN + (PULL_MAX - PULL_MIN) / 3, PULL_MIN + (2 * (PULL_MAX - PULL_MIN)) / 3, PULL_MAX];
 
 /**
- * Les tractions que le vérificateur essaie depuis un lanceur : dix-sept
- * directions dans le demi-plan du haut (selon la gravité du moment), à trois
+ * Les tractions que le vérificateur essaie depuis un lanceur : trente-trois
+ * directions dans le demi-plan du haut (selon la gravité du moment), à quatre
  * forces. Un joueur qui vise peut faire tout cela.
  */
 export function launchSet(env: Environment): Vec2[] {

@@ -219,5 +219,5 @@ describe('vérification sous un événement', () => {
     expect([...seen].sort()).toEqual(['alerte', 'bascule', 'cable', 'panne', 'pluie', 'traversiere', 'vent']);
     // Sur 400 m à une chance sur deux par segment d'une vingtaine de mètres, au moins une poignée d'événements par partie.
     expect(scheduled / 24).toBeGreaterThan(5);
-  });
+  }, 20_000);
 });

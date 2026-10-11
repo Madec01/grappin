@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { levelById } from '../src/data/levels';
+import { LEVELS, levelById } from '../src/data/levels';
 import { MISSIONS, missionById } from '../src/meta/missions';
-import { PERFECT_STREAK_STAR } from '../src/meta/traversee';
+import { createProfile } from '../src/meta/profile';
+import { PERFECT_STREAK_STAR, unlockedLevel } from '../src/meta/traversee';
 import type { EventKind } from '../src/sim/events';
 import { levelsOfPage } from '../src/render/buttons';
-import { equippedLine, eventAnnouncement, levelEvents, levelPageLabel, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, slotsLine, starLines } from '../src/render/labels';
+import { PAUSE_HELP, continueLabel, equippedLine, eventAnnouncement, levelEvents, levelPageLabel, levelRange, levelRowTitle, levelTitle, missionDoneLine, missionProgress, musicLabel, rankLabel, rankUpLine, sfxLabel, slotsLine, starLines, startLabel } from '../src/render/labels';
 
 const mission = (id: string) => {
   const def = missionById(id);
@@ -57,8 +58,8 @@ describe('niveaux', () => {
   if (!level) throw new Error('Niveau 3 absent');
 
   it('écrit le titre, la ligne de la liste et l\'intervalle de hauteur', () => {
-    expect(levelTitle(level)).toBe('Niveau 3 · Les enseignes');
-    expect(levelRowTitle(level)).toBe('3 · Les enseignes');
+    expect(levelTitle(level)).toBe('Niveau 3 · Les lueurs');
+    expect(levelRowTitle(level)).toBe('3 · Les lueurs');
     expect(levelRange(level)).toBe('200 → 320 m');
   });
 });
@@ -93,7 +94,7 @@ describe('étoiles d\'un niveau', () => {
 describe('annonce d\'un événement de niveau', () => {
   it('dit le début de chaque événement par un titre et une phrase', () => {
     expect(eventAnnouncement('bascule', 'start', 1)).toEqual({ title: 'La bascule !', detail: 'Le niveau tourne' });
-    expect(eventAnnouncement('panne', 'start', 1)).toEqual({ title: 'Panne de lampadaires', detail: 'Vise de mémoire' });
+    expect(eventAnnouncement('panne', 'start', 1)).toEqual({ title: 'Panne de lumière', detail: 'Vise de mémoire' });
     expect(eventAnnouncement('pluie', 'start', 1)).toEqual({ title: 'Pluie d\'étoiles', detail: 'Cueille-les au vol' });
     expect(eventAnnouncement('alerte', 'start', 1)).toEqual({ title: 'Alerte !', detail: 'La brume accélère' });
     expect(eventAnnouncement('cable', 'start', 1)).toEqual({ title: 'Câbles', detail: 'Les accroches glissent' });
@@ -109,7 +110,7 @@ describe('annonce d\'un événement de niveau', () => {
       expect(eventAnnouncement(kind, 'end', 1)).toEqual({ title: 'Retour au calme', detail: null });
     }
     for (const kind of ['panne', 'pluie', 'cable', 'traversiere'] as const) expect(eventAnnouncement(kind, 'end', 1)).toBeNull();
-    expect(eventAnnouncement('traversiere', 'start', 1)).toEqual({ title: 'Traversières !', detail: 'Les prises balaient la ville' });
+    expect(eventAnnouncement('traversiere', 'start', 1)).toEqual({ title: 'Traversières !', detail: 'Les prises balaient toute la largeur' });
   });
 
   it('annonce chaque événement du jeu au départ', () => {
@@ -140,5 +141,55 @@ describe('bouton d\'une page de la liste des niveaux', () => {
   it('un niveau seul s\'écrit au singulier, une page vide reste « Niveaux »', () => {
     expect(levelPageLabel(levelsOfPage(1).slice(0, 1))).toBe('Niveau 11');
     expect(levelPageLabel([])).toBe('Niveaux');
+  });
+});
+
+describe('rang du grimpeur', () => {
+  it('s\'appelle « Rang », jamais « Niveau », qui est celui de la traversée', () => {
+    expect(rankLabel(1)).toBe('Rang 1');
+    expect(rankLabel(12)).toBe('Rang 12');
+    expect(rankUpLine(4)).toBe('Rang 4 !');
+    for (const rank of [1, 2, 7, 30]) {
+      expect(rankLabel(rank)).not.toMatch(/niveau/i);
+      expect(rankUpLine(rank)).not.toMatch(/niveau/i);
+    }
+  });
+});
+
+describe('action principale du titre', () => {
+  it('se lit « Continuer · Niveau N · nom », et reprend le titre du niveau tel quel', () => {
+    const third = levelById(3);
+    if (!third) throw new Error('Niveau 3 absent');
+    expect(continueLabel(third)).toBe('Continuer · Niveau 3 · Les lueurs');
+    for (const level of LEVELS) expect(continueLabel(level)).toBe(`Continuer · ${levelTitle(level)}`);
+  });
+
+  it('désigne le niveau le plus avancé jouable : le premier pour un profil neuf', () => {
+    const profile = createProfile();
+    const next = levelById(unlockedLevel(profile));
+    if (!next) throw new Error('Niveau à jouer absent');
+    expect(continueLabel(next)).toBe(`Continuer · Niveau 1 · ${levelById(1)!.name}`);
+    const cleared = { ...profile, levels: { '1': { stars: 1, bestScore: 10 }, '2': { stars: 2, bestScore: 10 } } };
+    expect(continueLabel(levelById(unlockedLevel(cleared))!)).toBe('Continuer · Niveau 3 · Les lueurs');
+  });
+});
+
+describe('réglages du titre', () => {
+  it('disent « oui » ou « non » pour la musique et les sons', () => {
+    expect(musicLabel(true)).toBe('Musique : oui');
+    expect(musicLabel(false)).toBe('Musique : non');
+    expect(sfxLabel(true)).toBe('Sons : oui');
+    expect(sfxLabel(false)).toBe('Sons : non');
+  });
+
+  it('disent le départ de la course libre : avancé ou du sol', () => {
+    expect(startLabel('advanced')).toBe('Départ : avancé');
+    expect(startLabel('ground')).toBe('Départ : du sol');
+  });
+});
+
+describe('pause', () => {
+  it('l\'aide dit que la corde se reprend en appuyant de nouveau', () => {
+    expect(PAUSE_HELP).toBe('Reprends la corde en appuyant de nouveau');
   });
 });
