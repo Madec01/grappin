@@ -33,6 +33,9 @@ export interface RobotProfile {
 export const REASONABLE: RobotProfile = { name: 'raisonnable', speedTarget: 8, minSlope: 0.6, maxSlope: 1.8, reactionSeconds: 0, maxHoldSeconds: 2.5 };
 /** Temps minimal passé sur un lanceur avant de tirer, en secondes. */
 export const LAUNCH_AIM_SECONDS = 0.35;
+/** Le robot qui monte à plus de cette vitesse ignore un point visé plus bas que lui de cette distance : il attend la suite. */
+const RISING_SPEED = 1;
+const RISING_BELOW = 0.5;
 
 export const BEGINNER: RobotProfile = { name: 'débutant', speedTarget: 6, minSlope: 0.3, maxSlope: 3, reactionSeconds: 0.25, maxHoldSeconds: 3 };
 
@@ -76,7 +79,9 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
     if (!s.rope) {
       const target = s.targetId === null ? null : s.anchors.find((a) => a.id === s.targetId);
       const climbing = s.step - launchedStep > launchWaitSteps || (target !== null && target !== undefined && target.pos.y > launchedY + 1);
-      if (target && climbing && plannedPress < 0) plannedPress = s.step + reactionSteps;
+      // Porté vers le haut (un courant, une fusée), le robot ne rattrape pas un point sous lui : il monte d'abord, comme un joueur.
+      const rising = s.hero.vel.y > RISING_SPEED && target !== null && target !== undefined && target.pos.y < s.hero.pos.y - RISING_BELOW;
+      if (target && climbing && !rising && plannedPress < 0) plannedPress = s.step + reactionSteps;
       if (plannedPress >= 0 && s.step >= plannedPress) {
         plannedPress = -1;
         if (sim.press()) {

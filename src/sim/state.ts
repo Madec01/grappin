@@ -51,6 +51,31 @@ export interface Obstacle {
 }
 
 /**
+ * Zones qui modifient le mouvement (brief du 11 octobre 2026, section 8).
+ * Ascendant : une poussée vers le haut, progressive près des bords, qui
+ * traverse de grands espaces et offre une sortie de descente. Latéral : une
+ * poussée de côté, localisée, à anticiper. Accélération : un couloir qui
+ * accélère le long de son axe seulement, jusqu'à un plafond. Freinage : une
+ * zone qui retire progressivement de la vitesse, jamais sous un plancher.
+ */
+export type ZoneKind = 'ascendant' | 'lateral' | 'acceleration' | 'freinage';
+
+export interface Zone {
+  readonly id: number;
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+  readonly kind: ZoneKind;
+  /** Poussée en m/s² (ascendant, latéral, accélération) ou part de vitesse retirée par seconde (freinage). */
+  readonly strength: number;
+  /** Direction unitaire de la poussée ; nulle pour le freinage. */
+  readonly dir: Vec2;
+  /** Couloir d'accélération : vitesse le long de l'axe au-delà de laquelle il n'accélère plus, en m/s. */
+  readonly cap?: number;
+}
+
+/**
  * Anneau de précision : rien de solide, un cercle à traverser en vol. Le
  * traverser rapporte, et près du centre davantage, avec un cran de série : les
  * belles trajectoires se récompensent. Un anneau raté ne coûte rien.
@@ -139,6 +164,7 @@ export interface SimState {
   obstacles: Obstacle[];
   pickups: Pickup[];
   rings: Ring[];
+  zones: Zone[];
   /** Obstacles déjà frôlés depuis la dernière accroche : un bonus par obstacle et par corde. */
   grazed: number[];
   /** Portes dans lesquelles le personnage se trouve : une porte ne se referme jamais sur lui, il en sort d'abord. */

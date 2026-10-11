@@ -366,6 +366,8 @@ describe('jeu', () => {
         'windX',
         'xp',
         'xpGained',
+        'zone',
+        'zones',
       ].sort(),
     );
   });

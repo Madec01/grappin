@@ -8,6 +8,7 @@ import { Coach } from './coach';
 import { learningTuning } from '../meta/learning';
 import { LEVELS, levelById, type LevelDef } from '../data/levels';
 import { isSceneId, sceneById, type SceneId } from '../data/scenes';
+import { zoneAt } from '../sim/physics';
 import { TITLE_TRACK, levelTrack, trackFamily, type MusicFamily, type TrackId } from '../data/musique';
 import { levelFor } from '../meta/levels';
 import { createProfile, endLevel, endRun, loadProfile, saveProfile, toggleTalisman, type LevelOutcome, type Profile, type ProfileStorage, type RunOutcome, type FreeStart } from '../meta/profile';
@@ -24,7 +25,7 @@ import type { DeathCause, GameScreen, Renderer } from '../render/renderer';
 import type { CoursePlan } from '../sim/course';
 import type { EventKind } from '../sim/events';
 import { Simulation } from '../sim/simulation';
-import type { AnchorKind, SimState, RuleEvent } from '../sim/state';
+import type { AnchorKind, SimState, RuleEvent, ZoneKind } from '../sim/state';
 import { DEFAULT_TUNING, withTuning, type Tuning } from '../sim/tuning';
 
 /**
@@ -111,6 +112,9 @@ export interface DebugState {
   readonly smashed: number;
   /** Scène de démonstration en cours, ou null. */
   readonly scene: SceneId | null;
+  /** Zones chargées, et l'espèce de celle où se trouve le personnage, ou null. */
+  readonly zones: number;
+  readonly zone: ZoneKind | null;
   /** Niveau et expérience du profil, talismans équipés et missions actives avec leur avancement. */
   readonly level: number;
   readonly xp: number;
@@ -585,6 +589,8 @@ export class Game {
       rings: state.rings.filter((ring) => ring.taken).length,
       smashed: state.obstacles.filter((box) => box.broken).length,
       scene: state.course.plan.kind === 'scene' ? state.course.plan.sceneId : null,
+      zones: state.zones.length,
+      zone: zoneAt(state.zones, state.hero.pos)?.kind ?? null,
       level: levelFor(this.profile.xp),
       xp: this.profile.xp,
       equipped: [...this.profile.equipped],

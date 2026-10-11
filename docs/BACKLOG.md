@@ -48,7 +48,7 @@ Le brief complet du propriétaire (synthèse des échanges du 11 octobre 2026) e
 | P3 Aimant de trajectoire | 7 | à faire (lot 5) |
 | P4 Lien élastique | 7 | prototype (lot 5) |
 | P5 Prise interrupteur | 7 | à faire (lot 5) |
-| Z1 Courant ascendant, Z2 courant latéral, Z3 couloir d'accélération, Z4 zone de freinage | 8 | à faire (0.12.0) |
+| Z1 Courant ascendant, Z2 courant latéral, Z3 couloir d'accélération, Z4 zone de freinage | 8 | fait (0.12.0, avec une scène chacun ; les forces, plafonds et dimensions sont des constantes de `sim/generator.ts`, à revoir sur ressenti) |
 | O1 Portes intermittentes, O3 surfaces de rebond, O4 parois cassables, O5 anneaux de précision | 9 | fait (0.11.0, avec une scène de démonstration chacune) ; à revoir sur ressenti : restitution du rebond, seuil de vitesse des parois, cycle des portes |
 | O2 Obstacles tournants | 9 | à faire (0.13.0) |
 | O6 Passage qui se referme | 9 | à faire (lot 5) |

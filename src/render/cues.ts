@@ -1,6 +1,6 @@
 import type { Vec2 } from '../core/math/vec2';
 import { isLit } from '../sim/cycles';
-import { freeFlightAt } from '../sim/physics';
+import { flightSamples, freeFlightAt } from '../sim/physics';
 import { lightIsOff } from '../sim/events';
 import { isPerfectRelease, releaseVelocity } from '../sim/rules';
 import type { Anchor, AnchorKind, SimState } from '../sim/state';
@@ -36,10 +36,10 @@ export function heldKind(state: SimState): AnchorKind | null {
 export function shadowPoints(state: SimState, tuning: Tuning, seconds: number = tuning.shadowSeconds): Vec2[] {
   if (!state.rope) return [];
   const body = { pos: state.hero.pos, vel: releaseVelocity(state, tuning) };
+  // Sous un courant, l'ombre montre le vol porté ou dévié, joué pas à pas ; sinon la formule fermée, la même qu'avant.
+  if (state.zones.length > 0) return flightSamples(body, seconds, seconds / SHADOW_POINTS, tuning, state.env, state.zones).map((sample) => sample.pos);
   const points: Vec2[] = [];
-  for (let i = 1; i <= SHADOW_POINTS; i += 1) {
-    points.push(freeFlightAt(body, (seconds * i) / SHADOW_POINTS, tuning, state.env));
-  }
+  for (let i = 1; i <= SHADOW_POINTS; i += 1) points.push(freeFlightAt(body, (seconds * i) / SHADOW_POINTS, tuning, state.env));
   return points;
 }
 

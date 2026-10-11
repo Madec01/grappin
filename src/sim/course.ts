@@ -3,7 +3,7 @@ import type { Vec2 } from '../core/math/vec2';
 import { environmentOf, eventsAt, type EventKind, type ScheduledEvent } from './events';
 import { buildPlainSegment, buildSegment, tierProfile, type IdCounters, type Segment, type SegmentContext, type TierProfile } from './generator';
 import { buildScene, type SceneId } from '../data/scenes';
-import type { Anchor, Obstacle, SimState } from './state';
+import type { Anchor, Obstacle, SimState, Zone } from './state';
 import type { Tuning } from './tuning';
 import { verifySegment } from './verifier';
 
@@ -117,13 +117,13 @@ function segmentContext(state: SimState, segmentY: number): SegmentContext {
  * on peut l'attendre en pendant au point d'avant : il suffit qu'une des trois
  * positions fasse passer le segment.
  */
-function verifyWithCables(context: readonly Anchor[], contextObstacles: readonly Obstacle[], segment: Segment, tuning: Tuning, conditions: SegmentContext): boolean {
+function verifyWithCables(context: readonly Anchor[], contextObstacles: readonly Obstacle[], contextZones: readonly Zone[], segment: Segment, tuning: Tuning, conditions: SegmentContext): boolean {
   const { env, entryEnv } = conditions;
-  if (!segment.anchors.some((a) => a.cable)) return verifySegment(context, contextObstacles, segment, tuning, env, entryEnv);
+  if (!segment.anchors.some((a) => a.cable)) return verifySegment(context, contextObstacles, segment, tuning, env, entryEnv, contextZones);
   const placements: ((a: Anchor) => Vec2)[] = [(a) => a.cable!.from, (a) => a.pos, (a) => a.cable!.to];
   const passes = (place: (a: Anchor) => Vec2): boolean => {
     const anchors = segment.anchors.map((a) => (a.cable ? { ...a, pos: place(a) } : a));
-    return verifySegment(context, contextObstacles, { ...segment, anchors }, tuning, env, entryEnv);
+    return verifySegment(context, contextObstacles, { ...segment, anchors }, tuning, env, entryEnv, contextZones);
   };
   return conditions.cable === 'traversiere' ? placements.some(passes) : placements.every(passes);
 }
@@ -136,7 +136,7 @@ export function createCourse(seed: number, plan: CoursePlan): CourseState {
     pickupsTotal: 0,
     lastX: 0,
     lastY: plan.startY,
-    ids: { anchor: 1, obstacle: 1, pickup: 1, ring: 1 },
+    ids: { anchor: 1, obstacle: 1, pickup: 1, ring: 1, zone: 1 },
     segments: 0,
     fallbacks: 0,
     unverified: 0,
@@ -159,12 +159,13 @@ export function extendCourse(state: SimState, untilY: number, tuning: Tuning): v
     const conditions = segmentContext(state, course.lastY);
     const context = state.anchors.slice(-CONTEXT_ANCHORS);
     const contextObstacles = state.obstacles.filter((o) => o.y1 >= course.lastY - 8);
+    const contextZones = state.zones.filter((z) => z.y1 >= course.lastY - 8);
     let accepted: Segment | null = null;
     // Une scène commence par son segment construit à la main (prouvé par les tests) ; la suite est engendrée comme une course libre.
     if (course.plan.kind === 'scene' && course.segments === 0) accepted = buildScene(course.plan.sceneId, course.ids, origin);
     for (let attempt = 0; attempt < MAX_ATTEMPTS && !accepted; attempt += 1) {
       const candidate = buildSegment(rng, course.ids, from, origin, profile, rng.pick(profile.archetypes), conditions);
-      if (verifyWithCables(context, contextObstacles, candidate, tuning, conditions)) accepted = candidate;
+      if (verifyWithCables(context, contextObstacles, contextZones, candidate, tuning, conditions)) accepted = candidate;
     }
     if (!accepted) {
       // Repli : une chaîne serrée sans rien d'autre, vérifiée elle aussi. Si même cela échoue, on
@@ -173,7 +174,7 @@ export function extendCourse(state: SimState, untilY: number, tuning: Tuning): v
       let plain: Segment | null = null;
       for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS && !accepted; attempt += 1) {
         plain = buildPlainSegment(rng, course.ids, from, origin, conditions);
-        if (verifySegment(context, contextObstacles, plain, tuning, conditions.env, conditions.entryEnv)) accepted = plain;
+        if (verifySegment(context, contextObstacles, plain, tuning, conditions.env, conditions.entryEnv, contextZones)) accepted = plain;
       }
       if (!accepted) {
         accepted = plain!;
@@ -188,6 +189,7 @@ export function extendCourse(state: SimState, untilY: number, tuning: Tuning): v
     state.pickups.push(...pickups);
     course.pickupsTotal += pickups.length;
     state.rings.push(...accepted.rings.filter((ring) => ring.pos.y < ceiling));
+    state.zones.push(...accepted.zones);
     const top = accepted.anchors.at(-1)!;
     course.lastX = top.pos.x;
     course.lastY = top.pos.y;
@@ -205,4 +207,5 @@ export function pruneCourse(state: SimState, fogY: number): void {
   if (state.obstacles.length > 0 && state.obstacles[0]!.y1 < belowY) state.obstacles = state.obstacles.filter((o) => o.y1 >= belowY);
   if (state.pickups.length > 0 && state.pickups[0]!.pos.y < belowY) state.pickups = state.pickups.filter((p) => p.pos.y >= belowY);
   if (state.rings.length > 0 && state.rings[0]!.pos.y < belowY) state.rings = state.rings.filter((r) => r.pos.y >= belowY);
+  if (state.zones.length > 0 && state.zones[0]!.y1 < belowY) state.zones = state.zones.filter((z) => z.y1 >= belowY);
 }

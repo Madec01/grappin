@@ -1,5 +1,6 @@
 import { add, clampLength, dot, length, lengthSq, normalize, scale, sub, type Vec2 } from '../core/math/vec2';
 import { STILL, acceleration, type Environment } from './environment';
+import type { Zone } from './state';
 import type { Tuning } from './tuning';
 
 /**
@@ -20,6 +21,52 @@ export interface Body {
 
 /** Tolérance sous laquelle une corde est considérée tendue. */
 const TAUT_EPSILON = 1e-6;
+
+/** Aucune zone : le cas ordinaire, partagé pour ne rien allouer. */
+export const NO_ZONES: readonly Zone[] = [];
+/** Près du bord d'un courant, la poussée monte en douceur sur cette distance, en mètres (brief : « force progressive »). */
+export const ZONE_RAMP = 0.6;
+/** Une zone de freinage ne ralentit jamais sous cette vitesse, en m/s : lisible, jamais brutal, jamais arrêté. */
+export const BRAKE_FLOOR = 2;
+
+/**
+ * Accélération que les zones ajoutent en ce point, à cette vitesse. Un courant
+ * (ascendant, latéral) pousse dans sa direction, en douceur près de ses bords ;
+ * un couloir d'accélération pousse le long de son axe, à plein, tant que la
+ * vitesse le long de l'axe est sous son plafond ; une zone de freinage retire
+ * une part de la vitesse par seconde, jamais sous `BRAKE_FLOOR`. Quatre
+ * opérations : le résultat est identique sur tout moteur.
+ */
+export function zoneAcceleration(zones: readonly Zone[], pos: Vec2, vel: Vec2): Vec2 {
+  let x = 0;
+  let y = 0;
+  for (const zone of zones) {
+    if (pos.x < zone.x0 || pos.x > zone.x1 || pos.y < zone.y0 || pos.y > zone.y1) continue;
+    if (zone.kind === 'freinage') {
+      if (length(vel) <= BRAKE_FLOOR) continue;
+      x -= vel.x * zone.strength;
+      y -= vel.y * zone.strength;
+      continue;
+    }
+    if (zone.kind === 'acceleration') {
+      if (zone.cap !== undefined && dot(vel, zone.dir) >= zone.cap) continue;
+      x += zone.dir.x * zone.strength;
+      y += zone.dir.y * zone.strength;
+      continue;
+    }
+    const edge = Math.min(pos.x - zone.x0, zone.x1 - pos.x, pos.y - zone.y0, zone.y1 - pos.y);
+    const ramp = edge >= ZONE_RAMP ? 1 : edge / ZONE_RAMP;
+    x += zone.dir.x * zone.strength * ramp;
+    y += zone.dir.y * zone.strength * ramp;
+  }
+  return { x, y };
+}
+
+/** La zone dans laquelle se trouve ce point, ou null : la première de la liste s'il y en a plusieurs. */
+export function zoneAt(zones: readonly Zone[], pos: Vec2): Zone | null {
+  for (const zone of zones) if (pos.x >= zone.x0 && pos.x <= zone.x1 && pos.y >= zone.y0 && pos.y <= zone.y1) return zone;
+  return null;
+}
 
 /**
  * Retire la composante radiale sortante de la vitesse si la corde est tendue.
@@ -43,10 +90,11 @@ export function constrainVelocity(pos: Vec2, vel: Vec2, anchor: Vec2, ropeLength
  * est ramené sur le cercle et sa vitesse est contrainte une seconde fois,
  * afin que la corde garde exactement sa longueur à chaque pas.
  */
-export function integrate(body: Body, anchor: Vec2 | null, ropeLength: number, tuning: Tuning, env: Environment = STILL): Body {
+export function integrate(body: Body, anchor: Vec2 | null, ropeLength: number, tuning: Tuning, env: Environment = STILL, zones: readonly Zone[] = NO_ZONES): Body {
   const dt = tuning.stepSeconds;
   const a = acceleration(env, tuning);
-  let vel: Vec2 = { x: body.vel.x + a.x * dt, y: body.vel.y + a.y * dt };
+  const z = zones.length > 0 ? zoneAcceleration(zones, body.pos, body.vel) : { x: 0, y: 0 };
+  let vel: Vec2 = { x: body.vel.x + (a.x + z.x) * dt, y: body.vel.y + (a.y + z.y) * dt };
   if (anchor) vel = constrainVelocity(body.pos, vel, anchor, ropeLength);
   let pos = add(body.pos, scale(vel, dt));
   if (anchor) {
@@ -119,18 +167,54 @@ export function swingAssist(body: Body, anchor: Vec2, ropeLength: number, tuning
  * corps déplacé et la nouvelle longueur de corde. Partagé par la simulation et
  * le vérificateur de parcours, qui jouent ainsi exactement la même physique.
  */
-export function swingStep(body: Body, anchor: Vec2, ropeLength: number, tuning: Tuning, env: Environment = STILL): { body: Body; ropeLength: number } {
+export function swingStep(body: Body, anchor: Vec2, ropeLength: number, tuning: Tuning, env: Environment = STILL, zones: readonly Zone[] = NO_ZONES): { body: Body; ropeLength: number } {
   const assisted = swingAssist(body, anchor, ropeLength, tuning, env);
   const shorter = Math.max(tuning.ropeMin, ropeLength - tuning.reelSpeed * tuning.stepSeconds);
   const pulled = reelIn(assisted, anchor, ropeLength, shorter, tuning.reelSpin, tuning.stepSeconds, tuning.reelMaxSpeed);
-  return { body: integrate(pulled, anchor, shorter, tuning, env), ropeLength: shorter };
+  return { body: integrate(pulled, anchor, shorter, tuning, env, zones), ropeLength: shorter };
 }
 
-/** Position en vol libre après `t` secondes, sans corde ni plafond : sert à viser. */
+/** Position en vol libre après `t` secondes, sans corde, ni plafond, ni zone : la formule fermée, pour viser. */
 export function freeFlightAt(body: Body, t: number, tuning: Tuning, env: Environment = STILL): Vec2 {
   const a = acceleration(env, tuning);
   return {
     x: body.pos.x + body.vel.x * t + 0.5 * a.x * t * t,
     y: body.pos.y + body.vel.y * t + 0.5 * a.y * t * t,
   };
+}
+
+/**
+ * Le vol libre échantillonné : le corps (position et vitesse) tous les
+ * `sampleSeconds` jusqu'à `seconds`, en commençant au premier échantillon. Sans
+ * zone, la formule fermée ; avec des zones, le vol est joué pas à pas avec la
+ * vraie physique, car un courant dépend de l'endroit où l'on passe. Vise,
+ * ombre et vérificateur passent tous par ici : ils disent vrai sous un courant.
+ */
+export function flightSamples(body: Body, seconds: number, sampleSeconds: number, tuning: Tuning, env: Environment = STILL, zones: readonly Zone[] = NO_ZONES): Body[] {
+  const samples: Body[] = [];
+  const count = Math.max(0, Math.round(seconds / sampleSeconds));
+  if (zones.length === 0) {
+    const a = acceleration(env, tuning);
+    for (let i = 1; i <= count; i += 1) {
+      const t = sampleSeconds * i;
+      samples.push({ pos: freeFlightAt(body, t, tuning, env), vel: { x: body.vel.x + a.x * t, y: body.vel.y + a.y * t } });
+    }
+    return samples;
+  }
+  const stepsPerSample = Math.max(1, Math.round(sampleSeconds / tuning.stepSeconds));
+  let flying = body;
+  for (let i = 1; i <= count; i += 1) {
+    for (let k = 0; k < stepsPerSample; k += 1) flying = integrate(flying, null, 0, tuning, env, zones);
+    samples.push(flying);
+  }
+  return samples;
+}
+
+/** Le corps en vol libre après `t` secondes, zones comprises : la formule fermée sans zone, sinon pas à pas. */
+export function flightAt(body: Body, t: number, tuning: Tuning, env: Environment = STILL, zones: readonly Zone[] = NO_ZONES): Body {
+  if (zones.length === 0) {
+    const a = acceleration(env, tuning);
+    return { pos: freeFlightAt(body, t, tuning, env), vel: { x: body.vel.x + a.x * t, y: body.vel.y + a.y * t } };
+  }
+  return flightSamples(body, t, t, tuning, env, zones)[0] ?? body;
 }

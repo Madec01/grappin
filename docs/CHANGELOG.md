@@ -2,6 +2,28 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.12.0] — 2026-10-11 — Lot 2, deuxième livraison : les zones qui modifient le mouvement
+
+Suite du lot 2 du brief, section 8 : des zones où le vol change, chacune avec sa scène. Reste pour le lot 2 : la roue motorisée, l'obstacle tournant, le lanceur à ouverture mobile et le tir avec rebond (0.13.0).
+
+### Ajouté
+
+- **Courant ascendant (Z1).** Une colonne de 3,2 m de large qui pousse vers le haut à 10 m/s², plus que la gravité : on y monte doucement, porté. Elle part un mètre au-dessus du point d'entrée et mène à un point dix mètres plus haut, hors de portée de corde : seul le courant y conduit. La poussée monte en douceur près des bords (« force progressive »). Motif « courant », dès le palier 2 de la course libre, et au niveau 13.
+- **Courant latéral (Z2).** Une bande de toute la largeur, haute de 3,5 m, qui pousse de côté à 5 m/s² : on prépare son entrée et on anticipe la dérive. Localisé, à la différence du coup de vent qui couvre tout l'écran. Motif « derive », dès le palier 3, et au niveau 19.
+- **Couloir d'accélération et zone de freinage (Z3, Z4).** Un couloir vertical de 5 m qui accélère le long de son axe seulement, à 22 m/s² jusqu'à un plafond de 14 m/s ; puis, un mètre plus haut, une zone de 3 m qui retire 2,5 fois la vitesse par seconde, jamais sous 2 m/s ; et le point de sortie douze mètres au-dessus de l'entrée : « accélération, envolée, freinage, rattrapage ». Motif « fusee », dès le palier 4, et au niveau 16.
+- **La visée, l'ombre prédictive et le vérificateur jouent les zones.** Sous un courant, le vol prédit est joué pas à pas avec la vraie physique, pas par la formule du vol libre : l'ombre montre le vol porté ou dévié, la visée prend le point qu'on atteindra vraiment, et chaque segment à zones est prouvé avec ses zones. Mesuré : 60 segments sur 60 prouvés pour le courant et la fusée, 59 sur 60 pour la dérive ; la vérification coûte 6 à 10 ms par segment au lieu de 4.
+- **Scènes** `?scene=courant`, `?scene=derive`, `?scene=fusee`, prouvées par le vérificateur et grimpées par les deux robots.
+- **Robots** : porté vers le haut, un robot ne rattrape plus un point sous lui, il monte d'abord, comme un joueur.
+
+### Modifié
+
+- Les obstacles tirés au sort, les prises à cycles et les anneaux ne se posent jamais dans une zone.
+- Le test du parcours admet qu'un point suive le précédent à douze mètres quand une zone s'étend entre les deux.
+
+### Technique
+
+- `Zone`, `SimState.zones`, `zoneAcceleration`, `zoneAt`, `flightSamples`, `flightAt` (`sim/physics.ts`, la formule fermée reste pour le vol sans zone, à l'identique) ; `integrate` et `swingStep` prennent les zones ; `bestAnchor`, `flightCatches`, `canExit`, `verifySegment` aussi ; motifs `courant`, `derive`, `fusee` et constructeurs `updraft`, `drift`, `rocket` partagés avec les scènes ; `debugState().zones` et `.zone`.
+
 ## [0.11.0] — 2026-10-11 — Lot 2, première livraison : des obstacles qui font quelque chose
 
 Demande du propriétaire : « Go lot 2 ». Première livraison du lot 2 du brief : quatre obstacles à comportement, chacun avec sa scène de démonstration. Suivront les courants (0.12.0), puis la roue motorisée, l'obstacle tournant et les lanceurs à ouverture mobile et à rebond (0.13.0).

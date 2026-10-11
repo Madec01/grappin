@@ -23,15 +23,18 @@ describe('parcours engendré', () => {
   it('monte toujours, reste dans la largeur jouable, et chaque point est à portée du précédent', () => {
     const sim = climbed(3, 300);
     const anchors = sim.state.anchors;
-    expect(anchors.length).toBeGreaterThan(20);
+    // Un courant ou une fusée porte dix à douze mètres d'un coup : un parcours qui en a compte moins de points.
+    expect(anchors.length).toBeGreaterThan(15);
     for (let i = 1; i < anchors.length; i += 1) {
       const prev = anchors[i - 1]!;
       const cur = anchors[i]!;
       expect(Math.abs(cur.pos.x)).toBeLessThanOrEqual(playableHalfWidth(MAX_SPREAD));
       expect(cur.pos.y).toBeGreaterThan(sim.state.fogY - 11);
-      // Chaque point reste proche du précédent ; seul le grand saut, lancé par un propulseur, dépasse un peu la portée,
-      // et la sortie d'un lanceur, par-dessus son mur, se tire : elle peut être à dix mètres.
-      expect(Math.hypot(cur.pos.x - prev.pos.x, cur.pos.y - prev.pos.y)).toBeLessThan(prev.kind === 'lanceur' ? 11 : 8);
+      // Chaque point reste proche du précédent ; seul le grand saut, lancé par un propulseur, dépasse un peu la portée ;
+      // la sortie d'un lanceur, par-dessus son mur, se tire, elle peut être à dix mètres ; et la sortie d'un courant ou
+      // d'une fusée, portée par la zone qui s'étend entre les deux points, jusqu'à douze.
+      const bridged = sim.state.zones.some((z) => z.y0 >= prev.pos.y - 0.5 && z.y1 <= cur.pos.y + 0.5 && z.kind !== 'lateral');
+      expect(Math.hypot(cur.pos.x - prev.pos.x, cur.pos.y - prev.pos.y)).toBeLessThan(bridged ? 13 : prev.kind === 'lanceur' ? 11 : 8);
     }
   });
 
@@ -141,7 +144,7 @@ describe('robot vérificateur', () => {
 
   it('exige les deux branches d\'une fourche', () => {
     const rng = createRng(11);
-    const ids = { anchor: 1, obstacle: 1, pickup: 1, ring: 1 };
+    const ids = { anchor: 1, obstacle: 1, pickup: 1, ring: 1, zone: 1 };
     const origin = { x: 0, y: 0 };
     let segment = buildSegment(rng, ids, { x: 0, y: 60 }, origin, tierProfile(1), 'chaine');
     while (segment.junctionId === null) segment = buildSegment(rng, ids, { x: 0, y: 60 }, origin, tierProfile(1), 'chaine');
@@ -179,7 +182,7 @@ describe('robot vérificateur', () => {
         const nearEdge = sim.state.schedule.some((e) => Math.abs(a.pos.y - (sim.state.groundY + e.at)) < 6 || Math.abs(a.pos.y - (sim.state.groundY + e.at + e.length)) < 6);
         if (nearEdge) continue;
         const env = environmentOf(eventsAt(sim.state.schedule, sim.state.groundY, a.pos.y));
-        if (!canExit(a, anchors, sim.state.obstacles, null, T, env)) stolen.push(`graine ${seed}, point ${a.id}`);
+        if (!canExit(a, anchors, sim.state.obstacles, null, T, env, sim.state.zones)) stolen.push(`graine ${seed}, point ${a.id}`);
       }
     }
     const elapsed = performance.now() - started;

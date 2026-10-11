@@ -4,7 +4,8 @@ import { STILL, type Environment } from './environment';
 import { CABLE_HALF_LENGTH, CABLE_PERIOD_SECONDS, TRAVERSIERE_PERIOD_SECONDS } from './events';
 import { circleBoxGap } from './geometry';
 import { LANCEUR_CLEARANCE } from './launcher';
-import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring } from './state';
+import { zoneAt } from './physics';
+import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from './state';
 
 /**
  * Construction d'un segment de parcours : une chaîne de points d'accroche qui
@@ -16,15 +17,23 @@ import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring } from './state';
  * dispose. Tout l'aléatoire vient du générateur seedé.
  */
 
-export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' | 'fragiles' | 'saut' | 'lanceur';
+/**
+ * Motifs. Les trois derniers sont les zones du lot 2 : « courant », un courant
+ * ascendant qui porte jusqu'à un point hors de portée de corde ; « derive »,
+ * une bande de courant latéral qui traverse la chaîne ; « fusee », un couloir
+ * d'accélération puis une zone de freinage avant le point suivant
+ * (« accélération, envolée, freinage, rattrapage »).
+ */
+export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' | 'fragiles' | 'saut' | 'lanceur' | 'courant' | 'derive' | 'fusee';
 
-export const ARCHETYPES: readonly Archetype[] = ['chaine', 'escalier', 'couloir', 'dalles', 'rafale', 'fragiles', 'saut', 'lanceur'];
+export const ARCHETYPES: readonly Archetype[] = ['chaine', 'escalier', 'couloir', 'dalles', 'rafale', 'fragiles', 'saut', 'lanceur', 'courant', 'derive', 'fusee'];
 
 export interface Segment {
   readonly anchors: Anchor[];
   readonly obstacles: Obstacle[];
   readonly pickups: Pickup[];
   readonly rings: Ring[];
+  readonly zones: Zone[];
   /** Point de fourche, dont les deux branches doivent toutes deux être atteignables. */
   readonly junctionId: number | null;
   readonly branchIds: readonly number[];
@@ -36,6 +45,7 @@ export interface IdCounters {
   obstacle: number;
   pickup: number;
   ring: number;
+  zone: number;
 }
 
 /** Ce qu'un profil permet : une nouvelle contrainte à la fois. */
@@ -124,6 +134,10 @@ export function tierProfile(tier: number): TierProfile {
   if (tier >= 2) archetypes.push('fragiles');
   if (tier >= 2) archetypes.push('lanceur');
   if (tier >= 3) archetypes.push('rafale', 'saut');
+  // Lot 2, les zones : le courant ascendant d'abord (il porte), la dérive ensuite (elle dévie), la fusée en dernier (elle demande de rattraper vite).
+  if (tier >= 2) archetypes.push('courant');
+  if (tier >= 3) archetypes.push('derive');
+  if (tier >= 4) archetypes.push('fusee');
   return {
     spacing: Math.min(5, 3 + 0.4 * tier),
     obstacles: tier === 0 ? 0 : Math.min(3, 1 + Math.floor(tier / 2)),
@@ -183,7 +197,81 @@ const SHAPES: Record<Archetype, { dy: readonly [number, number]; dx: readonly [n
   fragiles: { dy: [0.5, 0.8], dx: [0.4, 0.9] },
   saut: { dy: [0.55, 0.85], dx: [0.4, 0.9] },
   lanceur: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  courant: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  derive: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  fusee: { dy: [0.55, 0.9], dx: [0.4, 1] },
 };
+
+/**
+ * Les zones du lot 2, en mètres. Courant ascendant : une colonne de
+ * `UPDRAFT_HALF_WIDTH` de demi-largeur qui pousse à `UPDRAFT_STRENGTH` (plus que
+ * la gravité : on y monte, doucement), d'un mètre au-dessus du point d'entrée
+ * jusqu'à un mètre sous le point de sortie, lui-même `UPDRAFT_RISE` plus haut, hors de
+ * portée de corde : seul le courant y mène. Dérive : une bande de toute la
+ * largeur, haute de `DRIFT_HEIGHT`, qui pousse de côté à `DRIFT_STRENGTH`.
+ * Fusée : un couloir de `BOOST_HEIGHT` qui accélère vers le haut à
+ * `BOOST_STRENGTH` jusqu'à `BOOST_CAP`, puis après un mètre une zone de
+ * freinage de `BRAKE_HEIGHT` à `BRAKE_STRENGTH` par seconde, et le point de
+ * sortie `BOOST_RISE` au-dessus de l'entrée.
+ */
+export const UPDRAFT_HALF_WIDTH = 1.6;
+export const UPDRAFT_STRENGTH = 10;
+export const UPDRAFT_RISE = 10;
+export const DRIFT_HEIGHT = 3.5;
+export const DRIFT_STRENGTH = 5;
+export const BOOST_HALF_WIDTH = 1.6;
+export const BOOST_HEIGHT = 5;
+export const BOOST_STRENGTH = 22;
+export const BOOST_CAP = 14;
+export const BRAKE_HEIGHT = 3;
+export const BRAKE_STRENGTH = 2.5;
+export const BOOST_RISE = 12;
+/** Les zones commencent un mètre au-dessus du point qui les précède : on s'y balance sans elles, on y entre en lâchant. Un courant s'arrête un mètre sous sa sortie. */
+const ZONE_ABOVE_ENTRY = 1;
+const ZONE_BELOW_EXIT = 1;
+/** Le point de sortie d'un courant ou d'une fusée est décalé de côté de cette distance : on le rattrape en sortant du courant. */
+const ZONE_EXIT_OFFSET = 1.2;
+/** Aucun obstacle, aucune prise ajoutée, aucun anneau à moins de cette distance d'une zone. */
+const ZONE_CLEARANCE = 0.5;
+
+function makeZone(ids: IdCounters, kind: Zone['kind'], x0: number, y0: number, x1: number, y1: number, strength: number, dir: Vec2, cap?: number): Zone {
+  const zone: Zone = cap === undefined ? { id: ids.zone, x0, y0, x1, y1, kind, strength, dir } : { id: ids.zone, x0, y0, x1, y1, kind, strength, dir, cap };
+  ids.zone += 1;
+  return zone;
+}
+
+/** La colonne d'un courant ascendant au-dessus du point `from`, et où la chaîne reprend. Partagé avec les scènes. */
+export function updraft(ids: IdCounters, from: Vec2, halfWidth: number): { zone: Zone; exit: Vec2 } {
+  const x = clampX(from.x, halfWidth - UPDRAFT_HALF_WIDTH);
+  const side = from.x > 0 ? -1 : 1;
+  const exit = { x: clampX(x + side * ZONE_EXIT_OFFSET, halfWidth), y: from.y + UPDRAFT_RISE };
+  return { zone: makeZone(ids, 'ascendant', x - UPDRAFT_HALF_WIDTH, from.y + ZONE_ABOVE_ENTRY, x + UPDRAFT_HALF_WIDTH, exit.y - ZONE_BELOW_EXIT, UPDRAFT_STRENGTH, { x: 0, y: 1 }), exit };
+}
+
+/** Une bande de dérive de toute la largeur, qui commence un mètre au-dessus de `y` et pousse vers `side`. Partagé avec les scènes. */
+export function drift(ids: IdCounters, y: number, side: -1 | 1, halfWidth: number): Zone {
+  const wallX = halfWidth + WALL_MARGIN;
+  return makeZone(ids, 'lateral', -wallX, y + ZONE_ABOVE_ENTRY, wallX, y + ZONE_ABOVE_ENTRY + DRIFT_HEIGHT, DRIFT_STRENGTH, { x: side, y: 0 });
+}
+
+/** Le couloir d'accélération et la zone de freinage au-dessus du point `from`, et où la chaîne reprend. Partagé avec les scènes. */
+export function rocket(ids: IdCounters, from: Vec2, halfWidth: number): { boost: Zone; brake: Zone; exit: Vec2 } {
+  const x = clampX(from.x, halfWidth - BOOST_HALF_WIDTH);
+  const side = from.x > 0 ? -1 : 1;
+  const boostY0 = from.y + ZONE_ABOVE_ENTRY;
+  const brakeY0 = boostY0 + BOOST_HEIGHT + 1;
+  const exit = { x: clampX(x + side * ZONE_EXIT_OFFSET, halfWidth), y: from.y + BOOST_RISE };
+  return {
+    boost: makeZone(ids, 'acceleration', x - BOOST_HALF_WIDTH, boostY0, x + BOOST_HALF_WIDTH, boostY0 + BOOST_HEIGHT, BOOST_STRENGTH, { x: 0, y: 1 }, BOOST_CAP),
+    brake: makeZone(ids, 'freinage', x - 2 * BOOST_HALF_WIDTH, brakeY0, x + 2 * BOOST_HALF_WIDTH, brakeY0 + BRAKE_HEIGHT, BRAKE_STRENGTH, { x: 0, y: 0 }),
+    exit,
+  };
+}
+
+/** Vrai si la boîte s'approche d'une zone à moins de `ZONE_CLEARANCE`. */
+function nearZone(box: Obstacle, zones: readonly Zone[]): boolean {
+  return zones.some((z) => box.x1 > z.x0 - ZONE_CLEARANCE && box.x0 < z.x1 + ZONE_CLEARANCE && box.y1 > z.y0 - ZONE_CLEARANCE && box.y0 < z.y1 + ZONE_CLEARANCE);
+}
 
 /**
  * Le mur à trou d'un lanceur : hauteur au-dessus du lanceur, demi-largeur du
@@ -254,8 +342,10 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
   let splitDone = false;
   let jumpDone = false;
   let launcherDone = false;
+  let zoneDone = false;
   /** Obstacles posés par le motif lui-même, que les obstacles tirés au sort respectent. */
   const fixed: Obstacle[] = [];
+  const zones: Zone[] = [];
 
   while (cur.y < targetY) {
     if (wantsSplit && !splitDone && cur.y - startY > 3 && targetY - cur.y > 9) {
@@ -315,6 +405,29 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
       launcherDone = true;
       continue;
     }
+    if (archetype === 'courant' && !zoneDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > UPDRAFT_RISE + 2) {
+      // Courant ascendant : depuis le dernier point, une colonne porte jusqu'au point suivant, hors de portée de corde.
+      const { zone, exit } = updraft(ids, cur, halfWidth);
+      zones.push(zone);
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      zoneDone = true;
+      continue;
+    }
+    if (archetype === 'derive' && !zoneDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > DRIFT_HEIGHT + 6) {
+      // Dérive : une bande de courant latéral traverse la chaîne, qui continue normalement ; le vérificateur prouve la traversée avec le courant.
+      zones.push(drift(ids, cur.y, cur.x > 0 ? -1 : 1, halfWidth));
+      zoneDone = true;
+    }
+    if (archetype === 'fusee' && !zoneDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > BOOST_RISE + 2) {
+      // Fusée : un couloir d'accélération, un freinage, et le point de sortie loin au-dessus.
+      const { boost, brake, exit } = rocket(ids, cur, halfWidth);
+      zones.push(boost, brake);
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      zoneDone = true;
+      continue;
+    }
     if (archetype === 'saut' && !jumpDone && profile.boosters > 0 && cur.y - startY > 6 && targetY - cur.y > 8) {
       // Grand saut : un propulseur, puis un trou d'un espacement et demi que seul le lâcher propulsé franchit bien.
       const launcher = makeAnchor(ids, cur, 'booster');
@@ -346,8 +459,8 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
   }
   assignKinds(rng, anchors, profile, archetype, junctionId, branchIds);
   if (context.cable !== 'none') hangCables(anchors, junctionId, branchIds, halfWidth, context.cable);
-  addSpecialAnchors(rng, ids, anchors, profile, halfWidth);
-  const rings = placeRings(rng, ids, anchors, pickups, profile.rings ?? 0, new Set([...branchIds, junctionId ?? -1]), halfWidth);
+  addSpecialAnchors(rng, ids, anchors, profile, halfWidth, zones);
+  const rings = placeRings(rng, ids, anchors, pickups, zones, profile.rings ?? 0, new Set([...branchIds, junctionId ?? -1]), halfWidth);
   const obstacleCount = archetype === 'dalles' ? Math.min(4, profile.obstacles + 2) : profile.obstacles;
   // Les espèces du lot 2 se posent d'abord : elles sont le propos du segment, les obstacles ordinaires prennent la place qui reste.
   const kinds: ObstacleKind[] = [
@@ -356,8 +469,8 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
     ...Array<ObstacleKind>(profile.bouncers ?? 0).fill('rebond'),
     ...Array<ObstacleKind>(obstacleCount).fill('solide'),
   ];
-  const obstacles = placeObstacles(rng, ids, anchors, pickups, rings, Math.max(startY, origin.y + GRACE_ABOVE_ORIGIN - 2), cur.y, kinds, from, archetype === 'dalles', context, halfWidth, fixed);
-  return { anchors, obstacles, pickups, rings, junctionId, branchIds };
+  const obstacles = placeObstacles(rng, ids, anchors, pickups, rings, zones, Math.max(startY, origin.y + GRACE_ABOVE_ORIGIN - 2), cur.y, kinds, from, archetype === 'dalles', context, halfWidth, fixed);
+  return { anchors, obstacles, pickups, rings, zones, junctionId, branchIds };
 }
 
 /** Anneau de précision : rayon, hauteur au-dessus du milieu du vol, et distances gardées aux points, aux étoiles et aux autres anneaux. */
@@ -374,7 +487,7 @@ const RING_RING_CLEARANCE = 0.5;
  * une fourche, ni sur un autre anneau. Rien de solide : un anneau raté ne
  * coûte rien, le parcours se prouve sans lui.
  */
-function placeRings(rng: Rng, ids: IdCounters, anchors: readonly Anchor[], pickups: readonly Pickup[], count: number, protectedIds: ReadonlySet<number>, halfWidth: number): Ring[] {
+function placeRings(rng: Rng, ids: IdCounters, anchors: readonly Anchor[], pickups: readonly Pickup[], zones: readonly Zone[], count: number, protectedIds: ReadonlySet<number>, halfWidth: number): Ring[] {
   const rings: Ring[] = [];
   if (count <= 0 || anchors.length < 4) return rings;
   const bands = launchBands(anchors);
@@ -391,7 +504,8 @@ function placeRings(rng: Rng, ids: IdCounters, anchors: readonly Anchor[], picku
     anchors.every((a) => Math.hypot(a.pos.x - pos.x, a.pos.y - pos.y) >= RING_RADIUS + RING_ANCHOR_CLEARANCE) &&
     pickups.every((p) => Math.hypot(p.pos.x - pos.x, p.pos.y - pos.y) >= RING_RADIUS + RING_PICKUP_CLEARANCE) &&
     rings.every((r) => Math.hypot(r.pos.x - pos.x, r.pos.y - pos.y) >= 2 * RING_RADIUS + RING_RING_CLEARANCE) &&
-    !bands.some((band) => pos.y > band.y0 && pos.y < band.y1);
+    !bands.some((band) => pos.y > band.y0 && pos.y < band.y1) &&
+    zoneAt(zones, pos) === null;
   for (let n = 0; n < count; n += 1) {
     for (let attempt = 0; attempt < 6; attempt += 1) {
       const i = pairs[Math.floor(rng.next() * pairs.length)]!;
@@ -432,7 +546,7 @@ function launchBands(anchors: readonly Anchor[]): { readonly y0: number; readonl
   return anchors.filter((a) => a.kind === 'lanceur').map((a) => ({ y0: a.pos.y - 1, y1: a.pos.y + WALL_RISE_MIN + WALL_RISE_RANGE + ABOVE_WALL + 1 }));
 }
 
-function addSpecialAnchors(rng: Rng, ids: IdCounters, anchors: Anchor[], profile: TierProfile, halfWidth: number): void {
+function addSpecialAnchors(rng: Rng, ids: IdCounters, anchors: Anchor[], profile: TierProfile, halfWidth: number, zones: readonly Zone[] = []): void {
   const wanted: Anchor['kind'][] = [...Array<Anchor['kind']>(profile.eclipse).fill('eclipse'), ...Array<Anchor['kind']>(profile.electric).fill('electrique')];
   if (wanted.length === 0 || anchors.length < 5) return;
   const farEnough = (pos: Vec2): boolean => anchors.every((a) => Math.hypot(a.pos.x - pos.x, a.pos.y - pos.y) >= SPECIAL_CLEARANCE);
@@ -452,7 +566,8 @@ function addSpecialAnchors(rng: Rng, ids: IdCounters, anchors: Anchor[], profile
         kind === 'eclipse'
           ? { x: clampX((before.pos.x + after.pos.x) / 2 + (rng.next() - 0.5) * 1.2, halfWidth), y: here.pos.y + ECLIPSE_RISE }
           : { x: clampX(here.pos.x + (here.pos.x > 0 ? -1 : 1) * ELECTRIC_OFFSET, halfWidth), y: here.pos.y + ELECTRIC_RISE };
-      if (!farEnough(pos) || inBand(pos)) continue;
+      // Jamais dans une zone : un courant y porterait la prise hors de toute logique de sortie.
+      if (!farEnough(pos) || inBand(pos) || zoneAt(zones, pos) !== null) continue;
       anchors.splice(i + 1, 0, makeAnchor(ids, pos, kind));
       break;
     }
@@ -535,6 +650,7 @@ function placeObstacles(
   anchors: readonly Anchor[],
   pickups: readonly Pickup[],
   rings: readonly Ring[],
+  zones: readonly Zone[],
   startY: number,
   endY: number,
   kinds: readonly ObstacleKind[],
@@ -556,6 +672,7 @@ function placeObstacles(
     anchors.every((a) => (a.kind === 'lanceur' ? circleBoxGap(a.pos, LANCEUR_CLEARANCE, box) > 0 : (a.cable ? [a.cable.from, a.pos, a.cable.to] : [a.pos]).every((pos) => clearOf(pos, box)))) &&
     pickups.every((p) => circleBoxGap(p.pos, 0, box) >= PICKUP_CLEARANCE) &&
     rings.every((r) => circleBoxGap(r.pos, r.radius, box) >= RING_OBSTACLE_CLEARANCE) &&
+    !nearZone(box, zones) &&
     (from === null || (circleBoxGap(from, 0, box) >= OBSTACLE_CLEARANCE && !underAnchor(from, box, env) && !underAnchor(from, box, entryEnv))) &&
     !inLaunchBand(box) &&
     obstacles.every((o) => box.y1 < o.y0 - 1 || box.y0 > o.y1 + 1);

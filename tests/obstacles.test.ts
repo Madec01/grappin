@@ -195,7 +195,7 @@ describe('le générateur du lot 2', () => {
     const seen = { rebond: 0, cassable: 0, porte: 0, rings: 0 };
     for (let seed = 1; seed <= 40; seed += 1) {
       const rng = createRng(seed);
-      const ids = { anchor: 1, obstacle: 1, pickup: 1, ring: 1 };
+      const ids = { anchor: 1, obstacle: 1, pickup: 1, ring: 1, zone: 1 };
       const segment = buildSegment(rng, ids, null, { x: 0, y: 0 }, profile, rng.pick(profile.archetypes));
       for (const box of segment.obstacles) {
         if (box.kind === 'rebond') seen.rebond += 1;
@@ -223,7 +223,7 @@ describe('le générateur du lot 2', () => {
 
   it('sans ces réglages, un profil engendre exactement comme avant : ni espèce d\'obstacle ni anneau', () => {
     const rng = createRng(3);
-    const segment = buildSegment(rng, { anchor: 1, obstacle: 1, pickup: 1, ring: 1 }, null, { x: 0, y: 0 }, { ...profile, bouncers: 0, breakables: 0, doors: 0, rings: 0 }, 'chaine');
+    const segment = buildSegment(rng, { anchor: 1, obstacle: 1, pickup: 1, ring: 1, zone: 1 }, null, { x: 0, y: 0 }, { ...profile, bouncers: 0, breakables: 0, doors: 0, rings: 0 }, 'chaine');
     expect(segment.rings).toEqual([]);
     expect(segment.obstacles.every((b) => b.kind === undefined)).toBe(true);
   });
@@ -232,11 +232,11 @@ describe('le générateur du lot 2', () => {
 describe('les scènes de démonstration', () => {
   it('se prouvent chacune par le vérificateur, et la porte seule fait passer le tir du lanceur', () => {
     for (const scene of SCENES) {
-      const segment = buildScene(scene.id, { anchor: 1, obstacle: 1, pickup: 1, ring: 1 }, { x: 0, y: 0 });
+      const segment = buildScene(scene.id, { anchor: 1, obstacle: 1, pickup: 1, ring: 1, zone: 1 }, { x: 0, y: 0 });
       expect(verifySegment([], [], segment, T), scene.id).toBe(true);
       expect(segment.anchors[0]!.pos).toEqual({ x: 0.8, y: 4 });
     }
-    const porte = buildScene('porte', { anchor: 1, obstacle: 1, pickup: 1, ring: 1 }, { x: 0, y: 0 });
+    const porte = buildScene('porte', { anchor: 1, obstacle: 1, pickup: 1, ring: 1, zone: 1 }, { x: 0, y: 0 });
     const walled = { ...porte, obstacles: porte.obstacles.map((box): Obstacle => ({ id: box.id, x0: box.x0, y0: box.y0, x1: box.x1, y1: box.y1 })) };
     expect(verifySegment([], [], walled, T)).toBe(false);
   });
@@ -244,7 +244,7 @@ describe('les scènes de démonstration', () => {
   it('commencent une partie par leur segment, puis la course libre continue, sans repli', () => {
     for (const scene of SCENES) {
       const sim = new Simulation(5, T, { kind: 'scene', sceneId: scene.id, startY: 0 });
-      const built = buildScene(scene.id, { anchor: 1, obstacle: 1, pickup: 1, ring: 1 }, { x: 0, y: 0 });
+      const built = buildScene(scene.id, { anchor: 1, obstacle: 1, pickup: 1, ring: 1, zone: 1 }, { x: 0, y: 0 });
       expect(sim.state.anchors.slice(0, built.anchors.length).map((a) => a.pos)).toEqual(built.anchors.map((a) => a.pos));
       expect(sim.state.anchors.length).toBeGreaterThan(built.anchors.length);
       expect(sim.state.course.unverified, scene.id).toBe(0);
