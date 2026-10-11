@@ -53,6 +53,16 @@ export const COLOR = {
   /** Obstacles (corniches, dalles) : remplissage sombre, contour néon rouge-magenta fin. */
   obstacle: 0x120b1c,
   obstacleEdge: 0xff3b6b,
+  /**
+   * Espèces d'obstacles du lot 2 (version 0.11.0), chacune sa teinte pour se reconnaître d'un coup d'œil, loin du rouge-magenta des
+   * obstacles solides et de toute couleur de prise : surface de rebond orchidée (contour double et ressort), paroi cassable braise
+   * (fissures qui s'allument quand on va assez vite), porte indigo (contour tireté ouvert, masse pleine fermée), anneau de précision
+   * vert vif. Aucune n'est ambiante : un test les garde loin de toutes les autres.
+   */
+  bounce: 0xc04dff,
+  smash: 0xff5a1f,
+  door: 0x7a5cff,
+  ring: 0x3cff66,
 
   /** Interface : textes blancs. */
   text: 0xf4f8ff,

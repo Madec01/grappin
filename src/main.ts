@@ -38,6 +38,7 @@ declare global {
       playLevel: (id: number) => boolean;
       /** Joue la course libre tout de suite, sans appui d'accroche. */
       playFree: () => void;
+      playScene: (id: string) => boolean;
       /** Les points d'accroche encore là, en mètres de monde : de quoi viser un trou dans un mur. Pour les tests de bout en bout et le banc de captures. */
       anchors: () => DebugAnchor[];
       /** La traction prouvée depuis le lanceur tenu (voir `sim/pilot.ts`), ou null : pour les pilotes de test. */
@@ -73,6 +74,7 @@ async function start(): Promise<void> {
     buttons: () => renderer.buttons(),
     playLevel: (id: number) => game.playLevel(id),
     playFree: () => game.playFree(),
+    playScene: (id: string) => game.playScene(id),
     anchors: () => game.anchors(),
     launchAim: () => game.launchAim(),
   };

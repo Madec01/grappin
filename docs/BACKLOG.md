@@ -42,14 +42,15 @@ Le brief complet du propriétaire (synthèse des échanges du 11 octobre 2026) e
 | Lanceur L1 ouverture décalée | 6 | fait (0.9.0) |
 | Lanceur L2 deux ouvertures (sûre / étroite étoilée) | 6 | fait (0.9.0) |
 | Lanceur L4 passage sous un plafond | 6 | à revoir : impossible tel quel, une prise s'attrape à toute vitesse ; demande une accroche qui dépende de la vitesse (décision du propriétaire), voir CHANGELOG 0.10.0 |
-| Lanceur L3 ouverture mobile, L5 tir avec rebond | 6 | à faire (lot 2, avec portes et surfaces de rebond) |
-| P1 Roue motorisée | 7 | à faire (lot 2) |
+| Lanceur L3 ouverture mobile, L5 tir avec rebond | 6 | à faire (0.13.0 ; les portes et les surfaces de rebond existent depuis 0.11.0, la scène « porte » en est déjà un premier L3 : un lanceur dont le trou du mur est une porte) |
+| P1 Roue motorisée | 7 | à faire (0.13.0) |
 | P2 Rail de lancement | 7 | à faire (lot 5) |
 | P3 Aimant de trajectoire | 7 | à faire (lot 5) |
 | P4 Lien élastique | 7 | prototype (lot 5) |
 | P5 Prise interrupteur | 7 | à faire (lot 5) |
-| Z1 Courant ascendant, Z2 courant latéral, Z3 couloir d'accélération, Z4 zone de freinage | 8 | à faire (lot 2) |
-| O1 Portes intermittentes, O2 obstacles tournants, O3 surfaces de rebond, O4 parois cassables, O5 anneaux de précision | 9 | à faire (lot 2) |
+| Z1 Courant ascendant, Z2 courant latéral, Z3 couloir d'accélération, Z4 zone de freinage | 8 | à faire (0.12.0) |
+| O1 Portes intermittentes, O3 surfaces de rebond, O4 parois cassables, O5 anneaux de précision | 9 | fait (0.11.0, avec une scène de démonstration chacune) ; à revoir sur ressenti : restitution du rebond, seuil de vitesse des parois, cycle des portes |
+| O2 Obstacles tournants | 9 | à faire (0.13.0) |
 | O6 Passage qui se referme | 9 | à faire (lot 5) |
 | H1 Puits de chute, H2 tunnel descendant, règles de la brume en descente | 10 | à faire (lot 5) |
 | D1 Duo alterné, D2 bille écho | 11 | prototype (lot 6) |
@@ -70,8 +71,8 @@ Le brief complet du propriétaire (synthèse des échanges du 11 octobre 2026) e
 | Intensité des pulsations réglable, indépendante de la musique | 17 | à faire (lot 4) |
 | Options pour téléphones modestes, validation mobile réelle | 17 | à faire (lot 4) ; les performances réelles restent à mesurer sur appareil |
 | Vérification à cheval sur deux segments (B-010) | 18 | à faire (avec le générateur du lot 3) |
-| Scènes déterministes de démonstration par mécanique | 18 | à faire (lot 2, avec chaque nouveauté) |
-| Robots à jour des nouvelles règles | 18 | fait pour le lanceur (0.9.0 : traction prouvée, temps de visée, `playRobot` traçable) ; à faire : éviter les prises électriques ou les lâcher avant la charge (le robot s'y fait décharger et retombe sur le mur du lanceur, niveau 14) |
+| Scènes déterministes de démonstration par mécanique | 18 | fait (0.11.0 : `?scene=`, une par nouveauté, prouvées par le vérificateur et jouées par le robot dans les tests) ; à poursuivre avec chaque nouveauté |
+| Robots à jour des nouvelles règles | 18 | fait pour le lanceur (0.9.0 : traction prouvée, temps de visée, `playRobot` traçable) ; à faire : éviter les prises électriques ou les lâcher avant la charge (le robot s'y fait décharger et retombe sur le mur du lanceur, niveau 14) ; attendre l'ouverture d'une porte avant de tirer (dans la scène « porte », il tire porte fermée et bute trois à cinq fois avant de passer) |
 
 Choses à ne pas présenter comme des nouveautés : génération infinie, mode niveaux, événements, trajectoire prédictive, talismans (existants) ; vibrations (écartées) ; morts instantanées sur obstacle (ne pas rétablir) ; filet permanent (non retenu).
 

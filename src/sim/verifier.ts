@@ -5,6 +5,7 @@ import { bestAnchor } from './aim';
 import { STILL, upOf, type Environment } from './environment';
 import { circleBoxGap } from './geometry';
 import type { Segment } from './generator';
+import { provableObstacles } from './obstacles';
 import { constrainVelocity, freeFlightAt, swingStep, type Body } from './physics';
 import { kickIfSlow } from './rules';
 import type { Anchor, Obstacle, RuleEvent } from './state';
@@ -26,7 +27,9 @@ import type { Tuning } from './tuning';
  * physiques d'un événement, gravité tournée ou vent, sont celles de la
  * vérification : un segment sous la bascule est prouvé avec la gravité de la
  * bascule. Un point sur câble est vérifié à sa position de départ, le milieu
- * du câble.
+ * du câble. Les obstacles se prouvent par `provableObstacles` : les portes ne
+ * comptent pas (on les attend ouvertes) ni les parois cassées, les surfaces de
+ * rebond et les parois cassables sont tenues pour solides.
  */
 
 const ENTRY_ROPE = 3;
@@ -96,7 +99,8 @@ function swingIsClear(anchor: Anchor, body: Body, anchors: readonly Anchor[], ob
  * en ligne de vue, et dont le balancement qui suit ne heurte aucun obstacle.
  * Le vol s'arrête au premier obstacle touché.
  */
-export function flightCatches(from: Anchor, body: Body, anchors: readonly Anchor[], obstacles: readonly Obstacle[], tuning: Tuning, env: Environment = STILL): number[] {
+export function flightCatches(from: Anchor, body: Body, anchors: readonly Anchor[], allObstacles: readonly Obstacle[], tuning: Tuning, env: Environment = STILL): number[] {
+  const obstacles = provableObstacles(allObstacles);
   const reach = tuning.ropeMax * tuning.verifyCatchRatio;
   // Les prises électriques et à éclipse ne comptent jamais comme sortie : le parcours se prouve sans elles.
   const catchable = anchors.filter((a) => !isOptional(a));
@@ -152,7 +156,8 @@ function holdAndRelease(
  * pour une fourche, chaque branche exigée est-elle atteignable avec un élan
  * typique ? Chaque décalage d'arrivée doit réussir.
  */
-export function canExit(from: Anchor, anchors: readonly Anchor[], obstacles: readonly Obstacle[], required: readonly number[] | null, tuning: Tuning, env: Environment = STILL): boolean {
+export function canExit(from: Anchor, anchors: readonly Anchor[], allObstacles: readonly Obstacle[], required: readonly number[] | null, tuning: Tuning, env: Environment = STILL): boolean {
+  const obstacles = provableObstacles(allObstacles);
   if (from.kind === 'lanceur') return launchExits(from, anchors, obstacles, required, tuning, env);
   for (const offset of ENTRY_OFFSETS) {
     const worst = entryState(from, offset, tuning.kickSpeed, anchors, tuning, env);

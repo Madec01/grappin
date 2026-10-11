@@ -67,14 +67,21 @@ Le héros, son nom, et le détail du décor restent à proposer au propriétaire
 
 - La brume qui monte.
 - Obstacles fixes : corniches accrochées aux bords et dalles flottantes. Les toucher est un choc, pas une mort (décision du propriétaire du 10 octobre 2026) : repoussé, rebond amorti, corde lâchée, série à zéro, étourdi 0,45 s ; on peut se poser sur le dessus d'une corniche. Passer à moins d'un demi-mètre sans toucher rapporte le bonus « Frôlé », une fois par obstacle et par corde.
-- Obstacles mobiles, introduits en phase 4.
+- Obstacles mobiles (bras tournants, ouverture tournante), à venir en 0.13.0.
+
+**Obstacles à comportement, lot 2 du brief, livrés en 0.11.0** (chacun avec sa scène de démonstration, `?scene=`) :
+- **Surface de rebond (O3).** Une dalle ou une corniche d'un autre habillage qui renvoie le personnage selon son angle d'arrivée, à 90 % de sa vitesse, presque sans frottement. La corde est lâchée s'il en tenait une, mais ni série perdue ni étourdissement : on rattrape un point dans la foulée. Une chute devient une remontée, un tir manqué se récupère ; utile autour des lanceurs et des passages indirects. Le vérificateur la tient pour solide : une route qui n'en dépend pas existe toujours. Dès le palier 1, et au niveau 12.
+- **Paroi cassable (O4).** Une paroi fissurée que l'on traverse si l'on arrive à 10 m/s au moins (`smashSpeed`, un bon balancement, un propulseur ou un lanceur y mènent) : elle vole en éclats, le personnage garde 80 % de sa vitesse et marque 25 points ; en dessous, un choc ordinaire. Le rendu allume les fissures quand la vitesse suffit : la condition se perçoit sans chiffre. Le vérificateur la tient pour solide : il y a toujours une autre route, la paroi est un raccourci qui donne une fonction à la vitesse. Dès le palier 3, et au niveau 17.
+- **Porte intermittente (O1).** Ouverte 3,6 s sur 6, elle prévient 0,8 s avant de se fermer, et chaque porte bat sur sa propre phase. Ouverte, son contour reste visible, on la traverse et on vise au travers ; fermée, elle repousse comme un solide. Elle ne se referme jamais sur le personnage : s'il est dedans au moment de la fermeture, elle reste franchissable pour lui jusqu'à ce qu'il en sorte. Le vérificateur prouve le parcours sans compter les portes : une porte peut se trouver sur le vol prouvé, et il faut choisir son moment, ou l'attendre en se balançant. Dès le palier 4, et au niveau 18. La scène « porte » est un lanceur dont le trou du mur est une porte : tirer quand elle est ouverte.
+- **Anneau de précision (O5).** Un cercle d'1,1 m de rayon au milieu d'un vol, un peu au-dessus de la ligne entre deux points. Rien de solide : le traverser rapporte 15 points à la sortie, et 40 avec un cran de série si le passage s'approche à 40 % du rayon du centre ; le passage se juge au plus près du centre, pas au premier contact. Un anneau raté ne coûte rien. Dès le palier 2, et au niveau 15.
 
 ## 8. Parcours [VALIDÉ]
 
 - Généré procéduralement par segments.
 - Génération vérifiée : avant d'afficher un segment, un robot le joue et vérifie qu'un instant de lâcher atteint l'accroche suivante avec de la marge. Aucun passage impossible.
 - Routes haute, risquée avec bonus, et basse, sûre, qui se rejoignent.
-- Difficulté croissante, une nouvelle contrainte à la fois, par paliers de 50 m : palier 0, points normaux espacés de 3 m ; palier 1, un obstacle par segment et la fourche haute-basse ; palier 2, accroches fragiles ; palier 3, un propulseur par segment ; ensuite l'espacement grandit jusqu'à 5 m et jusqu'à trois obstacles par segment.
+- Difficulté croissante, une nouvelle contrainte à la fois, par paliers de 50 m : palier 0, points normaux espacés de 3 m ; palier 1, un obstacle par segment, une surface de rebond et la fourche haute-basse ; palier 2, accroches fragiles et un anneau de précision ; palier 3, un propulseur et une paroi cassable par segment ; palier 4, une porte intermittente ; ensuite l'espacement grandit jusqu'à 5 m et jusqu'à trois obstacles par segment.
+- **Scènes de démonstration** (brief, section 18) : `?scene=rebond`, `cassable`, `porte`, `anneau`. La course libre commence par un segment construit à la main, le même à chaque fois, où la nouveauté se rencontre seule, avec son nom et une phrase en bannière ; puis la course libre continue. Les tests prouvent chaque scène par le vérificateur et y font grimper le robot.
 - Les premiers obstacles enseignent par la pratique comment le lâcher influence la trajectoire.
 - **Fourche.** À une fourche, la route basse est proche et sûre, la route haute plus lointaine, avec une étoile qui rapporte, puis les deux se rejoignent. Le joueur choisit par le moment du lâcher et par le moment du tap : le point visé change au fil du vol.
 - Paliers de hauteur nommés pour donner un sentiment d'étape. Noms pour la ville de nuit, validés le 9 octobre 2026 : Les toits, Les gouttières, Les enseignes, Les clochers, Les antennes, Les grues, Les nuages.
@@ -173,7 +180,7 @@ Valeurs de départ pour le prototype, à régler à la main sur téléphone. Ell
 | Portée du grappin | 7 m |
 | Élan minimal à l'accroche, sinon impulsion | 2 m/s tangentiels, impulsion à 3 m/s |
 | Coyote time | 120 ms |
-| Fenêtre du lâcher parfait | vitesse orientée entre 30° et 60° au-dessus de l'horizontale, dans le sens du mouvement |
+| Fenêtre du lâcher parfait | vitesse orientée entre 30° et 60° au-dessus de l'horizontale, dans le sens du mouvement, et d'au moins 7 m/s (`perfectMinSpeed` ; 3 m/s avant 0.11.0, retour du propriétaire : le parfait s'allumait avec le minimum d'élan, pas pour le meilleur lâcher) |
 | Multiplicateur | 1 + 0,25 × combo, plafonné à 5 |
 | Vitesse de la brume | Course libre : 0,8 m/s au départ, +0,1 m/s tous les 50 m depuis le toit de départ, plafonnée à 3 m/s. Niveau : la vitesse du niveau, constante, de 0,5 m/s au premier à 1,55 m/s au vingtième. Départ cinq mètres sous le toit. |
 | Pompage | vitesse plancher 4,5 m/s au point bas, 4 m/s² |

@@ -2,6 +2,32 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.11.0] — 2026-10-11 — Lot 2, première livraison : des obstacles qui font quelque chose
+
+Demande du propriétaire : « Go lot 2 ». Première livraison du lot 2 du brief : quatre obstacles à comportement, chacun avec sa scène de démonstration. Suivront les courants (0.12.0), puis la roue motorisée, l'obstacle tournant et les lanceurs à ouverture mobile et à rebond (0.13.0).
+
+### Ajouté
+
+- **Surfaces de rebond (O3).** Une dalle ou une corniche qui renvoie le personnage selon son angle d'arrivée, presque sans perte (90 % de la vitesse rendue), corde lâchée s'il en tenait une, mais ni série perdue ni étourdissement : on rattrape un point dans la foulée. Une chute devient une remontée, un tir manqué se récupère. Dès le palier 1 de la course libre, et au niveau 12.
+- **Parois cassables (O4).** Une paroi fissurée que l'on traverse en volant en éclats si l'on arrive à 10 m/s au moins (`smashSpeed`), en gardant 80 % de sa vitesse et en marquant 25 points ; en dessous, un choc ordinaire. Le vérificateur la tient pour solide : il y a toujours une autre route, la paroi est un raccourci qui donne une fonction à la vitesse. Dès le palier 3, et au niveau 17.
+- **Portes intermittentes (O1).** Un obstacle ouvert 3,6 s sur 6, qui prévient 0,8 s avant de se fermer, chaque porte sur sa phase. Ouverte, on la traverse et on vise au travers ; fermée, elle repousse comme un solide. Elle ne se referme jamais sur le personnage : s'il est dedans au moment de la fermeture, elle reste franchissable pour lui jusqu'à ce qu'il en sorte. Le vérificateur prouve le parcours sans compter les portes (on les attend ouvertes) : une porte peut donc se trouver sur le vol prouvé, et il faut choisir son moment. Dès le palier 4, et au niveau 18.
+- **Anneaux de précision (O5).** Un cercle d'1,1 m de rayon au milieu d'un vol, un peu au-dessus de la ligne entre deux points. Rien de solide : le traverser rapporte 15 points à la sortie, et 40 avec un cran de série si le passage s'approche à 40 % du rayon du centre. Un anneau raté ne coûte rien. Dès le palier 2, et au niveau 15.
+- **Scènes de démonstration.** `?scene=rebond`, `?scene=cassable`, `?scene=porte`, `?scene=anneau` : la course libre commence par un segment construit à la main, le même à chaque fois, où la nouveauté se rencontre seule, avec son nom et une phrase en bannière ; puis la course libre continue. Les tests prouvent chaque scène par le vérificateur et y font grimper le robot. `window.__grappin.playScene(id)` pour les tests et le banc de captures.
+- **Bruitages** du rebond, du fracas et de l'anneau (une quinte plus haut au centre).
+- **Habillages.** La surface de rebond se reconnaît à son double contour orchidée et à son ressort en zigzag ; la paroi cassable à ses fissures, qui s'allument quand on va assez vite pour la traverser ; la porte à son contour tireté pâle et à sa jauge qui se remplit quand elle est ouverte, à son contour qui clignote quand elle prévient, à sa masse indigo quand elle est fermée ; l'anneau à son cercle fin vert avec son cercle de centre, plus épais pendant la traversée, éteint une fois pris. Textes flottants « Rebond », « Fracas », « Anneau », « Au centre ! », et un éclat bref au personnage. Quatre couleurs nouvelles, loin des espèces de prises et des ambiances (test).
+- **Banc de captures** : une prise par scène (`npm run captures -- <dossier> 5 scenes` pour les scènes seules), dont la paroi éteinte et allumée et la porte dans ses trois états.
+
+### Modifié
+
+- **Un parfait demande un vrai élan.** Retour du propriétaire : « le parfait n'est pas du tout pour le meilleur lâcher, il nous est indiqué quand on a le minimum d'élan quasiment ». Le seuil de vitesse du lâcher parfait passe de 3 m/s (la vitesse de l'impulsion de départ, atteinte dès la première accroche) à 7 m/s (`perfectMinSpeed`) : la fenêtre de lâcher orange et le conseil « Lâche en montant ! » n'arrivent plus qu'avec un balancement qui a pris de l'élan, à la graine 7 depuis le sol après 1,8 s de tenue à 8 m/s, au lieu de 0,8 s à 6 m/s. L'angle ne change pas (entre 30° et 60°). Les robots, qui lâchent à 8 m/s, gardent leurs parfaits. Réglable à l'essai : `?perfectMinSpeed=6`.
+- Le générateur pose les espèces du lot 2 avant les obstacles ordinaires et avec plus d'essais ; les anneaux se posent entre deux points consécutifs, jamais autour d'un lanceur ni d'un point qui glisse ; les obstacles gardent leurs distances aux anneaux. Les niveaux 12, 15, 17 et 18 reçoivent chacun une nouveauté, annoncée dans leur phrase d'intro ; les autres niveaux ne changent pas.
+- La visée et la ligne de vue ne tiennent compte que des obstacles solides en ce moment : une porte ouverte laisse viser au travers.
+- Le test du parcours tolère la sortie d'un lanceur à dix mètres de lui (elle se tire par-dessus son mur).
+
+### Technique
+
+- `src/sim/obstacles.ts` (ce qu'un obstacle est en ce moment, pour le personnage et pour le vérificateur), `src/data/scenes.ts`, `CoursePlan` de genre `scene`, `Obstacle.kind` et `.broken`, `Ring`, `SimState.rings` et `.doorsInside`, événements `bounce`, `smash`, `ring`, réglages `smashSpeed`, `smashScore`, `ringScore`, `ringCentreScore`, profils `bouncers`, `breakables`, `doors`, `rings`, `debugState().rings`, `.smashed`, `.scene`.
+
 ## [0.10.0] — 2026-10-11 — Fin du lot 1 : apprendre en jouant
 
 Demande du propriétaire : « finis le lot 1 ». Restaient les aides visuelles et le tutoriel par l'action ; le lanceur sous plafond (L4) est reporté, voir plus bas.

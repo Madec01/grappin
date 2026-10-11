@@ -29,8 +29,9 @@ describe('parcours engendré', () => {
       const cur = anchors[i]!;
       expect(Math.abs(cur.pos.x)).toBeLessThanOrEqual(playableHalfWidth(MAX_SPREAD));
       expect(cur.pos.y).toBeGreaterThan(sim.state.fogY - 11);
-      // Chaque point reste proche du précédent ; seul le grand saut, lancé par un propulseur, dépasse un peu la portée.
-      expect(Math.hypot(cur.pos.x - prev.pos.x, cur.pos.y - prev.pos.y)).toBeLessThan(8);
+      // Chaque point reste proche du précédent ; seul le grand saut, lancé par un propulseur, dépasse un peu la portée,
+      // et la sortie d'un lanceur, par-dessus son mur, se tire : elle peut être à dix mètres.
+      expect(Math.hypot(cur.pos.x - prev.pos.x, cur.pos.y - prev.pos.y)).toBeLessThan(prev.kind === 'lanceur' ? 11 : 8);
     }
   });
 
@@ -82,7 +83,15 @@ describe('parcours engendré', () => {
   });
 
   it('introduit les contraintes une à la fois selon le palier', () => {
-    expect(tierProfile(0)).toEqual({ spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine', 'couloir'], spread: 1, electric: 0, eclipse: 0 });
+    expect(tierProfile(0)).toEqual({ spacing: 3, obstacles: 0, split: false, fragileChance: 0, boosters: 0, archetypes: ['chaine', 'couloir'], spread: 1, electric: 0, eclipse: 0, bouncers: 0, rings: 0, breakables: 0, doors: 0 });
+    // Lot 2 : une nouveauté par palier, rebond puis anneaux, parois cassables, portes.
+    expect(tierProfile(1).bouncers).toBe(1);
+    expect(tierProfile(1).rings).toBe(0);
+    expect(tierProfile(2).rings).toBe(1);
+    expect(tierProfile(2).breakables).toBe(0);
+    expect(tierProfile(3).breakables).toBe(1);
+    expect(tierProfile(3).doors).toBe(0);
+    expect(tierProfile(4).doors).toBe(1);
     expect(tierProfile(1).obstacles).toBe(1);
     expect(tierProfile(1).split).toBe(true);
     expect(tierProfile(1).fragileChance).toBe(0);
@@ -97,7 +106,8 @@ describe('parcours engendré', () => {
     const high = climbed(8, 200);
     expect(high.state.obstacles.length).toBeGreaterThan(0);
     expect(high.state.pickups.length).toBeGreaterThan(0);
-    expect(high.state.anchors.some((a) => a.kind === 'fragile')).toBe(true);
+    // Les fragiles arrivent au palier 2 : sur quelques graines, il y en a toujours au moins une en vue.
+    expect([8, 9, 10].some((seed) => climbed(seed, 200).state.anchors.some((a) => a.kind === 'fragile'))).toBe(true);
     expect(high.state.anchors.some((a) => a.kind === 'booster')).toBe(true);
   });
 
@@ -131,7 +141,7 @@ describe('robot vérificateur', () => {
 
   it('exige les deux branches d\'une fourche', () => {
     const rng = createRng(11);
-    const ids = { anchor: 1, obstacle: 1, pickup: 1 };
+    const ids = { anchor: 1, obstacle: 1, pickup: 1, ring: 1 };
     const origin = { x: 0, y: 0 };
     let segment = buildSegment(rng, ids, { x: 0, y: 60 }, origin, tierProfile(1), 'chaine');
     while (segment.junctionId === null) segment = buildSegment(rng, ids, { x: 0, y: 60 }, origin, tierProfile(1), 'chaine');

@@ -4,6 +4,7 @@ import { tierName } from '../data/tiers';
 import { STILL, isUpright, upOf, type Environment } from './environment';
 import { launchVelocity } from './launcher';
 import { circleBoxGap } from './geometry';
+import { isSolidNow, obstacleKind } from './obstacles';
 import { constrainVelocity } from './physics';
 import type { Anchor, RuleEvent, SimState, Obstacle } from './state';
 import type { Tuning } from './tuning';
@@ -228,23 +229,27 @@ export function applyCycles(state: SimState, tuning: Tuning, events: RuleEvent[]
   else if (anchor.kind === 'eclipse' && !isLit(anchor.id, state.step, tuning)) release(state, tuning, events, true);
 }
 
-/** Obstacles fixes : les toucher tue, les frôler rapporte une fois par obstacle et par corde. */
-/** Rebond sur un obstacle : part de la vitesse rendue dans la direction du choc, et part gardée le long de la surface. */
+/** Rebond sur un obstacle solide : part de la vitesse rendue dans la direction du choc, et part gardée le long de la surface. */
 export const BUMP_RESTITUTION = 0.35;
 export const BUMP_FRICTION = 0.6;
 /** Après un choc, on ne vise ni n'attrape rien pendant ce temps. */
 export const BUMP_STUN_SECONDS = 0.45;
 /** Sous cette vitesse de rebond, le personnage s'arrête contre l'obstacle : il peut s'y poser. */
 const BUMP_REST_SPEED = 0.8;
+/** Surface de rebond : presque toute la vitesse rendue, presque rien de perdu le long de la surface. */
+export const BOUNCE_RESTITUTION = 0.9;
+export const BOUNCE_FRICTION = 0.95;
+/** Part de la vitesse gardée en traversant une paroi cassable. */
+export const SMASH_KEEP = 0.8;
+/** Un anneau est traversé « au centre » si le passage s'approche à cette part de son rayon. */
+export const RING_CENTRE_RATIO = 0.4;
 
 /**
- * Choc contre un obstacle. Retour du propriétaire : mourir d'un coup était trop
- * fort. Le personnage est repoussé hors de la boîte, rebondit en perdant
- * l'essentiel de son élan, lâche sa corde, perd sa série de parfaits et reste
- * étourdi un instant ; sur le dessus d'une corniche, il peut se poser. La
- * brume reste le seul juge.
+ * Sort le personnage de la boîte qu'il touche, par le chemin le plus court, et
+ * rend la normale du contact (de la boîte vers lui). Partagé par le choc et le
+ * rebond.
  */
-function bump(state: SimState, box: Obstacle, tuning: Tuning, events: RuleEvent[]): void {
+function pushOut(state: SimState, box: Obstacle, tuning: Tuning): { x: number; y: number } {
   const { pos } = state.hero;
   // Le point de la boîte le plus proche du centre ; la normale va de ce point vers le personnage.
   const nearest = { x: Math.min(box.x1, Math.max(box.x0, pos.x)), y: Math.min(box.y1, Math.max(box.y0, pos.y)) };
@@ -263,12 +268,28 @@ function bump(state: SimState, box: Obstacle, tuning: Tuning, events: RuleEvent[
   }
   const depth = tuning.heroRadius - len;
   state.hero.pos = { x: pos.x + n.x * (depth + 1e-3), y: pos.y + n.y * (depth + 1e-3) };
-  if (state.rope) release(state, tuning, events, true);
-  const { vel } = state.hero;
+  return n;
+}
+
+/** La vitesse après un contact de normale `n` : la part vers la surface rendue à `restitution`, la part le long gardée à `friction`. */
+function reflected(vel: Vec2, n: Vec2, restitution: number, friction: number): Vec2 {
   const along = vel.x * n.x + vel.y * n.y;
   const tangent = { x: vel.x - along * n.x, y: vel.y - along * n.y };
-  const bounced = along < 0 ? -along * BUMP_RESTITUTION : Math.max(0, along);
-  let next = { x: tangent.x * BUMP_FRICTION + n.x * bounced, y: tangent.y * BUMP_FRICTION + n.y * bounced };
+  const bounced = along < 0 ? -along * restitution : Math.max(0, along);
+  return { x: tangent.x * friction + n.x * bounced, y: tangent.y * friction + n.y * bounced };
+}
+
+/**
+ * Choc contre un obstacle solide. Retour du propriétaire : mourir d'un coup
+ * était trop fort. Le personnage est repoussé hors de la boîte, rebondit en
+ * perdant l'essentiel de son élan, lâche sa corde, perd sa série de parfaits
+ * et reste étourdi un instant ; sur le dessus d'une corniche, il peut se
+ * poser. La brume reste le seul juge.
+ */
+function bump(state: SimState, box: Obstacle, tuning: Tuning, events: RuleEvent[]): void {
+  const n = pushOut(state, box, tuning);
+  if (state.rope) release(state, tuning, events, true);
+  let next = reflected(state.hero.vel, n, BUMP_RESTITUTION, BUMP_FRICTION);
   if (Math.hypot(next.x, next.y) < BUMP_REST_SPEED) next = { x: 0, y: 0 };
   state.hero.vel = { x: next.x || 0, y: next.y || 0 };
   state.combo = 0;
@@ -276,12 +297,60 @@ function bump(state: SimState, box: Obstacle, tuning: Tuning, events: RuleEvent[
   events.push({ type: 'bump', obstacleId: box.id });
 }
 
+/**
+ * Surface de rebond (brief, O3) : le personnage est renvoyé selon son angle
+ * d'arrivée, presque sans perte, la corde lâchée s'il en tenait une ; ni
+ * série perdue, ni étourdi : on peut rattraper un point dans la foulée. Une
+ * chute devient une remontée, un tir manqué se récupère.
+ */
+function bounce(state: SimState, box: Obstacle, tuning: Tuning, events: RuleEvent[]): void {
+  const n = pushOut(state, box, tuning);
+  if (state.rope) release(state, tuning, events, true);
+  const next = reflected(state.hero.vel, n, BOUNCE_RESTITUTION, BOUNCE_FRICTION);
+  state.hero.vel = { x: next.x || 0, y: next.y || 0 };
+  events.push({ type: 'bounce', obstacleId: box.id });
+}
+
+/** Paroi cassable (brief, O4) traversée assez vite : elle vole en éclats, le personnage garde l'essentiel de sa vitesse et marque. */
+function smash(state: SimState, box: Obstacle, tuning: Tuning, events: RuleEvent[]): void {
+  box.broken = true;
+  state.hero.vel = scale(state.hero.vel, SMASH_KEEP);
+  state.score += tuning.smashScore * multiplier(state.combo, tuning);
+  events.push({ type: 'smash', obstacleId: box.id });
+}
+
+/** Vrai si le personnage va assez vite pour traverser une paroi cassable en ce moment. */
+export function canSmash(state: Pick<SimState, 'hero'>, tuning: Tuning): boolean {
+  return length(state.hero.vel) >= tuning.smashSpeed;
+}
+
+/**
+ * Obstacles : les frôler rapporte une fois par obstacle et par corde ; les
+ * toucher dépend de l'espèce (solide, rebond, cassable, porte). Une porte
+ * ouverte se traverse ; une porte qui se ferme pendant que le personnage est
+ * dedans reste franchissable pour lui jusqu'à ce qu'il en sorte (brief : « pas
+ * d'apparition solide imprévisible directement sur la bille »).
+ */
 export function applyObstacles(state: SimState, tuning: Tuning, events: RuleEvent[]): void {
   if (state.status !== 'alive') return;
   for (const box of state.obstacles) {
+    if (box.broken) continue;
+    const kind = obstacleKind(box);
     const gap = circleBoxGap(state.hero.pos, tuning.heroRadius, box);
+    if (kind === 'porte') {
+      const inside = state.doorsInside.includes(box.id);
+      if (gap > 0) {
+        if (inside) state.doorsInside = state.doorsInside.filter((id) => id !== box.id);
+        continue;
+      }
+      if (isSolidNow(box, state.step, tuning, state.doorsInside)) bump(state, box, tuning, events);
+      else if (!inside) state.doorsInside.push(box.id);
+      continue;
+    }
     if (gap <= 0) {
-      bump(state, box, tuning, events);
+      if (kind === 'rebond') bounce(state, box, tuning, events);
+      else if (kind === 'cassable' && canSmash(state, tuning)) smash(state, box, tuning, events);
+      else bump(state, box, tuning, events);
       continue;
     }
     if (gap <= tuning.grazeDistance && !state.grazed.includes(box.id)) {
@@ -289,6 +358,30 @@ export function applyObstacles(state: SimState, tuning: Tuning, events: RuleEven
       state.score += tuning.grazeScore * multiplier(state.combo, tuning);
       events.push({ type: 'graze', obstacleId: box.id });
     }
+  }
+}
+
+/**
+ * Anneaux de précision (brief, O5) : traverser le disque d'un anneau rapporte
+ * quand on en ressort, selon le passage le plus proche du centre ; au centre,
+ * davantage et un cran de série. Un anneau raté ne coûte rien.
+ */
+export function applyRings(state: SimState, tuning: Tuning, events: RuleEvent[]): void {
+  if (state.status !== 'alive') return;
+  for (const ring of state.rings) {
+    if (ring.taken) continue;
+    const d = distance(ring.pos, state.hero.pos);
+    if (d <= ring.radius) {
+      ring.closest = ring.closest === null || d < ring.closest ? d : ring.closest;
+      continue;
+    }
+    if (ring.closest === null) continue;
+    const centred = ring.closest <= ring.radius * RING_CENTRE_RATIO;
+    ring.taken = true;
+    ring.closest = null;
+    if (centred) state.combo += 1;
+    state.score += (centred ? tuning.ringCentreScore : tuning.ringScore) * multiplier(state.combo, tuning);
+    events.push({ type: 'ring', ringId: ring.id, centred });
   }
 }
 

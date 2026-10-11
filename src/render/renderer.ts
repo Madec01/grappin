@@ -4,19 +4,21 @@ import type { Vec2 } from '../core/math/vec2';
 import type { LevelOutcome, Profile, RunOutcome } from '../meta/profile';
 import type { LevelResult } from '../meta/traversee';
 import { PULL_MAX } from '../sim/launcher';
-import { WORLD_HALF_WIDTH, multiplier } from '../sim/rules';
-import type { Anchor, AnchorKind, RuleEvent, SimState } from '../sim/state';
+import { obstacleKind } from '../sim/obstacles';
+import { RING_CENTRE_RATIO, WORLD_HALF_WIDTH, canSmash, multiplier } from '../sim/rules';
+import type { Anchor, AnchorKind, Obstacle, RuleEvent, SimState } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
 import { pauseRect, type ButtonId, type ButtonRect } from './buttons';
 import type { Camera, ViewBounds } from './camera';
 import { bandsInView, cityBand } from './city';
 import { electricState, type ElectricState } from '../sim/cycles';
 import { fragileGauge, heldKind, inReleaseWindow, isDark, isOff, shadowPoints } from './cues';
-import { alertAlpha, bannerAlpha, flicker, floatAlpha, floatRise, pulse, sizzle, type Banner, type Effects } from './effects';
+import { alertAlpha, bannerAlpha, flashAlpha, flashRadius, flicker, floatAlpha, floatRise, pulse, sizzle, type Banner, type Effects, type Flash } from './effects';
 import { formatDecimal } from './format';
 import { neonCircle, neonDiscs, neonFill, neonLine, neonRects, neonStroke, type NeonStrokeStyle } from './neon';
 import { ambientHalo, cityLots, fogSheetAlpha, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow, type HaloBoost } from './pulse';
 import { Screens, type OverlayView } from './screens';
+import { SKIN, crackPattern, doorLook, ringPhase, springTeeth, type Crack, type DoorLook } from './skins';
 import { bandWidth, cupRadius, cupTips, mixColor, pullRatio, traceCup } from './sling';
 import { COLOR, GlowText, PALETTES, makeText, readSafeInset, starPoints, type Palette } from './style';
 
@@ -44,6 +46,14 @@ import { COLOR, GlowText, PALETTES, makeText, readSafeInset, starPoints, type Pa
  * et des teintes, jamais une forme, une taille ni une position, ni la couleur
  * d'une espèce de prise ; au silence, chaque facteur vaut 1 et chaque ajout 0,
  * et le rendu est celui d'avant.
+ *
+ * Les obstacles à comportement du lot 2 gardent la masse sombre des obstacles solides, chacun dans sa teinte et avec son signe, pour se
+ * reconnaître d'un coup d'œil : la surface de rebond (contour double et ressort, orchidée), la paroi cassable (fissures, braise, qui
+ * s'allume quand le personnage va assez vite pour la traverser), la porte (contour tireté ouvert, jauge qui se remplit, clignotement
+ * avant la fermeture, masse pleine fermée, indigo). L'anneau de précision est un cercle fin vert vif, son centre marqué. Tout ce qui
+ * s'anime se lit du pas de simulation (cycle d'une porte), de l'état (vitesse, traversée en cours) ou du numéro de l'obstacle
+ * (fissures) : jamais de l'horloge de l'écran, pour que chaque capture soit reproductible. Les obstacles solides, eux, sont dessinés
+ * exactement comme avant. Un rebond, un fracas ou un anneau laisse aussi un éclat bref au personnage (voir `effects.ts`).
  *
  * Deux aides du tutoriel se dessinent ici, discrètement. La fenêtre de lâcher
  * (`inReleaseWindow`) : tant que lâcher serait parfait, la corde et le halo du
@@ -203,6 +213,78 @@ const FINISH_DASH = 14;
 const FINISH_GAP = 10;
 const FINISH_FONT_SIZE = 14;
 
+/**
+ * Obstacles à comportement (lot 2). Tous gardent la masse sombre et le contour néon des obstacles solides, chacun dans sa teinte (voir
+ * `COLOR.bounce`, `smash`, `door`) et avec son signe propre. Épaisseurs en pixels CSS, opacités de 0 à 1, intensités de halo relatives
+ * à celle du cerne des obstacles (`this.rim`).
+ *
+ * Surface de rebond : un second contour, plus fin, à l'intérieur du premier, et un ressort en zigzag au milieu. En dessous de
+ * `BOUNCE_MIN_THICKNESS` pixels d'épaisseur (très dézoomé), elle n'a plus la place que du contour simple et du ressort.
+ */
+const BOUNCE_INNER_WIDTH = 1;
+const BOUNCE_INNER_ALPHA = 0.55;
+const BOUNCE_INSET_RATIO = 0.22;
+const BOUNCE_INSET_MIN = 2;
+const BOUNCE_INSET_MAX = 3.5;
+const BOUNCE_MIN_THICKNESS = 8;
+const SPRING_WIDTH = 1.5;
+/** Le ressort laisse cet espace aux contours et aux extrémités, en pixels ; en dessous de cette amplitude il n'est plus dessiné. */
+const SPRING_MARGIN = 1.5;
+const SPRING_MIN_AMPLITUDE = 1.2;
+/** Paroi cassable : le contour et les fissures d'une braise qui couve (trop lent : solide), puis allumés (assez vite pour la traverser). */
+const SMASH_DIM_ALPHA = 0.7;
+const SMASH_DIM_HALO = 0.35;
+const SMASH_LIT_HALO = 1.1;
+const CRACK_DIM_WIDTH = 1.5;
+const CRACK_DIM_ALPHA = 0.85;
+const CRACK_HOT_WIDTH = 2;
+const CRACK_HOT_HALO = 0.7;
+/** On garde en mémoire le motif de fissures de tant de parois à la fois ; au-delà, on les recalcule (il ne coûte qu'un bruit déterministe). */
+const CRACK_CACHE_MAX = 64;
+/** Porte : tirets du contour ouvert, opacité de ce contour, de la part remplie (la jauge) et de la masse fantôme d'une porte qui laisse passer. */
+const DOOR_DASH = 7;
+const DOOR_GAP = 5;
+const DOOR_OPEN_ALPHA = 0.8;
+const DOOR_DASH_WIDTH = 2;
+/** Le contour tireté n'a pas de halo (celui de chaque tiret se confondrait en une herse de lueurs) ; le trait de front de la jauge, un peu. */
+const DOOR_OPEN_HALO = 0.3;
+const DOOR_FILL_ALPHA = 0.3;
+const DOOR_FRONT_WIDTH = 2;
+const DOOR_GHOST_ALPHA = 0.15;
+/** Porte fermée : la jauge d'ouverture est une barre claire, en retrait de ce nombre de pixels du contour, et son opacité. */
+const DOOR_BAR_INSET = 3;
+const DOOR_BAR_ALPHA = 0.5;
+/** Porte qui avertit : le clignotement fait varier ces grandeurs (plancher et plafond) du contour, de son halo et de la masse. */
+const DOOR_WARN_ALPHA_MIN = 0.55;
+const DOOR_WARN_HALO_MIN = 0.5;
+const DOOR_WARN_HALO_MAX = 1.8;
+const DOOR_WARN_FILL_MIN = 0.25;
+const DOOR_WARN_FILL_MAX = 0.5;
+
+/**
+ * Anneau de précision : un cercle fin au rayon de l'anneau, et à l'intérieur le cercle du centre (`RING_CENTRE_RATIO`) qui dit où
+ * viser, avec un point au milieu. Plus fin et plus grand que l'anneau de visée, d'une autre teinte. Traversé, il s'éclaire (le
+ * centre aussi si le passage est près du centre), puis ne laisse que la trace d'un néon coupé.
+ */
+const RING_WIDTH = 2;
+const RING_ACTIVE_WIDTH = 3;
+const RING_INNER_WIDTH = 1.25;
+const RING_INNER_ALPHA = 0.6;
+const RING_DOT_RADIUS = 2.2;
+const RING_HALO = 0.8;
+const RING_ACTIVE_HALO = 1.8;
+const RING_TRACE_WIDTH = 1.5;
+
+/**
+ * Éclats (rebond, fracas, anneau) : cercle qui s'élargit en s'effaçant à l'endroit du personnage. Épaisseur du trait, halo, et pour un fracas
+ * les huit éclats qui partent en étoile, de quelle part du rayon et sur quelle longueur.
+ */
+const FLASH_WIDTH = 2.5;
+const FLASH_HALO = 1.2;
+const FLASH_SHARDS = 8;
+const FLASH_SHARD_START = 0.55;
+const FLASH_CENTRE_RATIO = 0.6;
+
 /** Ombre prédictive : rayon d'un point en pixels, opacité. */
 const SHADOW_DOT_RADIUS = 1.8;
 const SHADOW_ALPHA = 0.55;
@@ -327,6 +409,30 @@ interface Spot {
   readonly y: number;
 }
 
+/** Un obstacle visible, en pixels de l'écran (coin haut gauche), avec l'obstacle de la simulation dont il vient. Réutilisé d'une image à l'autre. */
+interface ScreenBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  source: Obstacle;
+}
+
+/** Les obstacles visibles rangés par espèce, pour dessiner chaque espèce d'un seul lot. Réutilisé d'une image à l'autre. */
+interface ObstacleLots {
+  readonly solid: ScreenBox[];
+  readonly bounce: ScreenBox[];
+  readonly smash: ScreenBox[];
+  readonly door: ScreenBox[];
+}
+
+/** Un anneau de précision visible : son centre et son rayon, en pixels. */
+interface RingSpot {
+  x: number;
+  y: number;
+  radius: number;
+}
+
 /** Les accroches allumées, rangées par ce qu'elles sont : une prise électrique se range d'après son cycle. */
 interface LitGroups {
   readonly normal: Spot[];
@@ -402,6 +508,7 @@ export class Renderer {
   private readonly altitudeLabelLayer = new Container();
   private readonly windStreaks = new Graphics();
   private readonly finishLine = new Graphics();
+  private readonly rings = new Graphics();
   private readonly obstacles = new Graphics();
   private readonly pickups = new Graphics();
   private readonly roof = new Graphics();
@@ -414,6 +521,7 @@ export class Renderer {
   private readonly hero = new Graphics();
 
   // Par-dessus le décor, à l'écran.
+  private readonly flashLayer = new Graphics();
   private readonly floatLayer = new Container();
 
   private readonly altitudeLabels: Text[] = [];
@@ -466,6 +574,14 @@ export class Renderer {
   private litTarget: number | null = null;
   private litSince = 0;
 
+  /** Réservoirs des obstacles et des anneaux visibles, vidés et remplis à chaque image : pas d'allocation par image une fois chauffés. */
+  private readonly boxPool: ScreenBox[] = [];
+  private readonly obstacleLots: ObstacleLots = { solid: [], bounce: [], smash: [], door: [] };
+  private readonly ringPool: RingSpot[] = [];
+  private readonly ringLots: Record<'libre' | 'traverse' | 'centre' | 'prise', RingSpot[]> = { libre: [], traverse: [], centre: [], prise: [] };
+  /** Motif de fissures de chaque paroi cassable rencontrée, par numéro d'obstacle. */
+  private readonly crackCache = new Map<number, Crack[]>();
+
   private constructor(app: Application) {
     this.app = app;
 
@@ -490,6 +606,7 @@ export class Renderer {
       this.windStreaks,
       this.finishLine,
       this.finishLabel,
+      this.rings,
       this.obstacles,
       this.pickups,
       this.roof,
@@ -503,6 +620,7 @@ export class Renderer {
     );
     app.stage.addChild(
       this.world,
+      this.flashLayer,
       this.floatLayer,
       this.hud,
       this.bannerText,
@@ -572,7 +690,8 @@ export class Renderer {
     this.drawAltitude(state, camera, view);
     this.drawWind(effects, state.env.wind.x, view);
     this.drawFinish(state, camera, view);
-    this.drawObstacles(state, camera, view);
+    this.drawRings(state, camera, view);
+    this.drawObstacles(state, camera, view, tuning);
     this.drawPickups(state, camera, view, tuning, effects);
     this.drawRoof(state, camera);
     this.drawCables(state, camera);
@@ -584,6 +703,7 @@ export class Renderer {
     this.drawFog(state, camera, view, effects);
     this.drawShadow(state, camera, tuning, ready);
     this.drawHero(state, camera, tuning, ready);
+    this.drawFlashes(effects);
     this.drawFloatingTexts(effects);
     this.drawHud(state, frame, tuning);
     this.drawBanner(effects);
@@ -797,24 +917,296 @@ export class Renderer {
     return label;
   }
 
-  /** Obstacles : une masse sombre au contour néon rouge-magenta fin, sous les points et la corde. Un danger se lit comme tel, au rythme près : le pouls n'en change que l'intensité du halo. */
-  private drawObstacles(state: SimState, camera: Camera, view: ViewBounds): void {
+  /**
+   * Obstacles : une masse sombre au contour néon fin, sous les points et la corde. Un solide a le contour rouge-magenta : un danger se
+   * lit comme tel, au rythme près (le pouls n'en change que l'intensité du halo). Les trois autres espèces (rebond, cassable, porte) gardent la masse
+   * sombre, chacune dans sa teinte et avec son signe, dessinés dans cet ordre par-dessus les solides. Une paroi cassable déjà traversée n'est plus dessinée.
+   */
+  private drawObstacles(state: SimState, camera: Camera, view: ViewBounds, tuning: Tuning): void {
     const g = this.obstacles.clear();
     const scale = camera.scale;
-    const boxes = state.obstacles
-      .map((box) => {
-        const topLeft = camera.worldToScreen({ x: box.x0, y: box.y1 });
-        return { x: topLeft.x, y: topLeft.y, width: (box.x1 - box.x0) * scale, height: (box.y1 - box.y0) * scale };
-      })
+    const lots = this.obstacleLots;
+    lots.solid.length = 0;
+    lots.bounce.length = 0;
+    lots.smash.length = 0;
+    lots.door.length = 0;
+    let slot = 0;
+    for (const box of state.obstacles) {
+      if (box.broken) continue;
+      const topLeft = camera.worldToScreen({ x: box.x0, y: box.y1 });
+      const width = (box.x1 - box.x0) * scale;
+      const height = (box.y1 - box.y0) * scale;
       // Hors de la vue, ni le tracé ni son halo ne servent : on ne dessine que ce que l'écran peut montrer.
-      .filter((box) => box.x + box.width >= view.left - CULL_MARGIN && box.x <= view.right + CULL_MARGIN && box.y + box.height >= view.top - CULL_MARGIN && box.y <= view.bottom + CULL_MARGIN);
+      if (topLeft.x + width < view.left - CULL_MARGIN || topLeft.x > view.right + CULL_MARGIN || topLeft.y + height < view.top - CULL_MARGIN || topLeft.y > view.bottom + CULL_MARGIN) continue;
+      const item = this.screenBox(slot, box, topLeft.x, topLeft.y, width, height);
+      slot += 1;
+      const kind = obstacleKind(box);
+      (kind === 'rebond' ? lots.bounce : kind === 'cassable' ? lots.smash : kind === 'porte' ? lots.door : lots.solid).push(item);
+    }
+    if (slot === 0) return;
+    this.paintSolids(g, lots.solid);
+    this.paintBounces(g, lots.bounce);
+    this.paintSmashables(g, lots.smash, canSmash(state, tuning));
+    this.paintDoors(g, lots.door, state, tuning);
+  }
+
+  /** Le `slot`-ième obstacle visible de l'image, tiré du réservoir (il grandit seulement si plus d'obstacles sont à l'écran en même temps). */
+  private screenBox(slot: number, source: Obstacle, x: number, y: number, width: number, height: number): ScreenBox {
+    const item = this.boxPool[slot];
+    if (!item) {
+      const created = { x, y, width, height, source };
+      this.boxPool[slot] = created;
+      return created;
+    }
+    item.x = x;
+    item.y = y;
+    item.width = width;
+    item.height = height;
+    item.source = source;
+    return item;
+  }
+
+  /** Obstacles solides : le halo d'abord, puis le corps sombre par-dessus (il ne reste du halo que ce qui déborde), puis le contour net. Le cerne bat avec les graves : son intensité seulement. */
+  private paintSolids(g: Graphics, boxes: readonly ScreenBox[]): void {
     if (boxes.length === 0) return;
-    // Le halo d'abord, puis le corps sombre par-dessus (il ne reste du halo que ce qui déborde), puis le contour net. Le cerne bat avec les graves : son intensité seulement.
     const tube = { color: COLOR.obstacleEdge, halo: COLOR.obstacleEdge, width: OBSTACLE_EDGE_WIDTH, strength: this.rim };
     neonRects(g, boxes, { ...tube, pass: 'halo' });
     for (const box of boxes) g.rect(box.x, box.y, box.width, box.height);
     g.fill(COLOR.obstacle);
     neonRects(g, boxes, { ...tube, pass: 'core' });
+  }
+
+  /**
+   * Surfaces de rebond : un second contour fin à l'intérieur du premier, orchidée, et au milieu un ressort en zigzag le long de la
+   * plus grande dimension. Aucun obstacle solide n'a ni l'un ni l'autre : la surface se reconnaît même de loin, même sans la couleur.
+   */
+  private paintBounces(g: Graphics, boxes: readonly ScreenBox[]): void {
+    if (boxes.length === 0) return;
+    const tube = { color: COLOR.bounce, halo: COLOR.bounce, width: OBSTACLE_EDGE_WIDTH, strength: this.rim };
+    neonRects(g, boxes, { ...tube, pass: 'halo' });
+    for (const box of boxes) g.rect(box.x, box.y, box.width, box.height);
+    g.fill(SKIN.bounceBody);
+    neonRects(g, boxes, { ...tube, pass: 'core' });
+    // Le second contour, en retrait ; trop mince, il n'y a plus la place.
+    let inner = false;
+    for (const box of boxes) {
+      const thickness = Math.min(box.width, box.height);
+      if (thickness < BOUNCE_MIN_THICKNESS) continue;
+      const inset = clamp(thickness * BOUNCE_INSET_RATIO, BOUNCE_INSET_MIN, BOUNCE_INSET_MAX);
+      g.rect(box.x + inset, box.y + inset, box.width - 2 * inset, box.height - 2 * inset);
+      inner = true;
+    }
+    if (inner) g.stroke({ width: BOUNCE_INNER_WIDTH, color: COLOR.bounce, alpha: BOUNCE_INNER_ALPHA });
+    neonStroke(
+      g,
+      (target) => {
+        for (const box of boxes) this.traceSpring(target, box);
+      },
+      { color: COLOR.bounce, halo: COLOR.bounce, width: SPRING_WIDTH, spread: MARK_SPREAD, strength: this.species, cap: 'round', join: 'round' },
+    );
+  }
+
+  /** Ajoute au tracé le ressort de la surface : un zigzag au milieu de son épaisseur, d'un bout à l'autre de sa longueur, ou rien si elle est trop mince. */
+  private traceSpring(g: Graphics, box: ScreenBox): void {
+    const horizontal = box.width >= box.height;
+    const thickness = horizontal ? box.height : box.width;
+    const length = horizontal ? box.width : box.height;
+    const inset = clamp(thickness * BOUNCE_INSET_RATIO, BOUNCE_INSET_MIN, BOUNCE_INSET_MAX);
+    const amplitude = thickness / 2 - inset - SPRING_MARGIN;
+    if (amplitude < SPRING_MIN_AMPLITUDE) return;
+    const margin = inset + SPRING_MARGIN;
+    const teeth = springTeeth(length - 2 * margin);
+    const centre = thickness / 2;
+    for (let i = 0; i <= teeth; i += 1) {
+      // Les deux bouts sont au milieu de l'épaisseur ; entre eux, le zigzag alterne un côté puis l'autre.
+      const across = centre + (i === 0 || i === teeth ? 0 : i % 2 === 0 ? amplitude : -amplitude);
+      const along = margin + ((length - 2 * margin) * i) / teeth;
+      const px = horizontal ? box.x + along : box.x + across;
+      const py = horizontal ? box.y + across : box.y + along;
+      if (i === 0) g.moveTo(px, py);
+      else g.lineTo(px, py);
+    }
+  }
+
+  /**
+   * Parois cassables : le corps sombre fissuré. Trop lent (`lit` faux), la paroi est un solide qui couve : contour braise atténué, fissures
+   * éteintes. Assez vite pour la traverser (`lit` vrai), tout s'allume d'un cran : le contour et les fissures rougissent à blanc,
+   * leur halo se gonfle, le corps se réchauffe. Le joueur sent sa vitesse sans chiffre : la paroi dit « tu peux ».
+   */
+  private paintSmashables(g: Graphics, boxes: readonly ScreenBox[], lit: boolean): void {
+    if (boxes.length === 0) return;
+    const tube = { color: COLOR.smash, halo: COLOR.smash, width: OBSTACLE_EDGE_WIDTH, alpha: lit ? 1 : SMASH_DIM_ALPHA, strength: this.rim * (lit ? SMASH_LIT_HALO : SMASH_DIM_HALO) };
+    neonRects(g, boxes, { ...tube, pass: 'halo' });
+    for (const box of boxes) g.rect(box.x, box.y, box.width, box.height);
+    g.fill(lit ? SKIN.smashBodyLit : SKIN.smashBody);
+    neonRects(g, boxes, { ...tube, pass: 'core' });
+    neonStroke(
+      g,
+      (target) => {
+        for (const box of boxes) {
+          for (const crack of this.cracksOf(box.source)) this.traceCrack(target, box, crack);
+        }
+      },
+      lit
+        ? { color: SKIN.crackHot, halo: COLOR.smash, width: CRACK_HOT_WIDTH, strength: this.rim * CRACK_HOT_HALO, cap: 'round', join: 'round' }
+        : { color: SKIN.crackDim, halo: COLOR.smash, width: CRACK_DIM_WIDTH, alpha: CRACK_DIM_ALPHA, strength: 0, cap: 'round', join: 'round' },
+    );
+  }
+
+  /** Le motif de fissures de la paroi : calculé une fois par paroi (il ne dépend que de son numéro et de sa longueur). */
+  private cracksOf(box: Obstacle): Crack[] {
+    let cracks = this.crackCache.get(box.id);
+    if (!cracks) {
+      if (this.crackCache.size >= CRACK_CACHE_MAX) this.crackCache.clear();
+      cracks = crackPattern(box.id, Math.max(box.x1 - box.x0, box.y1 - box.y0));
+      this.crackCache.set(box.id, cracks);
+    }
+    return cracks;
+  }
+
+  /** Ajoute au tracé une fissure (en fractions de la paroi : `u` le long de sa plus grande dimension, `v` en travers) posée sur le rectangle à l'écran. */
+  private traceCrack(g: Graphics, box: ScreenBox, crack: Crack): void {
+    const horizontal = box.width >= box.height;
+    for (let i = 0; i + 1 < crack.length; i += 2) {
+      const u = crack[i]!;
+      const v = crack[i + 1]!;
+      const px = horizontal ? box.x + u * box.width : box.x + v * box.width;
+      const py = horizontal ? box.y + v * box.height : box.y + u * box.height;
+      if (i === 0) g.moveTo(px, py);
+      else g.lineTo(px, py);
+    }
+  }
+
+  /**
+   * Portes. Le contour reste visible à tout moment du cycle, pour que la porte se retrouve même ouverte. Ouverte : contour tireté
+   * pâle, pas de masse, et une jauge, la part déjà écoulée de l'ouverture, qui remplit la porte (de gauche à droite, ou de bas en haut
+   * d'une porte debout) jusqu'à un trait de front. Elle avertit : le contour devient franc et clignote, la masse est presque pleine.
+   * Fermée : masse pleine comme un solide, dans sa teinte de porte, et une barre claire qui se remplit jusqu'à l'ouverture. Fermée sur
+   * le personnage qu'elle a surpris dedans : masse fantôme, il en sort. Tout se lit du pas de simulation.
+   */
+  private paintDoors(g: Graphics, boxes: readonly ScreenBox[], state: SimState, tuning: Tuning): void {
+    for (const box of boxes) this.paintDoor(g, box, doorLook(box.source, state, tuning));
+  }
+
+  private paintDoor(g: Graphics, box: ScreenBox, look: DoorLook): void {
+    const { x, y, width, height } = box;
+    const horizontal = width >= height;
+    // La part remplie d'une jauge de 0 à 1 : depuis la gauche d'une porte couchée, depuis le bas d'une porte debout.
+    const fill = (inset: number): { x: number; y: number; width: number; height: number } =>
+      horizontal
+        ? { x: x + inset, y: y + inset, width: (width - 2 * inset) * look.gauge, height: height - 2 * inset }
+        : { x: x + inset, y: y + inset + (height - 2 * inset) * (1 - look.gauge), width: width - 2 * inset, height: (height - 2 * inset) * look.gauge };
+    const edge = { color: COLOR.door, halo: COLOR.door, width: OBSTACLE_EDGE_WIDTH };
+    const alone = [box];
+    switch (look.phase) {
+      case 'ouverte': {
+        const part = fill(0);
+        g.rect(part.x, part.y, part.width, part.height).fill({ color: COLOR.door, alpha: DOOR_FILL_ALPHA });
+        // Le trait de front de la jauge : la limite de la part remplie.
+        const front = horizontal ? { from: { x: part.x + part.width, y }, to: { x: part.x + part.width, y: y + height } } : { from: { x, y: part.y }, to: { x: x + width, y: part.y } };
+        neonLine(g, front.from, front.to, { ...edge, width: DOOR_FRONT_WIDTH, strength: DOOR_OPEN_HALO * this.rim });
+        neonStroke(
+          g,
+          (target) => {
+            dashedLine(target, { x, y }, { x: x + width, y }, DOOR_DASH, DOOR_GAP);
+            dashedLine(target, { x: x + width, y }, { x: x + width, y: y + height }, DOOR_DASH, DOOR_GAP);
+            dashedLine(target, { x: x + width, y: y + height }, { x, y: y + height }, DOOR_DASH, DOOR_GAP);
+            dashedLine(target, { x, y: y + height }, { x, y }, DOOR_DASH, DOOR_GAP);
+          },
+          { ...edge, color: SKIN.doorPale, alpha: DOOR_OPEN_ALPHA, strength: 0, width: DOOR_DASH_WIDTH },
+        );
+        break;
+      }
+      case 'avertit': {
+        // Le contour devient franc et clignote ; la masse, presque pleine, clignote avec lui.
+        const strength = this.rim * (DOOR_WARN_HALO_MIN + (DOOR_WARN_HALO_MAX - DOOR_WARN_HALO_MIN) * look.beat);
+        const tube = { ...edge, alpha: DOOR_WARN_ALPHA_MIN + (1 - DOOR_WARN_ALPHA_MIN) * look.beat, strength };
+        neonRects(g, alone, { ...tube, pass: 'halo' });
+        const part = fill(0);
+        g.rect(part.x, part.y, part.width, part.height).fill({ color: COLOR.door, alpha: DOOR_WARN_FILL_MIN + (DOOR_WARN_FILL_MAX - DOOR_WARN_FILL_MIN) * look.beat });
+        neonRects(g, alone, { ...tube, pass: 'core' });
+        break;
+      }
+      case 'fermee': {
+        const tube = { ...edge, strength: this.rim };
+        neonRects(g, alone, { ...tube, pass: 'halo' });
+        g.rect(x, y, width, height).fill(SKIN.doorBody);
+        // La barre claire qui se remplit jusqu'à l'ouverture, en retrait du contour.
+        const bar = fill(DOOR_BAR_INSET);
+        if (bar.width > 0 && bar.height > 0 && Math.min(width, height) > 2 * DOOR_BAR_INSET) g.rect(bar.x, bar.y, bar.width, bar.height).fill({ color: SKIN.doorPale, alpha: DOOR_BAR_ALPHA });
+        neonRects(g, alone, { ...tube, pass: 'core' });
+        break;
+      }
+      case 'passage': {
+        g.rect(x, y, width, height).fill({ color: COLOR.door, alpha: DOOR_GHOST_ALPHA });
+        neonRects(g, alone, { ...edge, alpha: DOOR_OPEN_ALPHA, strength: DOOR_OPEN_HALO * this.rim });
+        break;
+      }
+    }
+  }
+
+  /**
+   * Anneaux de précision, sous les obstacles et les points : un cercle fin vert vif au rayon de l'anneau, dedans le cercle du centre et
+   * son point, qui disent où viser. Le personnage qui le traverse l'allume (le centre aussi s'il passe près du milieu) ; une fois
+   * traversé, il ne reste que la trace d'un néon coupé.
+   */
+  private drawRings(state: SimState, camera: Camera, view: ViewBounds): void {
+    const g = this.rings.clear();
+    if (state.rings.length === 0) return;
+    const lots = this.ringLots;
+    lots.libre.length = 0;
+    lots.traverse.length = 0;
+    lots.centre.length = 0;
+    lots.prise.length = 0;
+    let slot = 0;
+    for (const ring of state.rings) {
+      const p = camera.worldToScreen(ring.pos);
+      const radius = ring.radius * camera.scale;
+      if (!inView(view, p, CULL_MARGIN + radius)) continue;
+      const spot = this.ringSpot(slot, p.x, p.y, radius);
+      slot += 1;
+      lots[ringPhase(ring)].push(spot);
+    }
+    if (slot === 0) return;
+    // La trace éteinte d'abord : elle ne doit jamais couvrir un anneau vivant.
+    this.paintRingCircles(g, lots.prise, 1, COLOR.ring, { width: RING_TRACE_WIDTH, alpha: DARK_ALPHA, strength: 0 });
+    this.paintRing(g, lots.libre, false, false);
+    this.paintRing(g, lots.traverse, true, false);
+    this.paintRing(g, lots.centre, true, true);
+  }
+
+  /**
+   * Un lot d'anneaux vivants : le cercle extérieur (plus épais et plus lumineux quand le personnage le traverse), puis le cercle du
+   * centre et son point. Le centre est discret tant que le passage n'y est pas, et s'allume (cœur plus clair, halo) quand il y est.
+   */
+  private paintRing(g: Graphics, spots: readonly RingSpot[], crossing: boolean, centred: boolean): void {
+    if (spots.length === 0) return;
+    this.paintRingCircles(g, spots, 1, COLOR.ring, { width: crossing ? RING_ACTIVE_WIDTH : RING_WIDTH, alpha: 1, strength: this.species * (crossing ? RING_ACTIVE_HALO : RING_HALO) });
+    const core = centred ? SKIN.ringHot : COLOR.ring;
+    const strength = centred ? this.species * RING_ACTIVE_HALO : 0;
+    const alpha = centred ? 1 : RING_INNER_ALPHA;
+    this.paintRingCircles(g, spots, RING_CENTRE_RATIO, core, { width: RING_INNER_WIDTH, alpha, strength });
+    neonDiscs(g, spots, RING_DOT_RADIUS, { color: core, halo: COLOR.ring, alpha, strength });
+  }
+
+  /** Cercles de tube du lot d'anneaux, d'un seul tracé : `ratio` est la part du rayon de chaque anneau où poser le cercle. */
+  private paintRingCircles(g: Graphics, spots: readonly RingSpot[], ratio: number, color: number, style: { width: number; alpha: number; strength: number }): void {
+    if (spots.length === 0) return;
+    neonStroke(g, (target) => spots.forEach((spot) => target.circle(spot.x, spot.y, spot.radius * ratio)), { color, halo: COLOR.ring, ...style, spread: MARK_SPREAD });
+  }
+
+  /** L'anneau visible numéro `slot` de l'image, tiré du réservoir. */
+  private ringSpot(slot: number, x: number, y: number, radius: number): RingSpot {
+    const spot = this.ringPool[slot];
+    if (!spot) {
+      const created = { x, y, radius };
+      this.ringPool[slot] = created;
+      return created;
+    }
+    spot.x = x;
+    spot.y = y;
+    spot.radius = radius;
+    return spot;
   }
 
   /**
@@ -1208,6 +1600,39 @@ export class Renderer {
     const p = camera.worldToScreen(state.hero.pos);
     const tube = ready ? READY_TUBE : this.normalTube;
     neonDiscs(this.hero.clear(), [p], tuning.heroRadius * camera.scale, { ...tube, spread: 1.4 * this.halo.spread, strength: this.halo.strength * (ready ? READY_STRENGTH : 1) });
+  }
+
+  /**
+   * Les éclats brefs qui accompagnent un rebond, un fracas ou un anneau : un cercle qui s'élargit en s'effaçant à l'endroit où le personnage a
+   * franchi l'événement, dans la teinte de l'espèce. Un fracas y ajoute des éclats qui partent en étoile ; un anneau traversé au
+   * centre, un second cercle plus clair. À l'écran, comme les textes flottants : le monde incliné ne les tourne pas.
+   */
+  private drawFlashes(effects: Effects): void {
+    const g = this.flashLayer.clear();
+    for (const flash of effects.flashes) this.paintFlash(g, flash);
+  }
+
+  private paintFlash(g: Graphics, flash: Flash): void {
+    const radius = flashRadius(flash.kind, flash.age);
+    const alpha = flashAlpha(flash.age);
+    const color = flash.kind === 'bounce' ? COLOR.bounce : flash.kind === 'smash' ? SKIN.crackHot : flash.kind === 'centre' ? SKIN.ringHot : COLOR.ring;
+    const halo = flash.kind === 'bounce' ? COLOR.bounce : flash.kind === 'smash' ? COLOR.smash : COLOR.ring;
+    const tube = { color, halo, width: FLASH_WIDTH, alpha, strength: FLASH_HALO, cap: 'round' as const };
+    if (flash.kind === 'smash') {
+      neonStroke(
+        g,
+        (target) => {
+          for (let shard = 0; shard < FLASH_SHARDS; shard += 1) {
+            const angle = (shard / FLASH_SHARDS) * TAU;
+            target.moveTo(flash.x + radius * FLASH_SHARD_START * Math.cos(angle), flash.y + radius * FLASH_SHARD_START * Math.sin(angle)).lineTo(flash.x + radius * Math.cos(angle), flash.y + radius * Math.sin(angle));
+          }
+        },
+        tube,
+      );
+      return;
+    }
+    neonCircle(g, flash.x, flash.y, radius, tube);
+    if (flash.kind === 'centre') neonCircle(g, flash.x, flash.y, radius * FLASH_CENTRE_RATIO, tube);
   }
 
   /** Textes flottants près du personnage : ils montent un peu et s'effacent. Jamais coupés par le bord de l'écran. */

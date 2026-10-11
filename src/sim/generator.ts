@@ -4,7 +4,7 @@ import { STILL, type Environment } from './environment';
 import { CABLE_HALF_LENGTH, CABLE_PERIOD_SECONDS, TRAVERSIERE_PERIOD_SECONDS } from './events';
 import { circleBoxGap } from './geometry';
 import { LANCEUR_CLEARANCE } from './launcher';
-import type { Anchor, Obstacle, Pickup } from './state';
+import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring } from './state';
 
 /**
  * Construction d'un segment de parcours : une chaîne de points d'accroche qui
@@ -24,6 +24,7 @@ export interface Segment {
   readonly anchors: Anchor[];
   readonly obstacles: Obstacle[];
   readonly pickups: Pickup[];
+  readonly rings: Ring[];
   /** Point de fourche, dont les deux branches doivent toutes deux être atteignables. */
   readonly junctionId: number | null;
   readonly branchIds: readonly number[];
@@ -34,6 +35,7 @@ export interface IdCounters {
   anchor: number;
   obstacle: number;
   pickup: number;
+  ring: number;
 }
 
 /** Ce qu'un profil permet : une nouvelle contrainte à la fois. */
@@ -55,6 +57,16 @@ export interface TierProfile {
   /** Prises électriques (pièges à cycles) et prises à éclipse (raccourcis accrochables deux secondes sur quatre) par segment. */
   readonly electric: number;
   readonly eclipse: number;
+  /**
+   * Lot 2 du brief, par segment : surfaces de rebond, parois cassables, portes
+   * intermittentes (des dalles d'une autre espèce, aux mêmes règles de
+   * placement) et anneaux de précision (entre deux points, sur le vol).
+   * Absents, aucun.
+   */
+  readonly bouncers?: number;
+  readonly breakables?: number;
+  readonly doors?: number;
+  readonly rings?: number;
 }
 
 /** Largeur jouable à l'écartement 1 : les points restent entre -limit et +limit, les obstacles s'y appuient. */
@@ -122,6 +134,11 @@ export function tierProfile(tier: number): TierProfile {
     spread: Math.min(MAX_SPREAD, 1 + 0.08 * tier),
     electric: tier >= 4 ? 1 : 0,
     eclipse: tier >= 3 ? (tier >= 6 ? 2 : 1) : 0,
+    // Lot 2 : une nouveauté par palier, dans l'ordre où elle se comprend le mieux.
+    bouncers: tier >= 1 ? 1 : 0,
+    rings: tier >= 2 ? 1 : 0,
+    breakables: tier >= 3 ? 1 : 0,
+    doors: tier >= 4 ? 1 : 0,
   };
 }
 
@@ -330,9 +347,65 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
   assignKinds(rng, anchors, profile, archetype, junctionId, branchIds);
   if (context.cable !== 'none') hangCables(anchors, junctionId, branchIds, halfWidth, context.cable);
   addSpecialAnchors(rng, ids, anchors, profile, halfWidth);
+  const rings = placeRings(rng, ids, anchors, pickups, profile.rings ?? 0, new Set([...branchIds, junctionId ?? -1]), halfWidth);
   const obstacleCount = archetype === 'dalles' ? Math.min(4, profile.obstacles + 2) : profile.obstacles;
-  const obstacles = placeObstacles(rng, ids, anchors, pickups, Math.max(startY, origin.y + GRACE_ABOVE_ORIGIN - 2), cur.y, obstacleCount, from, archetype === 'dalles', context, halfWidth, fixed);
-  return { anchors, obstacles, pickups, junctionId, branchIds };
+  // Les espèces du lot 2 se posent d'abord : elles sont le propos du segment, les obstacles ordinaires prennent la place qui reste.
+  const kinds: ObstacleKind[] = [
+    ...Array<ObstacleKind>(profile.doors ?? 0).fill('porte'),
+    ...Array<ObstacleKind>(profile.breakables ?? 0).fill('cassable'),
+    ...Array<ObstacleKind>(profile.bouncers ?? 0).fill('rebond'),
+    ...Array<ObstacleKind>(obstacleCount).fill('solide'),
+  ];
+  const obstacles = placeObstacles(rng, ids, anchors, pickups, rings, Math.max(startY, origin.y + GRACE_ABOVE_ORIGIN - 2), cur.y, kinds, from, archetype === 'dalles', context, halfWidth, fixed);
+  return { anchors, obstacles, pickups, rings, junctionId, branchIds };
+}
+
+/** Anneau de précision : rayon, hauteur au-dessus du milieu du vol, et distances gardées aux points, aux étoiles et aux autres anneaux. */
+export const RING_RADIUS = 1.1;
+const RING_RISE = 0.5;
+const RING_ANCHOR_CLEARANCE = 0.4;
+const RING_PICKUP_CLEARANCE = 0.3;
+const RING_RING_CLEARANCE = 0.5;
+
+/**
+ * Anneaux de précision (brief, O5) : chacun entre deux points consécutifs de
+ * la chaîne, au milieu du vol et un peu au-dessus, là où passe une belle
+ * trajectoire. Jamais autour d'un lanceur ni d'un point qui glisse, ni sur
+ * une fourche, ni sur un autre anneau. Rien de solide : un anneau raté ne
+ * coûte rien, le parcours se prouve sans lui.
+ */
+function placeRings(rng: Rng, ids: IdCounters, anchors: readonly Anchor[], pickups: readonly Pickup[], count: number, protectedIds: ReadonlySet<number>, halfWidth: number): Ring[] {
+  const rings: Ring[] = [];
+  if (count <= 0 || anchors.length < 4) return rings;
+  const bands = launchBands(anchors);
+  const pairs: number[] = [];
+  for (let i = 1; i < anchors.length - 2; i += 1) {
+    const a = anchors[i]!;
+    const b = anchors[i + 1]!;
+    if (a.kind === 'lanceur' || b.kind === 'lanceur' || a.cable || b.cable || protectedIds.has(a.id) || protectedIds.has(b.id)) continue;
+    if (b.pos.y < a.pos.y + 2) continue;
+    pairs.push(i);
+  }
+  if (pairs.length === 0) return rings;
+  const clear = (pos: Vec2): boolean =>
+    anchors.every((a) => Math.hypot(a.pos.x - pos.x, a.pos.y - pos.y) >= RING_RADIUS + RING_ANCHOR_CLEARANCE) &&
+    pickups.every((p) => Math.hypot(p.pos.x - pos.x, p.pos.y - pos.y) >= RING_RADIUS + RING_PICKUP_CLEARANCE) &&
+    rings.every((r) => Math.hypot(r.pos.x - pos.x, r.pos.y - pos.y) >= 2 * RING_RADIUS + RING_RING_CLEARANCE) &&
+    !bands.some((band) => pos.y > band.y0 && pos.y < band.y1);
+  for (let n = 0; n < count; n += 1) {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const i = pairs[Math.floor(rng.next() * pairs.length)]!;
+      const a = anchors[i]!.pos;
+      const b = anchors[i + 1]!.pos;
+      const limit = halfWidth - RING_RADIUS;
+      const pos = { x: Math.max(-limit, Math.min(limit, (a.x + b.x) / 2)), y: (a.y + b.y) / 2 + RING_RISE };
+      if (!clear(pos)) continue;
+      rings.push({ id: ids.ring, pos, radius: RING_RADIUS, closest: null, taken: false });
+      ids.ring += 1;
+      break;
+    }
+  }
+  return rings;
 }
 
 /** Prise à éclipse : au-dessus du point qu'elle permet de sauter, et déport de la prise électrique à côté de son point. */
@@ -446,15 +519,25 @@ function assignKinds(rng: Rng, anchors: Anchor[], profile: TierProfile, archetyp
   }
 }
 
-/** Corniches accrochées aux bords et dalles flottantes, à distance des points et des étoiles. */
+/** Un obstacle ne s'approche pas d'un anneau à moins de cette distance de son cercle. */
+const RING_OBSTACLE_CLEARANCE = 0.6;
+
+/**
+ * Corniches accrochées aux bords et dalles flottantes, à distance des points,
+ * des étoiles et des anneaux, une par espèce demandée dans `kinds`. Les
+ * espèces du lot 2 (rebond, cassable, porte) se posent comme les autres, en
+ * corniche ou en dalle, mais d'abord et avec plus d'essais : elles sont le
+ * propos du segment ; une porte est un peu plus large.
+ */
 function placeObstacles(
   rng: Rng,
   ids: IdCounters,
   anchors: readonly Anchor[],
   pickups: readonly Pickup[],
+  rings: readonly Ring[],
   startY: number,
   endY: number,
-  count: number,
+  kinds: readonly ObstacleKind[],
   from: Vec2 | null,
   slabsOnly: boolean,
   context: SegmentContext,
@@ -472,6 +555,7 @@ function placeObstacles(
   const keepAway = (box: Obstacle): boolean =>
     anchors.every((a) => (a.kind === 'lanceur' ? circleBoxGap(a.pos, LANCEUR_CLEARANCE, box) > 0 : (a.cable ? [a.cable.from, a.pos, a.cable.to] : [a.pos]).every((pos) => clearOf(pos, box)))) &&
     pickups.every((p) => circleBoxGap(p.pos, 0, box) >= PICKUP_CLEARANCE) &&
+    rings.every((r) => circleBoxGap(r.pos, r.radius, box) >= RING_OBSTACLE_CLEARANCE) &&
     (from === null || (circleBoxGap(from, 0, box) >= OBSTACLE_CLEARANCE && !underAnchor(from, box, env) && !underAnchor(from, box, entryEnv))) &&
     !inLaunchBand(box) &&
     obstacles.every((o) => box.y1 < o.y0 - 1 || box.y0 > o.y1 + 1);
@@ -480,13 +564,14 @@ function placeObstacles(
   const bottom = startY + 2;
   const top = endY - 2 - OBSTACLE_THICKNESS;
   if (top - bottom < 1) return obstacles;
-  for (let i = 0; i < count; i += 1) {
-    for (let attempt = 0; attempt < 6; attempt += 1) {
+  for (const kind of kinds) {
+    // Une espèce du lot 2 a droit à plus d'essais : elle est attendue.
+    for (let attempt = 0; attempt < (kind === 'solide' ? 6 : 12); attempt += 1) {
       const y0 = bottom + rng.next() * (top - bottom);
       let x0: number;
       let x1: number;
       if (!slabsOnly && rng.next() < 0.5) {
-        const width = 1.5 + 1.5 * rng.next();
+        const width = (kind === 'porte' ? 2 : 1.5) + 1.5 * rng.next();
         if (rng.next() < 0.5) {
           x0 = -wallX;
           x1 = -wallX + width;
@@ -495,12 +580,12 @@ function placeObstacles(
           x1 = wallX;
         }
       } else {
-        const width = 1.5 + rng.next();
+        const width = (kind === 'porte' ? 2 : 1.5) + rng.next();
         const center = (-3 + 6 * rng.next()) * (halfWidth / HALF_WIDTH);
         x0 = center - width / 2;
         x1 = center + width / 2;
       }
-      const box: Obstacle = { id: ids.obstacle, x0, y0, x1, y1: y0 + OBSTACLE_THICKNESS };
+      const box: Obstacle = kind === 'solide' ? { id: ids.obstacle, x0, y0, x1, y1: y0 + OBSTACLE_THICKNESS } : { id: ids.obstacle, x0, y0, x1, y1: y0 + OBSTACLE_THICKNESS, kind };
       if (!keepAway(box)) continue;
       obstacles.push(box);
       ids.obstacle += 1;

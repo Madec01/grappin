@@ -7,6 +7,7 @@ import {
   FLOAT_SECONDS,
   INTRO_SECONDS,
   ROPE_DRAW_SECONDS,
+  FLASH_SECONDS,
   WIND_STREAKS,
   FLICKER_HZ,
   SIZZLE_HZ,
@@ -15,6 +16,9 @@ import {
   flicker,
   floatAlpha,
   floatRise,
+  flashAlpha,
+  flashFor,
+  flashRadius,
   floatingTextFor,
   noise,
   pulse,
@@ -58,6 +62,16 @@ describe('texte d\'un événement', () => {
     expect(floatingTextFor(perfect(2), DEFAULT_TUNING)).toBe('Parfait ×1,5');
     expect(floatingTextFor(perfect(4), DEFAULT_TUNING)).toBe('Parfait ×2');
     expect(floatingTextFor(perfect(40), DEFAULT_TUNING)).toBe('Parfait ×5');
+  });
+
+  it('dit « Rebond » sur une surface de rebond et « Fracas » quand une paroi vole en éclats', () => {
+    expect(floatingTextFor({ type: 'bounce', obstacleId: 1 }, DEFAULT_TUNING)).toBe('Rebond');
+    expect(floatingTextFor({ type: 'smash', obstacleId: 1 }, DEFAULT_TUNING)).toBe('Fracas');
+  });
+
+  it('dit « Au centre ! » d\'un anneau traversé près du centre, « Anneau » sinon', () => {
+    expect(floatingTextFor({ type: 'ring', ringId: 1, centred: true }, DEFAULT_TUNING)).toBe('Au centre !');
+    expect(floatingTextFor({ type: 'ring', ringId: 1, centred: false }, DEFAULT_TUNING)).toBe('Anneau');
   });
 
   it('ne dit rien d\'un lâcher raté, ni des événements sans texte', () => {
@@ -456,5 +470,65 @@ describe('ondes des tubes de néon', () => {
       expect(flicker(t + 0.3 / FLICKER_HZ, 5, 0.4)).toBe(value);
     }
     expect(flicker(0.3, 1)).not.toBe(flicker(0.3, 2));
+  });
+});
+
+describe('éclats', () => {
+  it('un rebond, un fracas et un anneau en déclenchent un, d\'une espèce qui dit lequel ; rien d\'autre', () => {
+    expect(flashFor({ type: 'bounce', obstacleId: 1 })).toBe('bounce');
+    expect(flashFor({ type: 'smash', obstacleId: 1 })).toBe('smash');
+    expect(flashFor({ type: 'ring', ringId: 1, centred: false })).toBe('ring');
+    expect(flashFor({ type: 'ring', ringId: 1, centred: true })).toBe('centre');
+    for (const event of [{ type: 'kick' }, { type: 'boost' }, { type: 'bump', obstacleId: 1 }, { type: 'graze', obstacleId: 1 }, perfect(1)] as const) expect(flashFor(event)).toBeNull();
+  });
+
+  it('naît au personnage à l\'écran, plein, puis s\'élargit en ralentissant et s\'efface en 0,35 s', () => {
+    expect(FLASH_SECONDS).toBe(0.35);
+    expect(flashAlpha(0)).toBe(1);
+    expect(flashAlpha(FLASH_SECONDS)).toBe(0);
+    let alpha = 1;
+    let radius = flashRadius('smash', 0);
+    expect(radius).toBeGreaterThan(0);
+    for (let age = 0.05; age <= FLASH_SECONDS + 1e-9; age += 0.05) {
+      expect(flashAlpha(age)).toBeLessThan(alpha);
+      expect(flashRadius('smash', age)).toBeGreaterThan(radius);
+      alpha = flashAlpha(age);
+      radius = flashRadius('smash', age);
+    }
+    // Hors de sa vie, rien ne dépasse ; chaque espèce a son propre rayon final, le plus grand au centre d'un anneau.
+    expect(flashAlpha(5)).toBe(0);
+    expect(flashRadius('smash', 5)).toBe(flashRadius('smash', FLASH_SECONDS));
+    expect(flashRadius('centre', FLASH_SECONDS)).toBeGreaterThan(flashRadius('ring', FLASH_SECONDS));
+    expect(flashRadius('ring', FLASH_SECONDS)).toBeGreaterThan(flashRadius('bounce', FLASH_SECONDS));
+  });
+
+  it('les effets les tiennent à l\'écran 0,35 s de temps réel, à la position du personnage, puis les retirent', () => {
+    const effects = new Effects(DEFAULT_TUNING);
+    expect(effects.flashes).toHaveLength(0);
+    effects.handle({ type: 'smash', obstacleId: 1 }, HERO);
+    expect(effects.flashes).toHaveLength(1);
+    expect(effects.flashes[0]).toMatchObject({ kind: 'smash', x: HERO.x, y: HERO.y, age: 0 });
+    effects.update(0.34);
+    expect(effects.flashes).toHaveLength(1);
+    effects.update(0.02);
+    expect(effects.flashes).toHaveLength(0);
+  });
+
+  it('en tiennent six au plus à la fois : le plus ancien cède sa place', () => {
+    const effects = new Effects(DEFAULT_TUNING);
+    for (let i = 0; i < 9; i += 1) {
+      effects.handle({ type: 'ring', ringId: i, centred: i % 2 === 0 }, { x: i, y: HERO.y });
+      effects.update(0.001);
+    }
+    expect(effects.flashes).toHaveLength(6);
+    expect(effects.flashes[0]!.x).toBe(3);
+    expect(effects.flashes.at(-1)!.x).toBe(8);
+  });
+
+  it('un événement sans éclat n\'en fait pas naître', () => {
+    const effects = new Effects(DEFAULT_TUNING);
+    effects.handle({ type: 'boost' }, HERO);
+    effects.handle({ type: 'bump', obstacleId: 1 }, HERO);
+    expect(effects.flashes).toHaveLength(0);
   });
 });

@@ -45,8 +45,9 @@ export function shadowPoints(state: SimState, tuning: Tuning, seconds: number = 
 
 /**
  * La fenêtre de lâcher : vrai quand lâcher maintenant serait un lâcher parfait
- * (la vitesse de lâcher, propulseur compris, monte entre 30° et 60°, assez
- * vite). Faux sans corde, et toujours faux sur un lanceur, qui ne se juge pas.
+ * (la vitesse de lâcher, propulseur compris, monte entre 30° et 60°, à
+ * `perfectMinSpeed` au moins : un vrai élan, pas le minimum). Faux sans corde,
+ * et toujours faux sur un lanceur, qui ne se juge pas.
  * Le rendu la montre discrètement ; le tutoriel s'en sert pour dire « lâche ».
  */
 export function inReleaseWindow(state: SimState, tuning: Tuning): boolean {

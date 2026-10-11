@@ -12,7 +12,7 @@ import type { RuleEvent } from '../sim/state';
  * événements en notes, et les tests le vérifient sans son.
  */
 
-export type SoundId = 'attach' | 'release' | 'perfect' | 'launch' | 'boost' | 'pickup' | 'graze' | 'bump' | 'shock' | 'break' | 'fog' | 'fall' | 'finish' | 'tier';
+export type SoundId = 'attach' | 'release' | 'perfect' | 'launch' | 'boost' | 'pickup' | 'graze' | 'bump' | 'bounce' | 'smash' | 'ring' | 'shock' | 'break' | 'fog' | 'fall' | 'finish' | 'tier';
 
 /** Une note à jouer : le son, et sa hauteur relative (1 : telle quelle ; 2 : l'octave au-dessus). */
 export interface Cue {
@@ -59,6 +59,13 @@ export function cueFor(event: RuleEvent): Cue | null {
       return { id: 'graze', pitch: 1 };
     case 'bump':
       return { id: 'bump', pitch: 1 };
+    case 'bounce':
+      return { id: 'bounce', pitch: 1 };
+    case 'smash':
+      return { id: 'smash', pitch: 1 };
+    case 'ring':
+      // Au centre, l'anneau sonne une quinte plus haut.
+      return { id: 'ring', pitch: event.centred ? 1.5 : 1 };
     case 'shock':
       return { id: 'shock', pitch: 1 };
     case 'break':
@@ -115,6 +122,9 @@ export const RECIPES: Record<SoundId, Recipe> = {
   pickup: { tones: [{ type: 'triangle', from: 1318.5, to: 1760, seconds: 0.11, gain: 0.22 }] },
   graze: { tones: [{ type: 'sine', from: 2200, to: 2600, seconds: 0.04, gain: 0.1 }] },
   bump: { tones: [{ type: 'sine', from: 150, to: 55, seconds: 0.2, gain: 0.36 }], breaths: [{ from: 1200, to: 250, seconds: 0.08, gain: 0.24 }] },
+  bounce: { tones: [{ type: 'sine', from: 220, to: 660, seconds: 0.14, gain: 0.3 }, { type: 'triangle', from: 110, to: 330, seconds: 0.14, gain: 0.14 }] },
+  smash: { tones: [{ type: 'sawtooth', from: 320, to: 60, seconds: 0.22, gain: 0.22 }], breaths: [{ from: 6000, to: 900, seconds: 0.26, gain: 0.34 }] },
+  ring: { tones: [{ type: 'sine', from: 1046.5, to: 1046.5, seconds: 0.18, gain: 0.22 }, { type: 'sine', from: 1568, to: 1568, seconds: 0.26, gain: 0.16, at: 0.06 }] },
   shock: { tones: [{ type: 'square', from: 140, to: 85, seconds: 0.3, gain: 0.2 }, { type: 'square', from: 143, to: 88, seconds: 0.3, gain: 0.12 }] },
   break: { tones: [{ type: 'square', from: 520, to: 180, seconds: 0.09, gain: 0.16 }], breaths: [{ from: 4000, to: 1400, seconds: 0.12, gain: 0.3 }] },
   fog: { tones: [{ type: 'sine', from: 440, to: 110, seconds: 0.9, gain: 0.26 }] },

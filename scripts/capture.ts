@@ -1,9 +1,12 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { chromium, type Page } from '@playwright/test';
+import { chromium, type Browser, type Page } from '@playwright/test';
 import gifenc from 'gifenc';
 import { PNG } from 'pngjs';
+import { doorGauge, doorState } from '../src/sim/cycles';
+import { Simulation } from '../src/sim/simulation';
+import { DEFAULT_TUNING } from '../src/sim/tuning';
 
 // Le paquet est en CommonJS avec des accesseurs : Node ne voit pas ses exports nommés, on passe par l'export par défaut.
 const { GIFEncoder, applyPalette, quantize } = gifenc;
@@ -13,7 +16,7 @@ const { GIFEncoder, applyPalette, quantize } = gifenc;
  * scénarisée sur un écran de téléphone simulé, et dépose des captures d'écran
  * ainsi qu'une courte vidéo convertie en GIF.
  *
- * Usage : `npm run captures -- <dossier de sortie> [graine]`. Le build doit
+ * Usage : `npm run captures -- <dossier de sortie> [graine] [scenes]`. Le build doit
  * exister (`npm run build`). Chromium vient de Playwright ou de
  * `PW_CHROMIUM_PATH`. La vidéo demande le ffmpeg de Playwright
  * (`npx playwright install ffmpeg`), dont le chemin est passé par `FFMPEG_PATH`
@@ -37,6 +40,8 @@ const PORT = 4175;
 const VIEWPORT = { width: 390, height: 844 };
 const outDir = resolve(process.argv[2] ?? 'captures');
 const seed = Number(process.argv[3] ?? '1');
+/** `scenes` en troisième argument : seulement les prises des scènes du lot 2, pour les revoir sans rejouer tout le banc. */
+const onlyScenes = process.argv[4] === 'scenes';
 
 async function waitForServer(url: string, timeoutMs: number): Promise<void> {
   const start = Date.now();
@@ -181,6 +186,182 @@ function encodeGif(ffmpeg: string, webm: string, gif: string): void {
   console.log(`GIF : ${gif} (${files.length} images)`);
 }
 
+/**
+ * Les scènes du lot 2 (`playScene(id)` : un premier segment construit à la main pour chaque mécanique). Chaque prise a son contexte neuf,
+ * l'horloge de la page figée avant la scène puis menée à la main, comme pour le pouls : l'image voulue est exacte, jamais à quelques images
+ * près. La brume est lente, car on laisse le personnage s'attarder pour bien voir. Les pas par image sont ceux d'une image à 60 Hz.
+ */
+const SCENE_FOG = 0.1;
+const STEPS_PER_FRAME = FRAME_MS / 1000 / DEFAULT_TUNING.stepSeconds;
+/** Le pilote des scènes cherche jusqu'à ce nombre d'images (une dizaine de secondes) avant d'abandonner une prise. */
+const SCENE_FRAMES = 700;
+
+interface PilotMemory {
+  holdSince: number;
+  launchedAt: number;
+}
+
+/**
+ * Une image du pilote automatique, décidée côté Node : mêmes règles que `autoplay`, mais pour une page dont l'horloge est figée, où
+ * le pilote injecté (qui boucle sur `requestAnimationFrame` et `performance.now`) ne verrait jamais d'image. `nowMs` est le temps
+ * simulé écoulé, en millisecondes. Rend l'état vu avant l'action.
+ */
+async function pilotFrame(page: Page, memory: PilotMemory, nowMs: number): Promise<ReturnType<NonNullable<Window['__grappin']>['state']>> {
+  const s = await page.evaluate(() => window.__grappin!.state());
+  const gap = (a: { x: number; y: number }): number => Math.hypot(a.x - s.pos.x, a.y - s.pos.y);
+  if (!s.attached && s.targetId !== null) {
+    const target = nowMs - memory.launchedAt < 1500 ? (await page.evaluate(() => window.__grappin!.anchors())).find((a) => a.id === s.targetId) : undefined;
+    if (!target || (gap(target) <= 4 && target.y >= s.pos.y)) {
+      await page.evaluate(() => window.__grappin!.press());
+      memory.holdSince = nowMs;
+    }
+  } else if (s.attached && s.heldKind === 'lanceur') {
+    if (nowMs - memory.holdSince > 350) {
+      const aim = await page.evaluate(() => window.__grappin!.launchAim());
+      if (aim) await page.evaluate((pull) => window.__grappin!.release(pull.x, pull.y), aim);
+      else await page.evaluate(() => window.__grappin!.release(0, -1.75));
+      memory.launchedAt = nowMs;
+    }
+  } else if (s.attached && nowMs - memory.holdSince > 80) {
+    const speed = Math.hypot(s.vel.x, s.vel.y);
+    const ready = speed >= 8 || (s.ropeLength !== null && s.ropeLength <= 1.5 + 1e-9);
+    const ax = Math.abs(s.vel.x);
+    const slope = ax > 0 ? s.vel.y / ax : Infinity;
+    if ((ready && s.vel.y > 1 && slope > 0.6 && slope < 1.8) || nowMs - memory.holdSince > 2500) await page.evaluate(() => window.__grappin!.release());
+  }
+  return s;
+}
+
+/** Mène l'horloge figée de la page jusqu'au pas de simulation `target` (à un pas ou deux près, par excès), par grands bonds puis image par image. */
+async function advanceToStep(page: Page, target: number): Promise<number> {
+  for (let guard = 0; guard < 1000; guard += 1) {
+    const { step } = await page.evaluate(() => window.__grappin!.state());
+    if (step >= target) return step;
+    const frames = Math.max(1, Math.floor((target - step) / STEPS_PER_FRAME) - 1);
+    await page.clock.runFor(frames * FRAME_MS);
+  }
+  throw new Error(`Le pas ${target} n'est jamais atteint`);
+}
+
+/** Une page neuve sur la scène `id`, l'horloge figée et la bannière d'intro encore intacte (à l'image 0). */
+async function openScene(browser: Browser, id: string): Promise<{ page: Page; close: () => Promise<void> }> {
+  const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const page = await context.newPage();
+  await page.clock.install({ time: 0 });
+  await page.goto(`http://localhost:${PORT}/?graine=${seed}&fogBaseSpeed=${SCENE_FOG}`);
+  await page.waitForFunction(() => window.__grappin?.state().screen === 'title');
+  await page.clock.pauseAt(PULSE_CLOCK_MS);
+  if (!(await page.evaluate((scene) => window.__grappin!.playScene(scene), id))) throw new Error(`Scène inconnue : ${id}`);
+  return { page, close: () => context.close() };
+}
+
+/**
+ * Le pilote mène le personnage jusqu'à `until` (vrai sur l'état vu), image par image ; `true` s'il y est arrivé avant `SCENE_FRAMES`
+ * images. Il rend la main à cet instant : le personnage reste là où il est, corde tenue s'il en tenait une.
+ */
+async function climbUntil(page: Page, until: (s: Awaited<ReturnType<typeof pilotFrame>>) => boolean): Promise<boolean> {
+  const memory: PilotMemory = { holdSince: 0, launchedAt: -1e9 };
+  for (let frame = 0; frame < SCENE_FRAMES; frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const s = await pilotFrame(page, memory, frame * FRAME_MS);
+    if (s.screen !== 'playing') return false;
+    if (until(s)) return true;
+  }
+  return false;
+}
+
+/**
+ * Les quatre scènes du lot 2, une ou plusieurs prises chacune, en 390 × 844 :
+ *  - 28-scene-rebond : la surface de rebond (tapis, mur) vue du toit, bannière effacée ;
+ *  - 29-scene-cassable : la paroi fissurée, éteinte (le personnage va trop lentement), puis 29-scene-cassable-allumee : la même, allumée,
+ *    quand le personnage va assez vite pour la traverser ;
+ *  - 30-scene-porte-ouverte, -avertit, -fermee : la porte aux trois moments de son cycle (contour tireté et jauge, clignotement, masse pleine),
+ *    le personnage tenu au lanceur sous le mur ;
+ *  - 31-scene-anneau : un anneau juste traversé, ses voisins encore à prendre, son éclat et sa trace éteinte.
+ * Une prise que le parcours ne permet plus (réglages changés) est omise avec un avertissement, sans bloquer le banc.
+ */
+async function captureScenes(browser: Browser): Promise<void> {
+  // Le rebond : le tapis et le mur de rebond sont dans la vue depuis le toit ; le personnage attend dessus, et la bannière s'efface.
+  {
+    const { page, close } = await openScene(browser, 'rebond');
+    await page.clock.runFor(PULSE_INTRO_MS);
+    await page.screenshot({ path: join(outDir, '28-scene-rebond.png') });
+    console.log(`Scène rebond : pas ${(await page.evaluate(() => window.__grappin!.state())).step}`);
+    await close();
+  }
+
+  // La paroi cassable, éteinte : le personnage s'accroche et se balance sous elle, la bannière effacée.
+  {
+    const { page, close } = await openScene(browser, 'cassable');
+    const hanging = await climbUntil(page, (s) => s.attached && s.pos.y >= 6);
+    if (!hanging) console.warn('29-scene-cassable : le pilote ne s\'accroche pas assez haut, prise omise');
+    else {
+      await page.clock.runFor(PULSE_INTRO_MS);
+      const s = await page.evaluate(() => window.__grappin!.state());
+      await page.screenshot({ path: join(outDir, '29-scene-cassable.png') });
+      console.log(`Scène cassable éteinte : vitesse ${Math.hypot(s.vel.x, s.vel.y).toFixed(1)} m/s (en dessous de ${DEFAULT_TUNING.smashSpeed}), hauteur ${s.pos.y.toFixed(1)} m`);
+    }
+    await close();
+  }
+
+  // La paroi cassable, allumée : la première image où le pilote va assez vite, la paroi entière dans la vue (elle est à 13 m).
+  {
+    const { page, close } = await openScene(browser, 'cassable');
+    const fast = await climbUntil(page, (s) => Math.hypot(s.vel.x, s.vel.y) >= DEFAULT_TUNING.smashSpeed + 1 && s.pos.y >= 8 && s.pos.y <= 12.5 && s.smashed === 0);
+    if (!fast) console.warn('29-scene-cassable-allumee : le pilote ne va jamais assez vite sous la paroi, prise omise');
+    else {
+      const s = await page.evaluate(() => window.__grappin!.state());
+      await page.screenshot({ path: join(outDir, '29-scene-cassable-allumee.png') });
+      console.log(`Scène cassable allumée : vitesse ${Math.hypot(s.vel.x, s.vel.y).toFixed(1)} m/s, hauteur ${s.pos.y.toFixed(1)} m`);
+    }
+    await close();
+  }
+
+  // La porte : le personnage tenu au lanceur (ou accroché assez haut), sous le mur à trou ; la bannière s'efface, puis le cycle de la porte
+  // est mené pas à pas jusqu'à trois instants (la jauge à moitié ouverte, l'avertissement, la jauge à moitié fermée).
+  {
+    const { page, close } = await openScene(browser, 'porte');
+    const door = new Simulation(seed, DEFAULT_TUNING, { kind: 'scene', sceneId: 'porte', startY: 0 }).state.obstacles.find((box) => box.kind === 'porte');
+    const held = await climbUntil(page, (s) => s.attached && (s.heldKind === 'lanceur' || s.pos.y >= 9));
+    if (!door || !held) console.warn('30-scene-porte : pas de porte, ou le pilote n\'atteint pas le mur, prises omises');
+    else {
+      await page.clock.runFor(PULSE_INTRO_MS);
+      const now = (await page.evaluate(() => window.__grappin!.state())).step;
+      // Le premier pas, à partir de maintenant, de chaque instant voulu ; on les prend dans l'ordre où ils viennent.
+      const first = (wanted: (step: number) => boolean): number => {
+        for (let step = now; step < now + 8 * Math.round(1 / DEFAULT_TUNING.stepSeconds); step += 1) if (wanted(step)) return step;
+        return -1;
+      };
+      const moments: Array<[string, number]> = [
+        ['30-scene-porte-ouverte', first((step) => doorState(door.id, step, DEFAULT_TUNING) === 'ouverte' && doorGauge(door.id, step, DEFAULT_TUNING) >= 0.5)],
+        ['30-scene-porte-avertit', first((step) => doorState(door.id, step, DEFAULT_TUNING) === 'se ferme' && doorGauge(door.id, step, DEFAULT_TUNING) >= 0.88)],
+        ['30-scene-porte-fermee', first((step) => doorState(door.id, step, DEFAULT_TUNING) === 'fermee' && doorGauge(door.id, step, DEFAULT_TUNING) >= 0.5)],
+      ];
+      for (const [name, target] of moments.filter(([, step]) => step >= 0).sort((a, b) => a[1] - b[1])) {
+        const reached = await advanceToStep(page, target);
+        await page.screenshot({ path: join(outDir, `${name}.png`) });
+        console.log(`${name} : pas ${reached}, porte ${doorState(door.id, reached, DEFAULT_TUNING)}, jauge ${doorGauge(door.id, reached, DEFAULT_TUNING).toFixed(2)}`);
+      }
+      if (moments.some(([, step]) => step < 0)) console.warn('30-scene-porte : un instant du cycle n\'arrive pas en huit secondes, prise omise');
+    }
+    await close();
+  }
+
+  // Les anneaux : l'image qui suit la traversée du premier, bannière comprise (elle est au-dessus des anneaux).
+  {
+    const { page, close } = await openScene(browser, 'anneau');
+    const crossed = await climbUntil(page, (s) => s.rings >= 1);
+    if (!crossed) console.warn('31-scene-anneau : le pilote ne traverse aucun anneau, prise omise');
+    else {
+      await page.clock.runFor(2 * FRAME_MS);
+      await page.screenshot({ path: join(outDir, '31-scene-anneau.png') });
+      const s = await page.evaluate(() => window.__grappin!.state());
+      console.log(`Scène anneau : ${s.rings} anneau(x) traversé(s), score ${Math.round(s.score)}`);
+    }
+    await close();
+  }
+}
+
 async function main(): Promise<void> {
   if (!existsSync('dist')) throw new Error('Aucun build : lancer `npm run build` d\'abord.');
   mkdirSync(outDir, { recursive: true });
@@ -194,6 +375,12 @@ async function main(): Promise<void> {
       ...(executablePath ? { executablePath } : {}),
       args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
     });
+    if (onlyScenes) {
+      rmSync(videoDir, { recursive: true, force: true });
+      await captureScenes(browser);
+      await browser.close();
+      return;
+    }
     const context = await browser.newContext({
       viewport: VIEWPORT,
       deviceScaleFactor: 2,
@@ -477,7 +664,7 @@ async function main(): Promise<void> {
     let tipShot = false;
     let tipSince = -1;
     let windowStep = -1;
-    for (let frame = 0; frame < 240 && windowStep < 0; frame += 1) {
+    for (let frame = 0; frame < 400 && windowStep < 0; frame += 1) {
       await windowPage.clock.runFor(FRAME_MS);
       const st = await windowPage.evaluate(() => window.__grappin!.state());
       if (st.tip !== null && tipSince < 0) tipSince = frame;
@@ -492,10 +679,13 @@ async function main(): Promise<void> {
         windowStep = st.step;
       }
     }
-    if (windowStep < 0) console.warn('26-fenetre-de-lacher : la fenêtre de lâcher ne s\'ouvre pas en 240 pas, prise omise');
+    if (windowStep < 0) console.warn('26-fenetre-de-lacher : la fenêtre de lâcher ne s\'ouvre pas en 400 pas, prise omise');
     else console.log(`Fenêtre de lâcher : ouverte au pas ${windowStep}`);
     if (!tipShot) console.warn('27-conseil : aucun conseil affiché avant la fenêtre de lâcher, prise omise');
     await windowContext.close();
+
+    // Les scènes de démonstration du lot 2 : rebond, paroi cassable, porte, anneaux.
+    await captureScenes(browser);
 
     if (errors.length > 0) console.warn('Erreurs console :', errors);
 

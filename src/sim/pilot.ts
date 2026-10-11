@@ -3,6 +3,7 @@ import { launchSet, launchVelocity, pulledPosition } from './launcher';
 import type { Anchor, SimState } from './state';
 import type { Tuning } from './tuning';
 import { circleBoxGap } from './geometry';
+import { provableObstacles } from './obstacles';
 import { flightCatches } from './verifier';
 
 /**
@@ -28,10 +29,12 @@ export function bestLaunch(state: SimState, tuning: Tuning): Vec2 | null {
   if (candidates.length === 0) return null;
   const byId = new Map<number, Anchor>(candidates.map((a) => [a.id, a]));
   let best: { pull: Vec2; height: number } | null = null;
+  // Les mêmes obstacles que le vérificateur : les portes ne comptent pas, le tir prouvé passe quand elles sont ouvertes.
+  const obstacles = provableObstacles(state.obstacles);
   for (const pull of launchSet(state.env)) {
     const pos = pulledPosition(launcher.pos, pull);
-    if (state.obstacles.some((box) => circleBoxGap(pos, tuning.heroRadius, box) <= 0)) continue;
-    const caught = flightCatches(launcher, { pos, vel: launchVelocity(pull, state.env) }, candidates, state.obstacles, tuning, state.env);
+    if (obstacles.some((box) => circleBoxGap(pos, tuning.heroRadius, box) <= 0)) continue;
+    const caught = flightCatches(launcher, { pos, vel: launchVelocity(pull, state.env) }, candidates, obstacles, tuning, state.env);
     for (const id of caught) {
       const height = byId.get(id)?.pos.y ?? -Infinity;
       if (!best || height > best.height) best = { pull, height };

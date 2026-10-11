@@ -6,8 +6,8 @@ import type { Tuning } from '../sim/tuning';
 import { formatDecimal } from './format';
 
 /**
- * Effets de temps réel : textes flottants, bannière (palier, intro d'un
- * niveau ou événement), animation du trait du grappin, traînées du vent,
+ * Effets de temps réel : textes flottants, éclats (rebond, fracas, anneau),
+ * bannière (palier, intro d'un niveau ou événement), animation du trait du grappin, traînées du vent,
  * horloge du clignotement de l'alerte, et les ondes qui font vivre les tubes
  * de néon (pulsation, grésillement, scintillement).
  *
@@ -28,6 +28,13 @@ export const INTRO_SECONDS = 3;
 export const EVENT_SECONDS = 2.5;
 /** Vie d'un conseil du tutoriel, en secondes : le temps de le lire en jouant. */
 export const TIP_SECONDS = 3;
+
+/** Éclat d'un rebond, d'un fracas ou d'un anneau : bref, discret, il ne doit jamais cacher ce qui suit. Durée en secondes, et nombre maximal à la fois. */
+export const FLASH_SECONDS = 0.35;
+const FLASH_MAX = 6;
+/** Rayon final de chaque éclat, en pixels, et part de ce rayon où il naît. */
+const FLASH_RADIUS: Record<FlashKind, number> = { bounce: 38, smash: 56, ring: 46, centre: 64 };
+const FLASH_START = 0.35;
 
 /** Alerte : la ligne claire de la brume clignote ce nombre de fois par seconde, entre ces deux opacités. */
 export const ALERT_BLINK_HZ = 2;
@@ -84,6 +91,17 @@ export interface Banner {
   readonly tone?: 'tip';
 }
 
+/** Ce qu'un éclat raconte : un rebond, une paroi qui vole en éclats, un anneau traversé, un anneau traversé au centre. */
+export type FlashKind = 'bounce' | 'smash' | 'ring' | 'centre';
+
+/** Un éclat qui naît au personnage : cercle qui s'élargit en s'effaçant, à la position d'écran où il est né. */
+export interface Flash {
+  readonly kind: FlashKind;
+  readonly x: number;
+  readonly y: number;
+  age: number;
+}
+
 /**
  * Une traînée de vent, en fractions de la vue (0 à gauche et en haut, 1 à droite et en bas) :
  * le rendu la pose dans le repère du monde, où le vent souffle horizontalement.
@@ -111,6 +129,32 @@ export function floatAlpha(age: number): number {
 export function floatRise(age: number): number {
   const t = clamp01(age / FLOAT_SECONDS);
   return FLOAT_RISE * (1 - (1 - t) * (1 - t));
+}
+
+/** L'éclat que ce qui vient de se passer déclenche, ou null s'il n'en a pas. */
+export function flashFor(event: RuleEvent): FlashKind | null {
+  switch (event.type) {
+    case 'bounce':
+      return 'bounce';
+    case 'smash':
+      return 'smash';
+    case 'ring':
+      return event.centred ? 'centre' : 'ring';
+    default:
+      return null;
+  }
+}
+
+/** Opacité d'un éclat : pleine à la naissance, puis de plus en plus vite vers zéro. */
+export function flashAlpha(age: number): number {
+  const t = clamp01(age / FLASH_SECONDS);
+  return (1 - t) * (1 - t);
+}
+
+/** Rayon d'un éclat en pixels : il naît à une part de son rayon final et s'élargit en ralentissant. */
+export function flashRadius(kind: FlashKind, age: number): number {
+  const t = clamp01(age / FLASH_SECONDS);
+  return FLASH_RADIUS[kind] * (FLASH_START + (1 - FLASH_START) * (1 - (1 - t) * (1 - t)));
 }
 
 /** Opacité de la bannière : fondu d'entrée, plateau, fondu de sortie, pour une bannière qui dure `seconds`. */
@@ -178,6 +222,12 @@ export function floatingTextFor(event: RuleEvent, tuning: Tuning): string | null
       return 'Décharge !';
     case 'bump':
       return 'Boum';
+    case 'bounce':
+      return 'Rebond';
+    case 'smash':
+      return 'Fracas';
+    case 'ring':
+      return event.centred ? 'Au centre !' : 'Anneau';
     default:
       return null;
   }
@@ -186,6 +236,7 @@ export function floatingTextFor(event: RuleEvent, tuning: Tuning): string | null
 export class Effects {
   private readonly tuning: Tuning;
   private floating: FloatingText[] = [];
+  private flashing: Flash[] = [];
   private current: Banner | null = null;
   private ropeAge = ROPE_DRAW_SECONDS;
   private elapsed = 0;
@@ -199,6 +250,11 @@ export class Effects {
 
   get texts(): readonly FloatingText[] {
     return this.floating;
+  }
+
+  /** Les éclats en cours, du plus ancien au plus récent. */
+  get flashes(): readonly Flash[] {
+    return this.flashing;
   }
 
   get banner(): Readonly<Banner> | null {
@@ -231,6 +287,10 @@ export class Effects {
     this.blow(dtSeconds, windX);
     for (const item of this.floating) item.age += dtSeconds;
     this.floating = this.floating.filter((item) => item.age < FLOAT_SECONDS);
+    if (this.flashing.length > 0) {
+      for (const flash of this.flashing) flash.age += dtSeconds;
+      this.flashing = this.flashing.filter((flash) => flash.age < FLASH_SECONDS);
+    }
     if (this.current) {
       this.current.age += dtSeconds;
       if (this.current.age >= this.current.seconds) this.current = null;
@@ -241,6 +301,11 @@ export class Effects {
   handle(event: RuleEvent, hero: Vec2): void {
     if (event.type === 'attach') this.ropeAge = 0;
     if (event.type === 'tier') this.current = { text: `${event.name} · ${event.tier * this.tuning.tierHeight} m`, detail: null, seconds: BANNER_SECONDS, age: 0 };
+    const flash = flashFor(event);
+    if (flash !== null) {
+      this.flashing.push({ kind: flash, x: hero.x, y: hero.y, age: 0 });
+      if (this.flashing.length > FLASH_MAX) this.flashing.shift();
+    }
     const text = floatingTextFor(event, this.tuning);
     if (text === null) return;
     this.floating.push({ text, x: hero.x, y: this.freeY(hero.x, hero.y - FLOAT_START_LIFT), age: 0 });

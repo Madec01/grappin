@@ -26,13 +26,42 @@ export interface Anchor {
   readonly cable?: { readonly from: Vec2; readonly to: Vec2; /** Durée d'un aller-retour, en secondes. */ readonly period: number };
 }
 
-/** Obstacle fixe : boîte alignée sur les axes, en mètres, Y vers le haut. Le toucher tue, le frôler rapporte. */
+/**
+ * Espèces d'obstacles (brief du 11 octobre 2026, lot 2). Solide : le toucher
+ * fait rebondir en perdant l'élan et lâche la corde. Rebond : une surface qui
+ * renvoie le personnage selon son angle d'arrivée, presque sans perte, sans
+ * étourdir ni casser la série. Cassable : une paroi que l'on traverse en volant
+ * en éclats si l'on arrive assez vite (`smashSpeed`), solide sinon. Porte :
+ * tour à tour solide et franchissable, par cycles lents (`cycles.ts`), jamais
+ * refermée sur le personnage.
+ */
+export type ObstacleKind = 'solide' | 'rebond' | 'cassable' | 'porte';
+
+/** Obstacle : boîte alignée sur les axes, en mètres, Y vers le haut. Le frôler rapporte ; le toucher dépend de son espèce. */
 export interface Obstacle {
   readonly id: number;
   readonly x0: number;
   readonly y0: number;
   readonly x1: number;
   readonly y1: number;
+  /** Espèce ; absente, l'obstacle est solide. */
+  readonly kind?: ObstacleKind;
+  /** Paroi cassable traversée : plus rien, ni solide, ni dessinée. */
+  broken?: true;
+}
+
+/**
+ * Anneau de précision : rien de solide, un cercle à traverser en vol. Le
+ * traverser rapporte, et près du centre davantage, avec un cran de série : les
+ * belles trajectoires se récompensent. Un anneau raté ne coûte rien.
+ */
+export interface Ring {
+  readonly id: number;
+  readonly pos: Vec2;
+  readonly radius: number;
+  /** Distance la plus courte au centre pendant la traversée en cours, ou null hors de l'anneau. */
+  closest: number | null;
+  taken: boolean;
 }
 
 /** Étoile de la route haute, ou étoile de pluie qui tombe : ramassée au passage. */
@@ -86,6 +115,12 @@ export type RuleEvent =
   | { readonly type: 'death'; readonly height: number; readonly cause: 'fog' | 'fall' }
   /** Choc contre un obstacle : rebond, corde lâchée, série à zéro, étourdi un instant. */
   | { readonly type: 'bump'; readonly obstacleId: number }
+  /** Rebond sur une surface de rebond : renvoyé presque sans perte, corde lâchée, ni série perdue ni étourdi. */
+  | { readonly type: 'bounce'; readonly obstacleId: number }
+  /** Paroi cassable traversée assez vite : elle vole en éclats et rapporte. */
+  | { readonly type: 'smash'; readonly obstacleId: number }
+  /** Anneau de précision traversé ; `centred` si le passage est près du centre. */
+  | { readonly type: 'ring'; readonly ringId: number; readonly centred: boolean }
   /** Décharge d'une prise électrique tenue quand elle se charge : corde lâchée, personnage repoussé et étourdi. */
   | { readonly type: 'shock'; readonly anchorId: number };
 
@@ -103,8 +138,11 @@ export interface SimState {
   anchors: Anchor[];
   obstacles: Obstacle[];
   pickups: Pickup[];
+  rings: Ring[];
   /** Obstacles déjà frôlés depuis la dernière accroche : un bonus par obstacle et par corde. */
   grazed: number[];
+  /** Portes dans lesquelles le personnage se trouve : une porte ne se referme jamais sur lui, il en sort d'abord. */
+  doorsInside: number[];
   /** Palier nommé atteint. */
   tier: number;
   /** Point visé, surligné avant le tap, ou null si aucun point n'est à portée. */

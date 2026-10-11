@@ -72,6 +72,12 @@ export interface Tuning {
   /** Accroche propulseuse : la vitesse au lâcher est multipliée par ce facteur. */
   readonly boostFactor: number;
   /** Frôlé : distance maximale entre le bord du personnage et un obstacle pour compter le bonus. */
+  /** Vitesse à partir de laquelle une paroi cassable vole en éclats, en m/s, et ce que rapporte le fracas. */
+  readonly smashSpeed: number;
+  readonly smashScore: number;
+  /** Ce que rapporte un anneau de précision traversé, et traversé près du centre. */
+  readonly ringScore: number;
+  readonly ringCentreScore: number;
   readonly grazeDistance: number;
   /** Points d'un frôlé et d'une étoile, multipliés par le multiplicateur courant. */
   readonly grazeScore: number;
@@ -123,12 +129,16 @@ export const DEFAULT_TUNING: Tuning = {
   aimHeightBias: 0.25,
   perfectMinSlope: 0.5774,
   perfectMaxSlope: 1.7321,
-  perfectMinSpeed: 3,
+  perfectMinSpeed: 7,
   comboStep: 0.25,
   comboMissPenalty: 1,
   comboMaxMultiplier: 5,
   fragileSeconds: 1,
   boostFactor: 1.35,
+  smashSpeed: 10,
+  smashScore: 25,
+  ringScore: 15,
+  ringCentreScore: 40,
   grazeDistance: 0.5,
   grazeScore: 5,
   pickupScore: 10,

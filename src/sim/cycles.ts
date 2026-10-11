@@ -20,13 +20,46 @@ export const ELECTRIC_CHARGED_SECONDS = 1.5;
 export const ELECTRIC_WARNING_SECONDS = 0.6;
 export const ECLIPSE_PERIOD_SECONDS = 4;
 export const ECLIPSE_LIT_SECONDS = 2;
+/**
+ * Porte intermittente (brief, O1) : ouverte 3,6 s sur 6, et elle prévient
+ * 0,8 s avant de se fermer. « Première utilisation : cycle lent, ouverture
+ * généreuse. » Le cycle se calcule du numéro de pas et du numéro d'obstacle,
+ * décalé comme celui des prises.
+ */
+export const DOOR_PERIOD_SECONDS = 6;
+export const DOOR_OPEN_SECONDS = 3.6;
+export const DOOR_WARNING_SECONDS = 0.8;
 /** Décalage de phase entre deux prises consécutives, en secondes. */
 const PHASE_OFFSET_PER_ID = 0.37;
 
-/** Temps écoulé dans le cycle de la prise, en secondes, de 0 à `period`. */
-function cycleTime(anchorId: number, step: number, tuning: Tuning, period: number): number {
-  const t = step * tuning.stepSeconds + anchorId * PHASE_OFFSET_PER_ID;
+/** Temps écoulé dans le cycle d'une prise ou d'une porte, en secondes, de 0 à `period`. */
+function cycleTime(id: number, step: number, tuning: Tuning, period: number): number {
+  const t = step * tuning.stepSeconds + id * PHASE_OFFSET_PER_ID;
   return t - Math.floor(t / period) * period;
+}
+
+export type DoorState = 'ouverte' | 'se ferme' | 'fermee';
+
+/** Où en est le cycle d'une porte : ouverte, sur le point de se fermer, ou fermée (solide). */
+export function doorState(obstacleId: number, step: number, tuning: Tuning): DoorState {
+  const t = cycleTime(obstacleId, step, tuning, DOOR_PERIOD_SECONDS);
+  if (t >= DOOR_OPEN_SECONDS) return 'fermee';
+  if (t >= DOOR_OPEN_SECONDS - DOOR_WARNING_SECONDS) return 'se ferme';
+  return 'ouverte';
+}
+
+export function isDoorClosed(obstacleId: number, step: number, tuning: Tuning): boolean {
+  return doorState(obstacleId, step, tuning) === 'fermee';
+}
+
+/**
+ * La jauge d'une porte, de 0 à 1 : la part de la phase en cours déjà écoulée.
+ * Ouverte, elle se remplit et la porte se ferme à 1 ; fermée, elle se remplit
+ * de nouveau et la porte s'ouvre à 1. Le rendu l'annonce.
+ */
+export function doorGauge(obstacleId: number, step: number, tuning: Tuning): number {
+  const t = cycleTime(obstacleId, step, tuning, DOOR_PERIOD_SECONDS);
+  return t < DOOR_OPEN_SECONDS ? t / DOOR_OPEN_SECONDS : (t - DOOR_OPEN_SECONDS) / (DOOR_PERIOD_SECONDS - DOOR_OPEN_SECONDS);
 }
 
 export type ElectricState = 'calme' | 'avertit' | 'chargee';

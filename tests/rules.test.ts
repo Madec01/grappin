@@ -60,12 +60,14 @@ describe('accroche et lâcher', () => {
 
 describe('lâcher parfait et combo', () => {
   it('reconnaît la fenêtre de 30° à 60° vers le haut, à vitesse suffisante', () => {
-    expect(isPerfectRelease(4, 4, T)).toBe(true);
-    expect(isPerfectRelease(-4, 4, T)).toBe(true);
-    expect(isPerfectRelease(4, 1, T)).toBe(false);
-    expect(isPerfectRelease(1, 4, T)).toBe(false);
-    expect(isPerfectRelease(4, -4, T)).toBe(false);
-    expect(isPerfectRelease(0, 4, T)).toBe(false);
+    expect(isPerfectRelease(6, 6, T)).toBe(true);
+    expect(isPerfectRelease(-6, 6, T)).toBe(true);
+    expect(isPerfectRelease(8, 2, T)).toBe(false);
+    expect(isPerfectRelease(2, 8, T)).toBe(false);
+    expect(isPerfectRelease(6, -6, T)).toBe(false);
+    expect(isPerfectRelease(0, 8, T)).toBe(false);
+    // Retour du propriétaire (0.11.0) : un parfait demande un vrai élan, pas le minimum. À 45° mais sous 7 m/s, ce n'est pas un parfait.
+    expect(isPerfectRelease(4, 4, T)).toBe(false);
     expect(isPerfectRelease(1.5, 1.5, T)).toBe(false);
   });
 

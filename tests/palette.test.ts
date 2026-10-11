@@ -18,7 +18,15 @@ const SPECIES: Record<string, number> = {
   eclipse: COLOR.eclipse,
   obstacleEdge: COLOR.obstacleEdge,
   cityEdge: COLOR.cityEdge,
+  // Les espèces d'obstacles du lot 2 et l'anneau de précision : des couleurs de sens, elles aussi hors de portée de l'ambiance.
+  bounce: COLOR.bounce,
+  smash: COLOR.smash,
+  door: COLOR.door,
+  ring: COLOR.ring,
 };
+
+/** Les quatre teintes nouvelles du lot 2 : surface de rebond, paroi cassable, porte, anneau de précision. */
+const LOT2: Record<string, number> = { bounce: COLOR.bounce, smash: COLOR.smash, door: COLOR.door, ring: COLOR.ring };
 
 const FIELDS = Object.keys(PALETTES.biome1) as (keyof Palette)[];
 
@@ -113,6 +121,50 @@ describe('la teinte de la fenêtre de lâcher', () => {
 
   it('se voit sur chaque ambiance : son halo n\'a rien de celui de la palette, froide ou blanc chaud', () => {
     for (const family of FAMILIES) expect(distance(COLOR.releaseHalo, PALETTES[family].halo), family).toBeGreaterThan(100);
+  });
+});
+
+describe('les teintes des obstacles à comportement et des anneaux', () => {
+  /** Les couleurs qui portent un sens depuis avant le lot 2 : tout `SPECIES` sauf ses quatre nouvelles. */
+  const OLD = Object.entries(SPECIES).filter(([name]) => !(name in LOT2));
+
+  it('sont à plus de 40 de toute couleur d\'espèce de prise, d\'étoile et d\'obstacle solide : un coup d\'œil les distingue', () => {
+    expect(OLD.length).toBeGreaterThan(8);
+    for (const [tone, color] of Object.entries(LOT2)) {
+      for (const [name, species] of OLD) {
+        expect(color, `${tone} / ${name}`).not.toBe(species);
+        expect(distance(color, species), `${tone} / ${name}`).toBeGreaterThan(40);
+      }
+    }
+  });
+
+  it('sont franchement distinctes entre elles : une surface de rebond ne passe pas pour une porte, ni un anneau pour une paroi', () => {
+    const entries = Object.entries(LOT2);
+    for (let i = 0; i < entries.length; i += 1) {
+      for (let j = i + 1; j < entries.length; j += 1) expect(distance(entries[i]![1], entries[j]![1]), `${entries[i]![0]} / ${entries[j]![0]}`).toBeGreaterThan(60);
+    }
+  });
+
+  it('sont loin des teintes chaudes du lâcher parfait, qui se posent sur le personnage et sa corde', () => {
+    for (const [tone, color] of Object.entries(LOT2)) {
+      for (const warm of [COLOR.release, COLOR.releaseHalo]) expect(distance(color, warm), tone).toBeGreaterThan(40);
+    }
+  });
+
+  it('se voient sur chaque ambiance : ni le halo, ni le cœur, ni la couleur d\'effet d\'une famille ne leur ressemble', () => {
+    for (const family of FAMILIES) {
+      const palette = PALETTES[family];
+      for (const [tone, color] of Object.entries(LOT2)) {
+        for (const field of ['halo', 'tube', 'pale', 'accent', 'effectA', 'effectB', 'effectC'] as const) expect(distance(palette[field], color), `${family}.${field} / ${tone}`).toBeGreaterThan(40);
+      }
+    }
+  });
+
+  it('sont des 0xRRGGBB vifs : un néon, pas une teinte éteinte (au moins un canal à 0xe0)', () => {
+    for (const [tone, color] of Object.entries(LOT2)) {
+      expect(Number.isInteger(color), tone).toBe(true);
+      expect(Math.max(...channels(color)), tone).toBeGreaterThanOrEqual(0xe0);
+    }
   });
 });
 

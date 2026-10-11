@@ -5,7 +5,7 @@ import { FREE_RUN, createCourse, extendCourse, pruneCourse, type CoursePlan } fr
 import { STILL } from './environment';
 import { applyEvents } from './events';
 import { integrate, swingStep } from './physics';
-import { applyBufferedPress, applyFall, applyFinish, applyFog, applyCycles, applyFragile, applyGround, applyHang, applyObstacles, applyPickups, applyScore, applyTier, press, release } from './rules';
+import { applyBufferedPress, applyFall, applyFinish, applyFog, applyCycles, applyFragile, applyGround, applyHang, applyObstacles, applyPickups, applyRings, applyScore, applyTier, press, release } from './rules';
 import type { RuleEvent, SimState } from './state';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 
@@ -28,7 +28,9 @@ export function createState(seed: number, tuning: Tuning, plan: CoursePlan = FRE
     anchors: [],
     obstacles: [],
     pickups: [],
+    rings: [],
     grazed: [],
+    doorsInside: [],
     tier: 0,
     targetId: null,
     targetValidStep: 0,
@@ -96,7 +98,7 @@ export class Simulation {
 
   /**
    * Avance d'un pas. Ordre fixe : événements, casse fragile, treuil et mouvement,
-   * sol, chute, obstacles, étoiles, pendaison, score, palier, arrivée, brume, parcours, visée, appui en mémoire.
+   * sol, chute, obstacles, étoiles, anneaux, pendaison, score, palier, arrivée, brume, parcours, visée, appui en mémoire.
    */
   step(): void {
     const s = this.state;
@@ -124,6 +126,7 @@ export class Simulation {
     applyFall(s, this.events);
     applyObstacles(s, this.tuning, this.events);
     applyPickups(s, this.tuning, this.events);
+    applyRings(s, this.tuning, this.events);
     applyHang(s, this.tuning, this.events);
     applyScore(s, this.tuning);
     applyTier(s, this.tuning, this.events);

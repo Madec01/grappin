@@ -2,6 +2,7 @@ import { createRng, type Rng } from '../core/math/rng';
 import type { Vec2 } from '../core/math/vec2';
 import { environmentOf, eventsAt, type EventKind, type ScheduledEvent } from './events';
 import { buildPlainSegment, buildSegment, tierProfile, type IdCounters, type Segment, type SegmentContext, type TierProfile } from './generator';
+import { buildScene, type SceneId } from '../data/scenes';
 import type { Anchor, Obstacle, SimState } from './state';
 import type { Tuning } from './tuning';
 import { verifySegment } from './verifier';
@@ -21,6 +22,8 @@ import { verifySegment } from './verifier';
  */
 export type CoursePlan =
   | { readonly kind: 'infinite'; readonly startY: number }
+  /** Scène de démonstration d'une mécanique : un premier segment construit à la main, puis la course libre continue. */
+  | { readonly kind: 'scene'; readonly sceneId: SceneId; readonly startY: number }
   | {
       readonly kind: 'level';
       readonly levelId: number;
@@ -133,7 +136,7 @@ export function createCourse(seed: number, plan: CoursePlan): CourseState {
     pickupsTotal: 0,
     lastX: 0,
     lastY: plan.startY,
-    ids: { anchor: 1, obstacle: 1, pickup: 1 },
+    ids: { anchor: 1, obstacle: 1, pickup: 1, ring: 1 },
     segments: 0,
     fallbacks: 0,
     unverified: 0,
@@ -157,6 +160,8 @@ export function extendCourse(state: SimState, untilY: number, tuning: Tuning): v
     const context = state.anchors.slice(-CONTEXT_ANCHORS);
     const contextObstacles = state.obstacles.filter((o) => o.y1 >= course.lastY - 8);
     let accepted: Segment | null = null;
+    // Une scène commence par son segment construit à la main (prouvé par les tests) ; la suite est engendrée comme une course libre.
+    if (course.plan.kind === 'scene' && course.segments === 0) accepted = buildScene(course.plan.sceneId, course.ids, origin);
     for (let attempt = 0; attempt < MAX_ATTEMPTS && !accepted; attempt += 1) {
       const candidate = buildSegment(rng, course.ids, from, origin, profile, rng.pick(profile.archetypes), conditions);
       if (verifyWithCables(context, contextObstacles, candidate, tuning, conditions)) accepted = candidate;
@@ -182,6 +187,7 @@ export function extendCourse(state: SimState, untilY: number, tuning: Tuning): v
     const pickups = accepted.pickups.filter((pickup) => pickup.pos.y < ceiling);
     state.pickups.push(...pickups);
     course.pickupsTotal += pickups.length;
+    state.rings.push(...accepted.rings.filter((ring) => ring.pos.y < ceiling));
     const top = accepted.anchors.at(-1)!;
     course.lastX = top.pos.x;
     course.lastY = top.pos.y;
@@ -198,4 +204,5 @@ export function pruneCourse(state: SimState, fogY: number): void {
   }
   if (state.obstacles.length > 0 && state.obstacles[0]!.y1 < belowY) state.obstacles = state.obstacles.filter((o) => o.y1 >= belowY);
   if (state.pickups.length > 0 && state.pickups[0]!.pos.y < belowY) state.pickups = state.pickups.filter((p) => p.pos.y >= belowY);
+  if (state.rings.length > 0 && state.rings[0]!.pos.y < belowY) state.rings = state.rings.filter((r) => r.pos.y >= belowY);
 }

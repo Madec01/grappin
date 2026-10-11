@@ -1,5 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import { LEVELS, levelById } from '../src/data/levels';
+import { doorState, type DoorState } from '../src/sim/cycles';
+import { Simulation } from '../src/sim/simulation';
+import { DEFAULT_TUNING } from '../src/sim/tuning';
 
 /**
  * Test de fumée sur écran de téléphone (390 × 844, tactile) : la page charge,
@@ -12,7 +15,8 @@ import { LEVELS, levelById } from '../src/data/levels';
  * automatique, la pause fige la partie et se reprend sans lâcher la corde, les
  * réglages du titre (Sons, Départ) survivent au rechargement, la fenêtre de
  * lâcher s'ouvre puis se referme pendant un balancement, et le premier conseil
- * du tutoriel apparaît à la première accroche. Tout passe par `window.__grappin`.
+ * du tutoriel apparaît à la première accroche, et les quatre scènes de démonstration du lot 2 (rebond, paroi cassable, porte, anneau)
+ * se jouent et se dessinent sans erreur. Tout passe par `window.__grappin`.
  */
 
 const CENTER = { x: 195, y: 422 };
@@ -282,9 +286,9 @@ test('fenêtre de lâcher : pendant un balancement, state().releaseWindow passe 
   await page.evaluate(() => window.__grappin!.press());
   expect((await state(page)).attached).toBe(true);
 
-  // Deux secondes de balancement : la fenêtre s'ouvre (le lâcher monterait entre 30° et 60°) et se referme.
+  // Trois secondes de balancement : la fenêtre s'ouvre (le lâcher monterait entre 30° et 60°) et se referme.
   const seen: boolean[] = [];
-  for (let frame = 0; frame < 125; frame += 1) {
+  for (let frame = 0; frame < 190; frame += 1) {
     await page.clock.runFor(16);
     const sample = await state(page);
     expect(sample.attached).toBe(true);
@@ -330,6 +334,75 @@ test('un pilote automatique grimpe au-delà de 10 m sans erreur de console', asy
   expect(climbed.screen).toBe('playing');
   expect(climbed.height).toBeGreaterThan(10);
   expect(climbed.cause).toBeNull();
+  expect(errors).toEqual([]);
+});
+
+/**
+ * Scènes de démonstration du lot 2 (`?scene=`) : un premier segment construit à la main, qui montre une mécanique isolée. Chacune se
+ * charge, la course libre commence par elle, et ses images se dessinent sans erreur de console. L'horloge de la page est figée puis menée
+ * à la main : peu d'images suffisent, et le test ne dépend pas de la vitesse du rendu logiciel. Le pilote ne sait pas forcément casser
+ * une paroi ni rebondir : la paroi cassable et le rebond se contentent de se charger et de se dessiner.
+ */
+for (const scene of ['rebond', 'cassable', 'porte', 'anneau'] as const) {
+  test(`scène « ${scene} » : ?scene=${scene} commence la course libre par elle, et ses images se dessinent sans erreur`, async ({ page }) => {
+    const errors = watchErrors(page);
+    await page.clock.install({ time: 0 });
+    await open(page, `/?scene=${scene}&graine=5&fogBaseSpeed=0.1`);
+    await page.clock.pauseAt(60_000);
+    await page.evaluate(() => window.__grappin!.playFree());
+    // L'intro de la scène (trois secondes de bannière) a le temps de se dessiner, fondus compris.
+    for (let frame = 0; frame < 40; frame += 1) await page.clock.runFor(16);
+    const shown = await state(page);
+    expect(shown).toMatchObject({ screen: 'playing', scene, smashed: 0, rings: 0 });
+    // Les scènes à obstacles en ont chargé ; l'anneau n'en a pas besoin, mais a son premier segment.
+    if (scene !== 'anneau') expect(shown.obstacles).toBeGreaterThanOrEqual(1);
+    expect(shown.step).toBeGreaterThan(0);
+    // Le doigt posé : la corde part vers le premier point de la scène et la partie continue, sans erreur.
+    await page.evaluate(() => window.__grappin!.press());
+    for (let frame = 0; frame < 30; frame += 1) await page.clock.runFor(16);
+    expect(await state(page)).toMatchObject({ screen: 'playing', scene, attached: true });
+    expect(errors).toEqual([]);
+  });
+}
+
+test('scène « porte » : un cycle complet (6 s) se joue, et le rendu voit la porte ouverte, qui se ferme, puis fermée', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.clock.install({ time: 0 });
+  await open(page, '/?scene=porte&graine=5&fogBaseSpeed=0.1');
+  await page.clock.pauseAt(60_000);
+  await page.evaluate(() => window.__grappin!.playFree());
+  // La porte de la scène, retrouvée en rejouant son segment : le cycle d'une porte ne dépend que du pas et de son numéro.
+  const door = new Simulation(5, DEFAULT_TUNING, { kind: 'scene', sceneId: 'porte', startY: 0 }).state.obstacles.find((box) => box.kind === 'porte');
+  expect(door).toBeDefined();
+  const seen = new Set<DoorState>();
+  const first = (await state(page)).step;
+  // Un pas dure 1/120 s : 6 s, plus une marge. Cent millisecondes par image, le plafond de temps du jeu : peu d'images à dessiner.
+  const period = Math.round(6 / DEFAULT_TUNING.stepSeconds);
+  for (let frame = 0; frame < 80; frame += 1) {
+    await page.clock.runFor(100);
+    const sample = await state(page);
+    seen.add(doorState(door!.id, sample.step, DEFAULT_TUNING));
+    expect(sample.screen).toBe('playing');
+  }
+  expect((await state(page)).step - first).toBeGreaterThanOrEqual(period);
+  expect([...seen].sort()).toEqual(['fermee', 'ouverte', 'se ferme']);
+  expect(errors).toEqual([]);
+});
+
+test('scène « anneau » : le pilote automatique traverse au moins un anneau, et state().rings le compte', async ({ page }) => {
+  // Le pilote joue en temps réel et peut mourir ou manquer l'anneau sur une machine lente : on rejoue la scène, quelques fois au plus.
+  test.setTimeout(120_000);
+  const errors = watchErrors(page);
+  await open(page, '/?scene=anneau&graine=5&fogBaseSpeed=0.15');
+  let rings = 0;
+  for (let attempt = 0; attempt < 4 && rings < 1; attempt += 1) {
+    expect(await page.evaluate(() => window.__grappin!.playScene('anneau'))).toBe(true);
+    // Les anneaux sont au milieu des quatre premiers vols : à 16 m, le pilote a dû en traverser.
+    await page.evaluate(autopilot(16, 30_000));
+    rings = (await state(page)).rings;
+  }
+  expect(rings).toBeGreaterThanOrEqual(1);
+  expect((await state(page)).scene).toBe('anneau');
   expect(errors).toEqual([]);
 });
 

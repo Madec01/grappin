@@ -7,6 +7,7 @@ import { cueFor, silentSfx, type SoundPlayer } from '../audio/sfx';
 import { Coach } from './coach';
 import { learningTuning } from '../meta/learning';
 import { LEVELS, levelById, type LevelDef } from '../data/levels';
+import { isSceneId, sceneById, type SceneId } from '../data/scenes';
 import { TITLE_TRACK, levelTrack, trackFamily, type MusicFamily, type TrackId } from '../data/musique';
 import { levelFor } from '../meta/levels';
 import { createProfile, endLevel, endRun, loadProfile, saveProfile, toggleTalisman, type LevelOutcome, type Profile, type ProfileStorage, type RunOutcome, type FreeStart } from '../meta/profile';
@@ -77,6 +78,8 @@ export interface GameSettings {
    * réel, musique ou non. Pour voir et tester le pouls sans son ; null sinon.
    */
   readonly pulseBpm: number | null;
+  /** Scène de démonstration d'une mécanique, `?scene=rebond` : la course libre commence par elle. Null sinon. */
+  readonly scene: SceneId | null;
 }
 
 /** Instantané lisible de l'extérieur : tests de bout en bout et séances de réglage. */
@@ -103,6 +106,11 @@ export interface DebugState {
   readonly obstacles: number;
   /** Étoiles prises depuis le début de la partie. */
   readonly pickups: number;
+  /** Anneaux traversés et parois cassées depuis le début de la partie, parmi ceux encore chargés. */
+  readonly rings: number;
+  readonly smashed: number;
+  /** Scène de démonstration en cours, ou null. */
+  readonly scene: SceneId | null;
   /** Niveau et expérience du profil, talismans équipés et missions actives avec leur avancement. */
   readonly level: number;
   readonly xp: number;
@@ -187,11 +195,13 @@ export function readSettings(search: string): GameSettings {
   const test = params.get('test')?.trim();
   const pulseText = params.get('pouls')?.trim();
   const pulseBpm = pulseText === undefined ? null : pulseText === '' ? DEFAULT_PULSE_BPM : Number(pulseText);
+  const scene = params.get('scene')?.trim() ?? '';
   return {
     seed: Number.isInteger(seed) ? seed : null,
     tuning: withTuning(DEFAULT_TUNING, overrides),
     testMode: test !== undefined && test !== '0' && test !== 'non',
     pulseBpm: pulseBpm !== null && Number.isFinite(pulseBpm) && pulseBpm > 0 ? pulseBpm : null,
+    scene: isSceneId(scene) ? scene : null,
   };
 }
 
@@ -417,6 +427,13 @@ export class Game {
     this.begin(this.newFreeRun(this.freeSeed()), false);
   }
 
+  /** Lance une scène de démonstration, pour les tests et les captures ; faux si l'identifiant est inconnu. */
+  playScene(id: string): boolean {
+    if (!isSceneId(id)) return false;
+    this.begin(this.newSceneRun(id, this.freeSeed()), false);
+    return true;
+  }
+
   /** Équipe ou retire un talisman, puis sauvegarde. Sans effet s'il n'est pas débloqué ou si les emplacements sont pleins. Renvoie le profil. */
   equip(id: TalismanId): Profile {
     const next = toggleTalisman(this.profile, id);
@@ -565,6 +582,9 @@ export class Game {
       tier: state.tier,
       obstacles: state.obstacles.length,
       pickups: this.run.pickupsTaken,
+      rings: state.rings.filter((ring) => ring.taken).length,
+      smashed: state.obstacles.filter((box) => box.broken).length,
+      scene: state.course.plan.kind === 'scene' ? state.course.plan.sceneId : null,
       level: levelFor(this.profile.xp),
       xp: this.profile.xp,
       equipped: [...this.profile.equipped],
@@ -624,9 +644,21 @@ export class Game {
     if (announcement) this.run.effects.announce(announcement.title, announcement.detail);
   }
 
-  /** Course libre neuve sur une graine, depuis la zone la plus haute franchie, avec les talismans équipés. */
+  /**
+   * Course libre neuve sur une graine, depuis la zone la plus haute franchie,
+   * avec les talismans équipés. Avec `?scene=`, elle commence par la scène de
+   * démonstration demandée, depuis le sol.
+   */
   private newFreeRun(seed: number): Run {
-    const plan: CoursePlan = { kind: 'infinite', startY: this.profile.freeStart === 'ground' ? 0 : freeRunStartY(this.profile) };
+    return this.settings.scene ? this.newSceneRun(this.settings.scene, seed) : this.newRun({ kind: 'infinite', startY: this.profile.freeStart === 'ground' ? 0 : freeRunStartY(this.profile) }, seed);
+  }
+
+  /** Scène de démonstration d'une mécanique : son segment construit à la main depuis le sol, puis la course libre. */
+  private newSceneRun(sceneId: SceneId, seed: number): Run {
+    return this.newRun({ kind: 'scene', sceneId, startY: 0 }, seed);
+  }
+
+  private newRun(plan: CoursePlan, seed: number): Run {
     return this.buildRun(null, seed, learningTuning(applyTalismans(this.settings.tuning, this.profile.equipped), this.profile), plan);
   }
 
@@ -656,7 +688,10 @@ export class Game {
     this.run = run;
     this.screen = 'playing';
     this.coach = new Coach(this.profile.tips);
+    const { plan } = run.sim.state.course;
+    const scene = plan.kind === 'scene' ? sceneById(plan.sceneId) : undefined;
     if (run.level) run.effects.intro(levelTitle(run.level), run.level.intro);
+    else if (scene) run.effects.intro(scene.name, scene.intro);
     if (grab) run.sim.press();
   }
 

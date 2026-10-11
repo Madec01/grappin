@@ -58,9 +58,9 @@ describe('environnement', () => {
   it('le lâcher parfait se juge à l\'opposé de la gravité du moment', () => {
     const turned = { gravityDir: { x: 1, y: 0 }, wind: { x: 0, y: 0 } };
     // Gravité vers la droite : « monter », c'est aller vers la gauche, de côté c'est le long de y.
-    expect(isPerfectRelease(-4, 4, T, turned)).toBe(true);
-    expect(isPerfectRelease(4, 4, T, turned)).toBe(false);
-    expect(isPerfectRelease(4, 4, T, STILL)).toBe(true);
+    expect(isPerfectRelease(-6, 6, T, turned)).toBe(true);
+    expect(isPerfectRelease(6, 6, T, turned)).toBe(false);
+    expect(isPerfectRelease(6, 6, T, STILL)).toBe(true);
   });
 });
 
