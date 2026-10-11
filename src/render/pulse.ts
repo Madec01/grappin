@@ -14,6 +14,12 @@ import { mixColor } from './sling';
  * position, et jamais la couleur d'une espèce de prise (`COLOR`, style.ts), qui
  * porte un sens.
  *
+ * Le propriétaire veut un jeu « hyper dynamique visuellement », aux couleurs
+ * qui changent vite : la couleur d'effet change donc à chaque temps, parmi les
+ * trois couleurs d'effet de la palette (A sur le temps fort, puis B, C, B), le
+ * temps fort frappe plus fort que les trois autres, et le fond, la crête de
+ * brume, la dalle du toit et la ville prennent la couleur du moment.
+ *
  * Règle absolue : au silence (`SILENT_PULSE`, ou tout pouls sans temps ni graves),
  * rien ne change. Chaque multiplicateur y vaut exactement 1, chaque ajout
  * exactement 0, et `pulsedPalette` rend la palette reçue elle-même : le rendu
@@ -23,33 +29,39 @@ import { mixColor } from './sling';
 /**
  * Tous les réglages du pouls, au même endroit. Les amplitudes sont des parts de
  * 0 à 1 de ce que le pouls donne : un temps franc (`beat` et `strength` à 1) ou
- * des graves à fond.
+ * des graves à fond. Sur le temps fort de la mesure, le coup est renforcé de
+ * `beat.downbeat` ; les multiplicateurs peuvent alors dépasser leur part nominale
+ * d'autant.
  */
 export const PULSE = {
-  /** Fond : il monte vers la brume de cette part sur le temps (× force) et avec les graves, sans jamais dépasser `max`. */
-  background: { beat: 0.1, bass: 0.05, max: 0.15 },
-  /** Crête de la brume : part de blanc ajoutée sur le temps (× force). */
-  fogEdge: { beat: 0.5 },
+  /** Le coup : part de renfort sur le temps fort de chaque mesure. */
+  beat: { downbeat: 0.3 },
+  /** Fond : il monte vers la brume de cette part sur le temps (× force) et avec les graves, sans jamais dépasser `max` ; et il se teinte de la couleur d'effet de `tint` sur le temps. */
+  background: { beat: 0.16, bass: 0.06, max: 0.24, tint: 0.08 },
+  /** Crête de la brume : part de couleur d'effet prise sur le temps (× force), puis part de blanc ajoutée. */
+  fogEdge: { tint: 0.5, beat: 0.6 },
   /** Nappe de la brume : opacité ajoutée avec les graves. */
-  fogSheet: { bass: 0.06 },
-  /** Ville : part du halo mélangée aux traits avec les graves, et, sur les immeubles qui dansent, part de la couleur d'effet sur le temps (× force). */
-  city: { bass: 0.5, dance: 0.7 },
+  fogSheet: { bass: 0.08 },
+  /** Dalle du toit de départ et plateformes : part de couleur d'effet prise sur le temps (× force). */
+  roof: { beat: 0.15 },
+  /** Ville : part de la couleur d'effet mélangée aux traits avec les graves, et, sur les immeubles qui dansent, part de la couleur d'effet sur le temps (× force). */
+  city: { bass: 0.7, dance: 1 },
   /** Halo des tubes ambiants : de combien la portée et l'intensité grandissent sur le temps (× force). */
-  halo: { spread: 0.5, strength: 0.8 },
+  halo: { spread: 0.7, strength: 1 },
   /** Halo des espèces de prises : intensité ajoutée sur le temps (× force). Leurs couleurs ne bougent pas. */
-  species: { strength: 0.35 },
+  species: { strength: 0.5 },
   /** Halo du cerne des obstacles : intensité ajoutée, sur le temps (× force) ou avec les graves, le plus fort des deux. */
-  rim: { strength: 0.4 },
+  rim: { strength: 0.6 },
   /** Étoiles : amplitude du scintillement de la portée de leur halo avec les aigus, et nombre de ses à-coups par seconde. */
-  star: { reach: 0.6, hz: 9 },
+  star: { reach: 0.7, hz: 10 },
   /** Interface : de combien le multiplicateur grossit sur le temps (× force). */
-  ui: { multiplier: 0.12 },
-  /** Couleur d'effet : elle change toutes les `bars` mesures. */
-  effect: { bars: 2 },
+  ui: { multiplier: 0.18 },
+  /** Couleur d'effet : part du temps pendant laquelle l'ancienne couleur fond vers la nouvelle (le reste du temps, la nouvelle est franche). */
+  effect: { blend: 0.3 },
 } as const;
 
-/** Les couleurs de la palette que la couleur d'effet parcourt, dans l'ordre, puis recommence. */
-const EFFECT_CYCLE = ['halo', 'accent', 'fogEdge'] as const;
+/** Les couleurs d'effet de la palette, dans l'ordre des temps de la mesure : A sur le temps fort, puis B, C, B. */
+const EFFECT_SEQUENCE = ['effectA', 'effectB', 'effectC', 'effectB'] as const;
 
 /** Le blanc, vers lequel la crête de brume s'éclaire. */
 const WHITE = 0xffffff;
@@ -59,10 +71,18 @@ function unit(value: number): number {
   return value > 0 ? Math.min(1, value) : 0;
 }
 
-/** Le coup du temps : 1 sur un temps franc, retombe vers 0 jusqu'au suivant, d'autant plus faible que le temps l'est. */
+/**
+ * Le coup du temps : 1 sur un temps franc, retombe vers 0 jusqu'au suivant,
+ * d'autant plus faible que le temps l'est ; renforcé sur le temps fort de la
+ * mesure, où il peut dépasser 1 de `PULSE.beat.downbeat`.
+ */
 function punch(pulse: Pulse): number {
-  return unit(pulse.beat) * unit(pulse.strength);
+  const hit = unit(pulse.beat) * unit(pulse.strength);
+  return pulse.inBar === 0 && pulse.count >= 0 ? hit * (1 + PULSE.beat.downbeat) : hit;
 }
+
+/** Le plus fort coup possible : un temps fort franc. */
+export const PUNCH_MAX = 1 + PULSE.beat.downbeat;
 
 /** Courbe douce de 0 à 1 : pas d'à-coup au début ni à la fin d'un fondu. */
 function smooth(t: number): number {
@@ -72,7 +92,7 @@ function smooth(t: number): number {
 /**
  * Où en est le temps courant, de 0 (il vient de tomber) à 1 (le suivant arrive) :
  * l'inverse de la décroissance de `beat` (voir `BEAT_DECAY`). Il sert à mener un
- * fondu d'un temps de long à partir du seul pouls, sans horloge.
+ * fondu à partir du seul pouls, sans horloge.
  */
 function beatProgress(beat: number): number {
   if (!(beat > 0)) return 1;
@@ -80,47 +100,58 @@ function beatProgress(beat: number): number {
   return Math.min(1, -Math.log(beat) / BEAT_DECAY);
 }
 
+/** La place dans la mesure, bornée à la séquence des couleurs d'effet. */
+function sequenceIndex(inBar: number): number {
+  const index = Number.isFinite(inBar) ? Math.floor(inBar) : 0;
+  return ((index % EFFECT_SEQUENCE.length) + EFFECT_SEQUENCE.length) % EFFECT_SEQUENCE.length;
+}
+
 /**
- * La couleur d'effet : elle tourne avec la musique. Toutes les deux mesures,
- * elle passe du halo à l'accent, de l'accent à la crête de brume, puis
- * recommence ; au changement, elle fond de l'ancienne vers la nouvelle pendant
- * la durée du premier temps, sans claquer. Au silence, avant le premier temps
- * et pendant les deux premières mesures, c'est le halo de la palette. Ce sont
- * toujours des couleurs ambiantes de la palette : jamais celle d'une espèce.
+ * La couleur d'effet : elle change à chaque temps. Sur le temps fort de la
+ * mesure, la couleur A de la palette ; puis B, C et B sur les trois temps
+ * suivants. Au début de chaque temps, elle fond de la couleur du temps
+ * précédent vers la nouvelle pendant la part `PULSE.effect.blend` du temps, puis
+ * tient franche. Au silence et avant le premier temps, le halo de la palette.
+ * Ce sont toujours des couleurs d'ambiance : jamais celle d'une espèce.
  */
 export function effectColor(palette: Palette, pulse: Pulse): number {
   if (pulse.count < 0) return palette.halo;
-  const step = Math.floor(pulse.bars / PULSE.effect.bars);
-  if (step <= 0) return palette.halo;
-  const current = palette[EFFECT_CYCLE[step % EFFECT_CYCLE.length]!];
-  const startsBlock = pulse.inBar === 0 && pulse.bars % PULSE.effect.bars === 0;
-  if (!startsBlock) return current;
-  const previous = palette[EFFECT_CYCLE[(step - 1) % EFFECT_CYCLE.length]!];
-  return mixColor(previous, current, smooth(beatProgress(pulse.beat)));
+  const index = sequenceIndex(pulse.inBar);
+  const current = palette[EFFECT_SEQUENCE[index]!];
+  const previous = palette[EFFECT_SEQUENCE[(index + EFFECT_SEQUENCE.length - 1) % EFFECT_SEQUENCE.length]!];
+  if (previous === current) return current;
+  const progress = beatProgress(pulse.beat) / PULSE.effect.blend;
+  if (progress >= 1) return current;
+  return mixColor(previous, current, smooth(progress));
 }
 
 /**
  * La palette dans laquelle le pouls la plonge : le fond monte vers la brume sur
- * le temps et avec les graves (jamais de plus de `PULSE.background.max`), la crête
- * de brume s'éclaire sur le temps, la ville se teinte vers le halo avec les
- * graves, et le halo ambiant prend la couleur d'effet. Le reste (lignes
- * d'altitude, dalle du toit, cœur du tube, accent) ne bouge pas. Au silence, la
- * palette reçue elle-même (`===`), si bien que le rendu la reconnaît à son identité.
+ * le temps et avec les graves (jamais de plus de `PULSE.background.max`) et se
+ * teinte de la couleur d'effet, la crête de brume prend la couleur d'effet et
+ * s'éclaire sur le temps, la dalle du toit se teinte sur le temps, la ville se
+ * teinte vers la couleur d'effet avec les graves, et le halo ambiant est la
+ * couleur d'effet. Le reste (lignes d'altitude, cœur du tube, accent) ne bouge
+ * pas. Au silence, la palette reçue elle-même (`===`), si bien que le rendu la
+ * reconnaît à son identité.
  */
 export function pulsedPalette(palette: Palette, pulse: Pulse): Palette {
   const hit = punch(pulse);
   const bass = unit(pulse.bass);
   const lift = Math.min(PULSE.background.max, PULSE.background.beat * hit + PULSE.background.bass * bass);
-  const edge = PULSE.fogEdge.beat * hit;
-  const tint = PULSE.city.bass * bass;
-  const halo = effectColor(palette, pulse);
-  if (lift === 0 && edge === 0 && tint === 0 && halo === palette.halo) return palette;
+  const edge = Math.min(1, PULSE.fogEdge.beat * hit);
+  const tint = Math.min(1, PULSE.city.bass * bass);
+  const effect = effectColor(palette, pulse);
+  if (lift === 0 && edge === 0 && tint === 0 && effect === palette.halo) return palette;
+  const background = mixColor(mixColor(palette.background, palette.fog, lift), effect, Math.min(1, PULSE.background.tint * hit));
+  const crest = mixColor(palette.fogEdge, effect, Math.min(1, PULSE.fogEdge.tint * hit));
   return {
     ...palette,
-    background: mixColor(palette.background, palette.fog, lift),
-    fogEdge: mixColor(palette.fogEdge, WHITE, edge),
-    city: mixColor(palette.city, palette.halo, tint),
-    halo,
+    background,
+    roofFill: mixColor(palette.roofFill, effect, Math.min(1, PULSE.roof.beat * hit)),
+    fogEdge: mixColor(crest, WHITE, edge),
+    city: mixColor(palette.city, effect, tint),
+    halo: effect,
   };
 }
 
@@ -141,7 +172,7 @@ export function ambientHalo(pulse: Pulse): HaloBoost {
   return { spread: 1 + PULSE.halo.spread * hit, strength: 1 + PULSE.halo.strength * hit };
 }
 
-/** Multiplicateur d'intensité du halo des espèces de prises (et des étoiles) : un peu plus lumineux sur le temps, 1 au silence. Leur couleur ne change pas. */
+/** Multiplicateur d'intensité du halo des espèces de prises (et des étoiles) : plus lumineux sur le temps, 1 au silence. Leur couleur ne change pas. */
 export function speciesGlow(pulse: Pulse): number {
   return 1 + PULSE.species.strength * punch(pulse);
 }
@@ -167,7 +198,7 @@ export function starSparkle(pulse: Pulse, seconds: number, seed: number): number
   return 1 + PULSE.star.reach * unit(pulse.high) * (2 * wave - 1);
 }
 
-/** Taille du multiplicateur (×N) de l'interface : il grossit un peu sur le temps, 1 au silence. */
+/** Taille du multiplicateur (×N) de l'interface : il grossit sur le temps, 1 au silence. */
 export function multiplierPop(pulse: Pulse): number {
   return 1 + PULSE.ui.multiplier * punch(pulse);
 }
@@ -189,13 +220,14 @@ export function uiGlow(palette: Palette, pulse: Pulse): number {
  * Les deux lots de couleur de la ville, pour des immeubles qui dansent : les
  * immeubles d'index pair s'allument vers la couleur d'effet sur les temps pairs
  * de la mesure (0 et 2), les impairs sur les temps impairs (1 et 3), puis
- * retombent avec le temps. `palette` est celle que le pouls a déjà teintée.
- * Rend `[pairs, impairs]`, ou null quand rien ne s'allume (au silence, ou temps
- * retombé) : le rendu garde alors un seul lot, celui de la palette, et ne paie
- * rien de plus. Jamais plus de deux couleurs, donc jamais plus de deux lots par rang.
+ * retombent avec le temps. `palette` est celle que le pouls a déjà teintée : son
+ * halo est la couleur d'effet. Rend `[pairs, impairs]`, ou null quand rien ne
+ * s'allume (au silence, ou temps retombé) : le rendu garde alors un seul lot,
+ * celui de la palette, et ne paie rien de plus. Jamais plus de deux couleurs,
+ * donc jamais plus de deux lots par rang.
  */
 export function cityLots(palette: Palette, pulse: Pulse): readonly [number, number] | null {
-  const lit = mixColor(palette.city, palette.halo, PULSE.city.dance * punch(pulse));
+  const lit = mixColor(palette.city, palette.halo, Math.min(1, PULSE.city.dance * punch(pulse)));
   if (lit === palette.city) return null;
-  return pulse.inBar % 2 === 0 ? [lit, palette.city] : [palette.city, lit];
+  return sequenceIndex(pulse.inBar) % 2 === 0 ? [lit, palette.city] : [palette.city, lit];
 }

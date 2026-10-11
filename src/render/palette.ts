@@ -40,6 +40,15 @@ export interface Palette {
   readonly fogEdge: number;
   /** Accent de l'interface : multiplicateur, titres à halo, contour des boutons, barre d'expérience. */
   readonly accent: number;
+  /**
+   * Les trois couleurs d'effet du pouls (voir `render/pulse.ts`) : A sur le temps
+   * fort de la mesure, puis B, C, B. Franchement distinctes entre elles, et hors
+   * des couleurs d'espèce : ce sont des couleurs d'ambiance, qui changent à
+   * chaque temps de la musique.
+   */
+  readonly effectA: number;
+  readonly effectB: number;
+  readonly effectC: number;
 }
 
 /** « Cyan nuit » : l'ambiance d'origine du jeu, et celle du menu. */
@@ -55,6 +64,9 @@ const CYAN_NIGHT: Palette = {
   fog: 0x2a2f6b,
   fogEdge: 0x8c9cff,
   accent: 0x38e8ff,
+  effectA: 0x22c8ff,
+  effectB: 0x5a7bff,
+  effectC: 0xd8fbff,
 };
 
 /** Une palette par famille de musique : cinq ambiances distinctes, et le menu qui reprend la première. */
@@ -73,6 +85,9 @@ export const PALETTES: Record<MusicFamily, Palette> = {
     fog: 0x3a2a6b,
     fogEdge: 0xa89cff,
     accent: 0x9aa6ff,
+    effectA: 0x7b8cff,
+    effectB: 0x3f6cff,
+    effectC: 0xd8dcff,
   },
   /** « Glace » : un halo blanc-bleu. */
   biome3: {
@@ -87,6 +102,9 @@ export const PALETTES: Record<MusicFamily, Palette> = {
     fog: 0x2a4a6b,
     fogEdge: 0xa8d8ff,
     accent: 0xdff7ff,
+    effectA: 0xb8f0ff,
+    effectB: 0x6ab8ff,
+    effectC: 0xf4fdff,
   },
   /** « Lime ». */
   biome4: {
@@ -101,6 +119,9 @@ export const PALETTES: Record<MusicFamily, Palette> = {
     fog: 0x2f5a4a,
     fogEdge: 0xb8ff9c,
     accent: 0xd9ff7a,
+    effectA: 0xc8ff5a,
+    effectB: 0x9cffb0,
+    effectC: 0xf4ffd0,
   },
   /** « Braise » : un halo blanc chaud sur un fond rouge sombre. */
   boss: {
@@ -115,6 +136,9 @@ export const PALETTES: Record<MusicFamily, Palette> = {
     fog: 0x5a2a3a,
     fogEdge: 0xffb8c8,
     accent: 0xffe0b0,
+    effectA: 0xfff0c8,
+    effectB: 0xffa8c0,
+    effectC: 0xff8ca0,
   },
   /** Le menu et les écrans hors partie reprennent l'ambiance d'origine. */
   menu: CYAN_NIGHT,
@@ -145,5 +169,8 @@ export function mixPalette(a: Palette, b: Palette, t: number): Palette {
     fog: mixColor(a.fog, b.fog, t),
     fogEdge: mixColor(a.fogEdge, b.fogEdge, t),
     accent: mixColor(a.accent, b.accent, t),
+    effectA: mixColor(a.effectA, b.effectA, t),
+    effectB: mixColor(a.effectB, b.effectB, t),
+    effectC: mixColor(a.effectC, b.effectC, t),
   };
 }

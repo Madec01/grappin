@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { SILENT_PULSE, pulseAt, syntheticRhythm, type Pulse } from '../src/audio/rhythm';
+import { BEAT_DECAY, SILENT_PULSE, pulseAt, syntheticRhythm, type Pulse } from '../src/audio/rhythm';
 import type { MusicFamily } from '../src/data/musique';
-import { PULSE, ambientHalo, cityLots, effectColor, fogSheetAlpha, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow } from '../src/render/pulse';
+import { PULSE, PUNCH_MAX, ambientHalo, cityLots, effectColor, fogSheetAlpha, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow } from '../src/render/pulse';
 import { COLOR, PALETTES, type Palette } from '../src/render/style';
 
 /** Les cinq ambiances ; le menu reprend la première. */
@@ -66,9 +66,8 @@ describe('au silence, rien ne bouge', () => {
   it('un pouls sans temps ni graves (tempo connu, piste pas encore partie) est aussi muet', () => {
     const waiting = pulse({ bpm: 120, mid: 0.9, high: 0.9 });
     for (const family of FAMILIES) expect(pulsedPalette(PALETTES[family], waiting)).toBe(PALETTES[family]);
-    // Un temps retombé à zéro avec une force restante ne change rien non plus, tant que la couleur d'effet est encore le halo.
-    expect(pulsedPalette(PALETTES.biome2, pulse({ strength: 1, count: 4, inBar: 1, bars: 0 }))).toBe(PALETTES.biome2);
-    // Mais plus loin dans la musique, la couleur d'effet a tourné : la palette n'est plus la même, même au creux du temps.
+    // Dès que la musique marque les temps, la couleur d'effet est celle du temps : la palette n'est plus la même, même au creux du temps.
+    expect(pulsedPalette(PALETTES.biome2, pulse({ strength: 1, count: 4, inBar: 1, bars: 0 }))).not.toBe(PALETTES.biome2);
     expect(pulsedPalette(PALETTES.boss, pulse({ strength: 1, count: 40, inBar: 1, bars: 10 }))).not.toBe(PALETTES.boss);
   });
 
@@ -93,40 +92,48 @@ describe('au silence, rien ne bouge', () => {
 });
 
 describe('bornes', () => {
-  it('le fond ne s\'éclaircit jamais de plus de 12 % vers la brume', () => {
-    expect(PULSE.background.max).toBeLessThanOrEqual(0.15);
+  it('le fond ne s\'éclaircit jamais de plus de son plafond vers la brume', () => {
+    expect(PULSE.background.max).toBeLessThanOrEqual(0.25);
     for (const family of FAMILIES) {
       const palette = PALETTES[family];
       for (const sample of grid()) {
         const lit = pulsedPalette(palette, sample);
+        const effect = channels(effectColor(palette, sample));
         channels(palette.background).forEach((from, index) => {
           const to = channels(palette.fog)[index]!;
           const now = channels(lit.background)[index]!;
-          // Entre le fond et la brume, et à au plus 12 % du chemin (un cran d'arrondi près).
-          expect(now, `${family} canal ${index}`).toBeGreaterThanOrEqual(Math.min(from, to));
-          expect(Math.abs(now - from), `${family} canal ${index}`).toBeLessThanOrEqual(Math.abs(to - from) * 0.15 + 0.5);
+          // Vers la brume d'au plus le plafond du chemin, puis vers la couleur d'effet d'au plus sa part (un cran d'arrondi près à chaque mélange).
+          expect(now, `${family} canal ${index}`).toBeGreaterThanOrEqual(Math.min(from, to, effect[index]!));
+          const towardFog = Math.abs(to - from) * PULSE.background.max + 0.5;
+          const towardEffect = Math.abs(effect[index]! - from) * PULSE.background.tint * PUNCH_MAX + 0.5;
+          expect(Math.abs(now - from), `${family} canal ${index}`).toBeLessThanOrEqual(towardFog + towardEffect);
         });
       }
     }
   });
 
-  it('ne touche que le fond, la crête de brume, la ville et le halo : tout le reste est celui de la palette', () => {
+  it('ne touche que le fond, la crête de brume, la dalle du toit, la ville et le halo : tout le reste est celui de la palette', () => {
     for (const family of FAMILIES) {
       const palette = PALETTES[family];
       for (const sample of grid()) {
         const lit = pulsedPalette(palette, sample);
         expect(Object.keys(lit).sort()).toEqual([...FIELDS].sort());
-        for (const field of ['altitudeLine', 'altitudeLabel', 'roofFill', 'tube', 'pale', 'fog', 'accent'] as const) expect(lit[field], `${family}.${field}`).toBe(palette[field]);
+        for (const field of ['altitudeLine', 'altitudeLabel', 'tube', 'pale', 'fog', 'accent', 'effectA', 'effectB', 'effectC'] as const) expect(lit[field], `${family}.${field}`).toBe(palette[field]);
+        // La dalle du toit ne va vers la couleur d'effet que de sa part, sur le temps.
+        const effect = channels(effectColor(palette, sample));
+        channels(palette.roofFill).forEach((from, index) => {
+          expect(Math.abs(channels(lit.roofFill)[index]! - from), `${family} dalle canal ${index}`).toBeLessThanOrEqual(Math.abs(effect[index]! - from) * PULSE.roof.beat * PUNCH_MAX + 0.5);
+        });
       }
     }
   });
 
-  it('la ville ne va qu\'à moitié vers le halo, la crête de brume s\'éclaircit sans dépasser le blanc', () => {
+  it('la ville va vers la couleur d\'effet de sa part avec les graves, la crête de brume s\'éclaircit sans dépasser le blanc', () => {
     for (const family of FAMILIES) {
       const palette = PALETTES[family];
       const bassy = pulsedPalette(palette, pulse({ bass: 1 }));
       expect(gap(bassy.city, palette.city)).toBeGreaterThan(0);
-      // 50 % du chemin du trait de ville vers le halo, à un cran d'arrondi près.
+      // La part réglée du chemin du trait de ville vers la couleur d'effet (ici le halo : rien ne bat), à un cran d'arrondi près.
       channels(palette.city).forEach((from, index) => {
         const to = channels(palette.halo)[index]!;
         expect(Math.abs(channels(bassy.city)[index]! - (from + (to - from) * PULSE.city.bass))).toBeLessThanOrEqual(0.5);
@@ -144,15 +151,15 @@ describe('bornes', () => {
     for (const sample of grid()) {
       const halo = ambientHalo(sample);
       expect(halo.spread).toBeGreaterThanOrEqual(1);
-      expect(halo.spread).toBeLessThanOrEqual(1 + PULSE.halo.spread);
+      expect(halo.spread).toBeLessThanOrEqual(1 + PULSE.halo.spread * PUNCH_MAX);
       expect(halo.strength).toBeGreaterThanOrEqual(1);
-      expect(halo.strength).toBeLessThanOrEqual(1 + PULSE.halo.strength);
+      expect(halo.strength).toBeLessThanOrEqual(1 + PULSE.halo.strength * PUNCH_MAX);
       expect(speciesGlow(sample)).toBeGreaterThanOrEqual(1);
-      expect(speciesGlow(sample)).toBeLessThanOrEqual(1 + PULSE.species.strength);
+      expect(speciesGlow(sample)).toBeLessThanOrEqual(1 + PULSE.species.strength * PUNCH_MAX);
       expect(rimBoost(sample)).toBeGreaterThanOrEqual(1);
-      expect(rimBoost(sample)).toBeLessThanOrEqual(1 + PULSE.rim.strength);
+      expect(rimBoost(sample)).toBeLessThanOrEqual(1 + PULSE.rim.strength * PUNCH_MAX);
       expect(multiplierPop(sample)).toBeGreaterThanOrEqual(1);
-      expect(multiplierPop(sample)).toBeLessThanOrEqual(1 + PULSE.ui.multiplier);
+      expect(multiplierPop(sample)).toBeLessThanOrEqual(1 + PULSE.ui.multiplier * PUNCH_MAX);
       expect(fogSheetAlpha(0.85, sample)).toBeGreaterThanOrEqual(0.85);
       expect(fogSheetAlpha(0.85, sample)).toBeLessThanOrEqual(0.85 + PULSE.fogSheet.bass);
       expect(fogSheetAlpha(0.99, sample)).toBeLessThanOrEqual(1);
@@ -162,12 +169,16 @@ describe('bornes', () => {
     }
   });
 
-  it('les réglages de pleine force sont ceux annoncés', () => {
+  it('les réglages de pleine force sont ceux annoncés, et le temps fort frappe plus fort', () => {
     const full = pulse({ beat: 1, strength: 1, bass: 1, count: 1, inBar: 1 });
-    expect(ambientHalo(full)).toEqual({ spread: 1.5, strength: 1.8 });
-    expect(speciesGlow(full)).toBeCloseTo(1.35, 10);
-    expect(rimBoost(full)).toBeCloseTo(1.4, 10);
-    expect(multiplierPop(full)).toBeCloseTo(1.12, 10);
+    expect(ambientHalo(full)).toEqual({ spread: 1.7, strength: 2 });
+    expect(speciesGlow(full)).toBeCloseTo(1.5, 10);
+    expect(rimBoost(full)).toBeCloseTo(1.6, 10);
+    expect(multiplierPop(full)).toBeCloseTo(1.18, 10);
+    const downbeat = pulse({ beat: 1, strength: 1, bass: 1, count: 4, inBar: 0 });
+    expect(ambientHalo(downbeat).spread).toBeCloseTo(1 + 0.7 * PUNCH_MAX, 10);
+    expect(multiplierPop(downbeat)).toBeCloseTo(1 + 0.18 * PUNCH_MAX, 10);
+    expect(PUNCH_MAX).toBeCloseTo(1.3, 10);
   });
 
   it('un pouls hors domaine (négatif, trop grand, NaN) ne sort pas des mêmes bornes', () => {
@@ -178,7 +189,7 @@ describe('bornes', () => {
         expect(Number.isFinite(value)).toBe(true);
       }
       expect(halo.spread).toBeGreaterThanOrEqual(1);
-      expect(halo.spread).toBeLessThanOrEqual(1 + PULSE.halo.spread);
+      expect(halo.spread).toBeLessThanOrEqual(1 + PULSE.halo.spread * PUNCH_MAX);
       const lit = pulsedPalette(PALETTES.biome2, sample);
       for (const field of FIELDS) expect(Number.isInteger(lit[field]) && lit[field] >= 0 && lit[field] <= 0xffffff, field).toBe(true);
     }
@@ -195,88 +206,99 @@ describe('bornes', () => {
 });
 
 describe('la couleur d\'effet', () => {
-  /** Les couleurs que la couleur d'effet parcourt, dans l'ordre. */
-  const cycle = (palette: Palette): number[] => [palette.halo, palette.accent, palette.fogEdge];
+  /** Les couleurs d'effet d'une palette, dans l'ordre des temps de la mesure : A, B, C, B. */
+  const sequence = (palette: Palette): number[] => [palette.effectA, palette.effectB, palette.effectC, palette.effectB];
 
-  it('tourne halo, accent, crête de brume toutes les deux mesures, et recommence', () => {
+  it('change à chaque temps : A sur le temps fort, puis B, C, B, et recommence', () => {
     const palette = PALETTES.biome2;
-    const [halo, accent, edge] = cycle(palette) as [number, number, number];
-    // Un temps quelconque de chaque mesure (ici le deuxième : le fondu du premier temps est fini).
-    const at = (bars: number): number => effectColor(palette, pulse({ beat: 0.4, strength: 1, count: bars * 4 + 1, inBar: 1, bars, bpm: 120 }));
-    expect([0, 1].map(at)).toEqual([halo, halo]);
-    expect([2, 3].map(at)).toEqual([accent, accent]);
-    expect([4, 5].map(at)).toEqual([edge, edge]);
-    expect([6, 7].map(at)).toEqual([halo, halo]);
-    expect([8, 9].map(at)).toEqual([accent, accent]);
-    // Avant le premier temps fort (mesures négatives), le halo.
-    expect(at(-1)).toBe(halo);
+    const [a, b, c] = sequence(palette) as [number, number, number, number];
+    // Loin dans le temps (le fondu du début est fini).
+    const at = (count: number): number => effectColor(palette, pulse({ beat: 0.2, strength: 1, count, inBar: count % 4, bars: Math.floor(count / 4), bpm: 120 }));
+    expect([0, 1, 2, 3].map(at)).toEqual([a, b, c, b]);
+    expect([4, 5, 6, 7].map(at)).toEqual([a, b, c, b]);
+    expect([40, 41].map(at)).toEqual([a, b]);
+    // Avant le premier temps, le halo.
+    expect(effectColor(palette, pulse({ beat: 0.2, count: -1 }))).toBe(palette.halo);
   });
 
-  it('au changement, le premier temps fond de l\'ancienne couleur vers la nouvelle', () => {
+  it('au début de chaque temps, fond de la couleur du temps précédent vers la nouvelle, puis tient franche', () => {
     const palette = PALETTES.biome2;
-    const first = (beat: number): number => effectColor(palette, pulse({ beat, strength: 1, count: 8, inBar: 0, bars: 2, bpm: 120 }));
-    expect(first(1)).toBe(palette.halo);
-    expect(first(1e-9)).toBe(palette.accent);
-    const middle = first(Math.exp(-1.5));
-    expect(gap(middle, palette.halo)).toBeGreaterThan(0);
-    expect(gap(middle, palette.accent)).toBeGreaterThan(0);
+    const [a, b] = sequence(palette) as [number, number, number, number];
+    // Le deuxième temps : il vient de B ? Non : de A, le temps fort qui le précède.
+    const second = (beat: number): number => effectColor(palette, pulse({ beat, strength: 1, count: 5, inBar: 1, bars: 1, bpm: 120 }));
+    expect(second(1)).toBe(a);
+    expect(second(1e-9)).toBe(b);
+    const middle = second(Math.exp(-BEAT_DECAY * PULSE.effect.blend * 0.5));
+    expect(gap(middle, a)).toBeGreaterThan(0);
+    expect(gap(middle, b)).toBeGreaterThan(0);
+    // Passé la part de fondu, la couleur est franche.
+    expect(second(Math.exp(-BEAT_DECAY * PULSE.effect.blend * 1.01))).toBe(b);
     // Le fondu ne dépend pas de la force du temps.
-    expect(effectColor(palette, pulse({ beat: Math.exp(-1.5), strength: 0.2, count: 8, inBar: 0, bars: 2, bpm: 120 }))).toBe(middle);
+    expect(effectColor(palette, pulse({ beat: Math.exp(-0.45), strength: 0.2, count: 5, inBar: 1, bars: 1, bpm: 120 }))).toBe(second(Math.exp(-0.45)));
+    // Le temps fort revient de B (le quatrième temps) vers A.
+    const first = (beat: number): number => effectColor(palette, pulse({ beat, strength: 1, count: 8, inBar: 0, bars: 2, bpm: 120 }));
+    expect(first(1)).toBe(b);
+    expect(first(1e-9)).toBe(a);
   });
 
-  it('suit un vrai métronome à 120 : halo, puis accent, puis crête, puis halo, sans jamais claquer d\'une image à l\'autre', () => {
+  it('suit un vrai métronome à 120 : une couleur par temps, un fondu court, sans jamais claquer d\'une image à l\'autre', () => {
     for (const family of FAMILIES) {
       const palette = PALETTES[family];
-      const [halo, accent, edge] = cycle(palette) as [number, number, number];
-      // Au plus un petit pas de couleur par image à 60 images par seconde, sur toute la durée de trois cycles.
-      const widest = Math.max(gap(halo, accent), gap(accent, edge), gap(edge, halo));
+      const [a, b, c] = sequence(palette) as [number, number, number, number];
+      const widest = Math.max(gap(a, b), gap(b, c), gap(c, a));
+      // Le fondu dure `blend` d'un temps de 0,5 s : à 60 images par seconde, au plus une dizaine d'images pour tout l'écart.
+      const framesPerBlend = Math.max(1, Math.floor((PULSE.effect.blend * 0.5) / (1 / 60)));
       let previous = effectColor(palette, beatAt(0));
-      const seen: number[] = [];
-      for (let t = 1 / 60; t < 26; t += 1 / 60) {
+      const seen = new Set<number>();
+      for (let t = 1 / 60; t < 10; t += 1 / 60) {
         const color = effectColor(palette, beatAt(t));
-        expect(gap(color, previous), `${family} à ${t.toFixed(3)} s`).toBeLessThanOrEqual(widest * 0.08 + 1);
+        expect(gap(color, previous), `${family} à ${t.toFixed(3)} s`).toBeLessThanOrEqual((1.5 * widest) / framesPerBlend + 1);
         previous = color;
-        if (seen[seen.length - 1] !== color) seen.push(color);
+        seen.add(color);
       }
-      // Aux mesures 1, 3, 5, 7 (2 s, 6 s, 10 s, 14 s) : le plateau du bloc.
-      expect(effectColor(palette, beatAt(2.2))).toBe(halo);
-      expect(effectColor(palette, beatAt(6.2))).toBe(accent);
-      expect(effectColor(palette, beatAt(10.2))).toBe(edge);
-      expect(effectColor(palette, beatAt(14.2))).toBe(halo);
-      expect(effectColor(palette, beatAt(18.2))).toBe(accent);
-      // Le fondu vient bien de la couleur précédente : le premier instant d'un bloc est encore l'ancienne.
-      expect(effectColor(palette, beatAt(4.0))).toBe(halo);
-      expect(effectColor(palette, beatAt(8.0))).toBe(accent);
-      expect(seen.length).toBeGreaterThan(3);
+      // Au milieu de chaque temps (fondu fini) : A à 0,25 s, B à 0,75 s, C à 1,25 s, B à 1,75 s, A à 2,25 s.
+      expect(effectColor(palette, beatAt(0.25))).toBe(a);
+      expect(effectColor(palette, beatAt(0.75))).toBe(b);
+      expect(effectColor(palette, beatAt(1.25))).toBe(c);
+      expect(effectColor(palette, beatAt(1.75))).toBe(b);
+      expect(effectColor(palette, beatAt(2.25))).toBe(a);
+      expect(seen.has(a) && seen.has(b) && seen.has(c)).toBe(true);
     }
   });
 
   it('le fondu va droit et sans retour de l\'ancienne couleur à la nouvelle', () => {
     const palette = PALETTES.biome2;
     let before = Number.POSITIVE_INFINITY;
-    // Le temps qui commence la mesure 2, de t = 4 s à 4,5 s.
-    for (let t = 4; t <= 4.5; t += 1 / 120) {
-      const remaining = gap(effectColor(palette, beatAt(t)), palette.accent);
+    // Le deuxième temps, de t = 0,5 s à 0,75 s : de A vers B.
+    for (let t = 0.5; t <= 0.75; t += 1 / 240) {
+      const remaining = gap(effectColor(palette, beatAt(t)), palette.effectB);
       expect(remaining).toBeLessThanOrEqual(before);
       before = remaining;
     }
-    expect(before).toBeLessThanOrEqual(1);
+    expect(before).toBe(0);
   });
 
   it('reste une couleur d\'ambiance : jamais celle d\'une espèce de prise, d\'une étoile ou d\'un obstacle', () => {
     for (const family of FAMILIES) {
-      for (let t = 0; t < 30; t += 1 / 30) {
+      for (let t = 0; t < 10; t += 1 / 30) {
         const color = effectColor(PALETTES[family], beatAt(t));
         for (const species of SPECIES) expect(color, `${family} à ${t.toFixed(2)} s`).not.toBe(species);
       }
     }
   });
 
+  it('supporte une place dans la mesure hors domaine', () => {
+    const palette = PALETTES.boss;
+    expect(effectColor(palette, pulse({ beat: 0.2, count: 3, inBar: 7 }))).toBe(palette.effectB);
+    expect(effectColor(palette, pulse({ beat: 0.2, count: 3, inBar: -1 }))).toBe(palette.effectB);
+    expect(effectColor(palette, pulse({ beat: 0.2, count: 3, inBar: Number.NaN }))).toBe(palette.effectA);
+  });
+
   it('donne aussi le halo des titres dès que la musique marque les temps', () => {
     const palette = PALETTES.biome2;
-    const hit = pulse({ beat: 0.4, strength: 1, count: 9, inBar: 1, bars: 2, bpm: 120 });
+    const hit = pulse({ beat: 0.2, strength: 1, count: 9, inBar: 1, bars: 2, bpm: 120 });
     expect(uiGlow(palette, hit)).toBe(effectColor(palette, hit));
-    expect(uiGlow(palette, hit)).toBe(palette.accent);
+    expect(uiGlow(palette, hit)).toBe(palette.effectB);
   });
 });
 
@@ -376,12 +398,13 @@ describe('les réglages', () => {
   it('sont tous des parts entre 0 et 1, et le fond ne peut pas dépasser son plafond', () => {
     for (const group of Object.values(PULSE)) {
       for (const [name, value] of Object.entries(group)) {
-        if (name === 'bars' || name === 'hz') continue;
+        if (name === 'hz') continue;
         expect(value, name).toBeGreaterThanOrEqual(0);
         expect(value, name).toBeLessThanOrEqual(1);
       }
     }
     expect(PULSE.background.beat + PULSE.background.bass).toBeLessThanOrEqual(PULSE.background.max + 1e-12);
-    expect(PULSE.effect.bars).toBe(2);
+    expect(PULSE.effect.blend).toBeGreaterThan(0);
+    expect(PULSE.effect.blend).toBeLessThanOrEqual(0.5);
   });
 });

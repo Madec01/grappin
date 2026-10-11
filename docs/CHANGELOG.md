@@ -2,6 +2,21 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.8.1] — 2026-10-11 — Des couleurs qui changent à chaque temps
+
+Demande du propriétaire : « dynamique pour les couleurs, pas lent ; un jeu hyper dynamique visuellement ».
+
+### Modifié
+
+- La couleur d'effet change à chaque temps, plus toutes les deux mesures : chaque ambiance a maintenant trois couleurs d'effet franchement distinctes (A sur le temps fort, puis B, C, B), choisies loin des couleurs des prises. Cyan nuit : cyan, bleu électrique, blanc glacé. Indigo : lavande, bleu profond, lavande pâle. Glace : blanc-bleu, bleu ciel, blanc. Lime : lime, menthe, blanc chaud. Braise : crème, rose, corail. Le fondu d'une couleur à l'autre tient dans le premier tiers du temps.
+- Le temps fort de chaque mesure frappe 30 % plus fort que les trois autres : on sent la mesure, pas seulement le tempo.
+- Le fond et la dalle du toit se teintent de la couleur du moment, la crête de brume la prend à moitié avant de s'éclairer ; la ville se teinte des graves vers la couleur du moment et ses immeubles s'allument en plein.
+- Amplitudes relevées partout : fond, halos ambiants (portée +70 %, intensité +100 % sur un temps franc), prises spéciales, cerne des obstacles, étoiles, multiplicateur.
+
+### Technique
+
+- `Palette.effectA/B/C`, mélangés comme les autres champs au fondu d'ambiance ; `PULSE.beat.downbeat`, `PULSE.effect.blend`, `PULSE.roof` ; `PUNCH_MAX`. Test des trios (distance entre eux et aux espèces).
+
 ## [0.8.0] — 2026-10-11 — L'ambiance pulse au rythme de la musique
 
 Demande du propriétaire : « que l'ambiance lumineuse pulse avec la musique, que ça change de couleur d'effet, que ça pulse au rythme, même les éléments du jeu ».

@@ -77,6 +77,20 @@ describe('palettes', () => {
   });
 });
 
+describe('les couleurs d\'effet', () => {
+  it('sont trois par ambiance, franchement distinctes entre elles, et loin de toute couleur d\'espèce', () => {
+    for (const family of FAMILIES) {
+      const { effectA, effectB, effectC } = PALETTES[family];
+      expect(distance(effectA, effectB), `${family} A/B`).toBeGreaterThan(50);
+      expect(distance(effectB, effectC), `${family} B/C`).toBeGreaterThan(40);
+      expect(distance(effectA, effectC), `${family} A/C`).toBeGreaterThan(50);
+      for (const [name, color] of Object.entries(SPECIES)) {
+        for (const effect of [effectA, effectB, effectC]) expect(distance(effect, color), `${family} / ${name}`).toBeGreaterThan(40);
+      }
+    }
+  });
+});
+
 describe('mixPalette', () => {
   const a = PALETTES.biome1;
   const b = PALETTES.boss;
