@@ -385,16 +385,17 @@ describe('mort et cause', () => {
   });
 
   it('un obstacle ne tue pas : on rebondit avec « Boum », et seule la brume finit la partie', () => {
-    // Paliers de 4 m : obstacles, fragiles et propulseurs apparaissent tout près du toit.
-    for (let seed = 1; seed <= 10; seed += 1) {
-      const { game, seen } = makeFreeGame(`?graine=${seed}&tierHeight=4`);
-      playPilot(game, 60);
-      if (!seen.texts.has('Boum')) continue;
-      const state = game.debugState();
-      expect(state.cause === null || state.cause === 'fog').toBe(true);
-      return;
-    }
-    expect.unreachable('aucune des dix graines n\'a heurté un obstacle');
+    // Une dalle solide posée sur le chemin, et le personnage lâché dessus de haut : un vrai choc (depuis 0.12.1, se poser
+    // doucement sur une corniche n'en est plus un, B-012), qui ne tue pas.
+    const { game, seen } = makeFreeGame('?graine=1');
+    game.playFree();
+    const { state } = (game as unknown as { run: { sim: { state: SimState } } }).run.sim;
+    state.obstacles.push({ id: 9999, x0: -2, y0: 6, x1: 2, y1: 6.4 });
+    state.hero = { pos: { x: 0, y: 9 }, vel: { x: 0, y: -6 }, grounded: false };
+    state.rope = null;
+    for (let frames = 0; frames < 120 && !seen.texts.has('Boum'); frames += 1) game.frame(1 / 60);
+    expect(seen.texts.has('Boum')).toBe(true);
+    expect(game.debugState()).toMatchObject({ screen: 'playing', cause: null });
   });
 
   it('une nouvelle partie efface le palier, la cause et les effets en cours', () => {

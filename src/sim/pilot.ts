@@ -34,7 +34,7 @@ export function bestLaunch(state: SimState, tuning: Tuning): Vec2 | null {
   for (const pull of launchSet(state.env)) {
     const pos = pulledPosition(launcher.pos, pull);
     if (obstacles.some((box) => circleBoxGap(pos, tuning.heroRadius, box) <= 0)) continue;
-    const caught = flightCatches(launcher, { pos, vel: launchVelocity(pull, state.env) }, candidates, obstacles, tuning, state.env, state.zones);
+    const caught = flightCatches(launcher, { pos, vel: launchVelocity(pull, state.env) }, candidates, obstacles, tuning, state.env, state.zones, state.rings);
     for (const id of caught) {
       const height = byId.get(id)?.pos.y ?? -Infinity;
       if (!best || height > best.height) best = { pull, height };

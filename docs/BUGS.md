@@ -1,6 +1,6 @@
 # Registre des bugs
 
-Dernière mise à jour : 11 octobre 2026, version 0.10.0.
+Dernière mise à jour : 11 octobre 2026, version 0.12.1.
 
 | Id | Statut | Sévérité | Description | Reproduction | Résolution |
 |---|---|---|---|---|---|
@@ -15,6 +15,7 @@ Dernière mise à jour : 11 octobre 2026, version 0.10.0.
 | B-009 | résolu | mineur | Un profil qui avait fini tout le catalogue de missions se voyait réinjecter les trois missions de départ au chargement, bien qu'elles soient dans ses missions accomplies. | Brief du 11 octobre 2026 (incohérence C), reproduit par un test unitaire. | 0.9.0 : les missions de départ ne sont redonnées qu'à un profil qui n'a jamais rien accompli ; un catalogue fini reste fini, en attendant les contrats renouvelables. |
 | B-010 | ouvert | mineur | La vérification d'un segment ne connaît pas les points du segment suivant ; au vol, la visée automatique peut préférer l'un d'eux à la sortie prouvée, et le point perd sa sortie « propre » (le joueur attrape l'autre point et, au pire, rebondit). Un point sur plusieurs milliers. | Test des deux cents graines, graine 80, point 99, sur la 0.9.0. | Toléré et compté par le test (au plus deux sur deux cents graines). À traiter avec une vérification à cheval sur deux segments, ou une génération qui connaît le segment suivant (voir BACKLOG). |
 | B-011 | résolu | mineur | Au tout premier toucher, le jeu créait le contexte audio des bruitages dans le geste même : la page se figeait quelques dizaines de millisecondes sur un ordinateur, bien plus sur un petit téléphone ou une machine chargée. L'intégration continue a refusé 0.10.0 une première fois sur ce point (le test « le doigt posé accroche » exigeait la partie en 0,5 s). | Profil du démarrage d'une partie, navigateur froid, sur la 0.9.0 et la 0.10.0 : 45 ms de création du contexte au premier appui ; 0,7 à 1,5 s de page bloquée sur la machine de CI. | 0.10.0 : le contexte naît au chargement, suspendu, et le premier geste ne fait que le reprendre ; le test vérifie le passage en partie en 2 s. |
+| B-012 | résolu | majeur | Posé sur le dessus d'une corniche, le personnage la touchait à chaque pas à vitesse nulle, ce qui comptait pour un choc : étourdi en continu, sans cible, incapable d'attraper quoi que ce soit jusqu'à la brume. | Simulation : personnage lâché sur une dalle, 73 chocs en deux secondes, aucune cible, appui sans effet ; trouvé en réglant le ricochet (0.12.1), le robot y restait coincé sur la chicane. | 0.12.1 : se poser n'est plus un choc (vitesse vers la surface sous 0,8 m/s, sans corde) ; le personnage reste posé, garde sa série, vise et attrape. |
 
 ## Conventions
 

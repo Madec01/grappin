@@ -1,9 +1,13 @@
 import { FREE_RUN, type CoursePlan } from './course';
+import { flightStep, startFlight } from './flight';
 import { PULL_MAX } from './launcher';
+import { provableObstacles } from './obstacles';
 import { bestLaunch } from './pilot';
+import { releaseVelocity } from './rules';
 import type { Anchor, RuleEvent, SimState } from './state';
 import { Simulation } from './simulation';
 import type { Tuning } from './tuning';
+import { swingIsClear } from './verifier';
 
 /**
  * Robots joueurs : des stratégies simples qui jouent une partie en Node,
@@ -36,6 +40,20 @@ export const LAUNCH_AIM_SECONDS = 0.35;
 /** Le robot qui monte à plus de cette vitesse ignore un point visé plus bas que lui de cette distance : il attend la suite. */
 const RISING_SPEED = 1;
 const RISING_BELOW = 0.5;
+/** Avant de lâcher, le robot regarde ce temps de vol devant lui : s'il heurte un obstacle solide, il garde la corde et attend la suite du balancement. */
+const LOOK_AHEAD_SECONDS = 0.5;
+
+/** Vrai si le vol qui suivrait un lâcher maintenant ne heurte rien pendant `LOOK_AHEAD_SECONDS` (rebonds, fracas et anneaux joués). */
+function releaseIsClear(state: SimState, tuning: Tuning): boolean {
+  const flight = startFlight({ pos: state.hero.pos, vel: releaseVelocity(state, tuning) });
+  const obstacles = provableObstacles(state.obstacles);
+  const steps = Math.round(LOOK_AHEAD_SECONDS / tuning.stepSeconds);
+  for (let k = 0; k < steps; k += 1) {
+    flightStep(flight, obstacles, state.rings, state.zones, tuning, state.env);
+    if (flight.ended) return false;
+  }
+  return true;
+}
 
 export const BEGINNER: RobotProfile = { name: 'débutant', speedTarget: 6, minSlope: 0.3, maxSlope: 3, reactionSeconds: 0.25, maxHoldSeconds: 3 };
 
@@ -81,7 +99,10 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
       const climbing = s.step - launchedStep > launchWaitSteps || (target !== null && target !== undefined && target.pos.y > launchedY + 1);
       // Porté vers le haut (un courant, une fusée), le robot ne rattrape pas un point sous lui : il monte d'abord, comme un joueur.
       const rising = s.hero.vel.y > RISING_SPEED && target !== null && target !== undefined && target.pos.y < s.hero.pos.y - RISING_BELOW;
-      if (target && climbing && !rising && plannedPress < 0) plannedPress = s.step + reactionSteps;
+      // Attraper ici mènerait-il dans un mur ? Saisi de loin, corde molle, le vol continue tout droit : le robot regarde le balancement
+      // qui suivrait, comme le vérificateur, et attend sinon (une prise électrique ou à éclipse ne compte pas, il la laisse de toute façon).
+      const safe = target !== null && target !== undefined && swingIsClear(target, { pos: s.hero.pos, vel: s.hero.vel }, s.anchors, provableObstacles(s.obstacles), tuning, s.env, s.zones);
+      if (target && climbing && !rising && safe && plannedPress < 0) plannedPress = s.step + reactionSteps;
       if (plannedPress >= 0 && s.step >= plannedPress) {
         plannedPress = -1;
         if (sim.press()) {
@@ -114,7 +135,8 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
       const ax = Math.abs(s.hero.vel.x);
       const slope = ax > 0 ? s.hero.vel.y / ax : Infinity;
       const wants = (ready && s.hero.vel.y > 1 && slope > profile.minSlope && slope < profile.maxSlope) || held > profile.maxHoldSeconds;
-      if (wants && plannedRelease < 0) plannedRelease = s.step + reactionSteps;
+      // Un lâcher droit dans un mur n'est pas un lâcher : le robot attend le prochain moment, sauf s'il pend depuis trop longtemps.
+      if (wants && plannedRelease < 0 && (held > 2 * profile.maxHoldSeconds || releaseIsClear(s, tuning))) plannedRelease = s.step + reactionSteps;
       if (plannedRelease >= 0 && s.step >= plannedRelease) {
         plannedRelease = -1;
         sim.release();

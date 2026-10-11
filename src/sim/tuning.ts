@@ -75,9 +75,10 @@ export interface Tuning {
   /** Vitesse à partir de laquelle une paroi cassable vole en éclats, en m/s, et ce que rapporte le fracas. */
   readonly smashSpeed: number;
   readonly smashScore: number;
-  /** Ce que rapporte un anneau de précision traversé, et traversé près du centre. */
+  /** Ce que rapporte un anneau de précision traversé, et traversé près du centre ; au centre, la vitesse est multipliée par `ringBoost`. */
   readonly ringScore: number;
   readonly ringCentreScore: number;
+  readonly ringBoost: number;
   readonly grazeDistance: number;
   /** Points d'un frôlé et d'une étoile, multipliés par le multiplicateur courant. */
   readonly grazeScore: number;
@@ -139,6 +140,7 @@ export const DEFAULT_TUNING: Tuning = {
   smashScore: 25,
   ringScore: 15,
   ringCentreScore: 40,
+  ringBoost: 1.3,
   grazeDistance: 0.5,
   grazeScore: 5,
   pickupScore: 10,

@@ -90,7 +90,13 @@ export class Simulation {
 
   /** Le doigt se lève : libère le personnage. Depuis un lanceur, `pull` est la traction du lancer. */
   release(pull?: Vec2): boolean {
-    if (pull) this.state.pull = clampPull(pull);
+    if (pull) {
+      this.state.pull = clampPull(pull);
+      // Un pilote qui donne sa traction au relâché, sans avoir glissé le doigt, part d'où la traction recule le personnage,
+      // comme un doigt l'aurait fait et comme le vérificateur le suppose : pas du lanceur lui-même.
+      const held = this.state.rope ? this.state.anchors.find((a) => a.id === this.state.rope!.anchorId) : undefined;
+      if (held?.kind === 'lanceur') this.state.hero.pos = pulledPosition(held.pos, this.state.pull);
+    }
     const recorded = this.state.pull;
     const ok = release(this.state, this.tuning, this.events);
     if (ok) this.state.inputs.push({ step: this.state.step, kind: 'release', ...(pull ? { pull: recorded } : {}) });

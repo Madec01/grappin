@@ -3,7 +3,7 @@ import type { Vec2 } from '../core/math/vec2';
 import { environmentOf, eventsAt, type EventKind, type ScheduledEvent } from './events';
 import { buildPlainSegment, buildSegment, tierProfile, type IdCounters, type Segment, type SegmentContext, type TierProfile } from './generator';
 import { buildScene, type SceneId } from '../data/scenes';
-import type { Anchor, Obstacle, SimState, Zone } from './state';
+import type { Anchor, Obstacle, Ring, SimState, Zone } from './state';
 import type { Tuning } from './tuning';
 import { verifySegment } from './verifier';
 
@@ -117,13 +117,13 @@ function segmentContext(state: SimState, segmentY: number): SegmentContext {
  * on peut l'attendre en pendant au point d'avant : il suffit qu'une des trois
  * positions fasse passer le segment.
  */
-function verifyWithCables(context: readonly Anchor[], contextObstacles: readonly Obstacle[], contextZones: readonly Zone[], segment: Segment, tuning: Tuning, conditions: SegmentContext): boolean {
+function verifyWithCables(context: readonly Anchor[], contextObstacles: readonly Obstacle[], contextZones: readonly Zone[], contextRings: readonly Ring[], segment: Segment, tuning: Tuning, conditions: SegmentContext): boolean {
   const { env, entryEnv } = conditions;
-  if (!segment.anchors.some((a) => a.cable)) return verifySegment(context, contextObstacles, segment, tuning, env, entryEnv, contextZones);
+  if (!segment.anchors.some((a) => a.cable)) return verifySegment(context, contextObstacles, segment, tuning, env, entryEnv, contextZones, contextRings);
   const placements: ((a: Anchor) => Vec2)[] = [(a) => a.cable!.from, (a) => a.pos, (a) => a.cable!.to];
   const passes = (place: (a: Anchor) => Vec2): boolean => {
     const anchors = segment.anchors.map((a) => (a.cable ? { ...a, pos: place(a) } : a));
-    return verifySegment(context, contextObstacles, { ...segment, anchors }, tuning, env, entryEnv, contextZones);
+    return verifySegment(context, contextObstacles, { ...segment, anchors }, tuning, env, entryEnv, contextZones, contextRings);
   };
   return conditions.cable === 'traversiere' ? placements.some(passes) : placements.every(passes);
 }
@@ -160,12 +160,13 @@ export function extendCourse(state: SimState, untilY: number, tuning: Tuning): v
     const context = state.anchors.slice(-CONTEXT_ANCHORS);
     const contextObstacles = state.obstacles.filter((o) => o.y1 >= course.lastY - 8);
     const contextZones = state.zones.filter((z) => z.y1 >= course.lastY - 8);
+    const contextRings = state.rings.filter((r) => !r.taken && r.pos.y >= course.lastY - 8);
     let accepted: Segment | null = null;
     // Une scène commence par son segment construit à la main (prouvé par les tests) ; la suite est engendrée comme une course libre.
     if (course.plan.kind === 'scene' && course.segments === 0) accepted = buildScene(course.plan.sceneId, course.ids, origin);
     for (let attempt = 0; attempt < MAX_ATTEMPTS && !accepted; attempt += 1) {
       const candidate = buildSegment(rng, course.ids, from, origin, profile, rng.pick(profile.archetypes), conditions);
-      if (verifyWithCables(context, contextObstacles, contextZones, candidate, tuning, conditions)) accepted = candidate;
+      if (verifyWithCables(context, contextObstacles, contextZones, contextRings, candidate, tuning, conditions)) accepted = candidate;
     }
     if (!accepted) {
       // Repli : une chaîne serrée sans rien d'autre, vérifiée elle aussi. Si même cela échoue, on
@@ -174,7 +175,7 @@ export function extendCourse(state: SimState, untilY: number, tuning: Tuning): v
       let plain: Segment | null = null;
       for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS && !accepted; attempt += 1) {
         plain = buildPlainSegment(rng, course.ids, from, origin, conditions);
-        if (verifySegment(context, contextObstacles, plain, tuning, conditions.env, conditions.entryEnv, contextZones)) accepted = plain;
+        if (verifySegment(context, contextObstacles, plain, tuning, conditions.env, conditions.entryEnv, contextZones, contextRings)) accepted = plain;
       }
       if (!accepted) {
         accepted = plain!;

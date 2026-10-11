@@ -1,5 +1,5 @@
 import type { Vec2 } from '../core/math/vec2';
-import { FIRST_ANCHOR_OFFSET, HALF_WIDTH, RING_RADIUS, drift, rocket, updraft, type IdCounters, type Segment } from '../sim/generator';
+import { FIRST_ANCHOR_OFFSET, HALF_WIDTH, RICOCHET_WALL_RISE, RING_RADIUS, drift, hoop, ricochet, rocket, smashWall, updraft, type IdCounters, type Segment } from '../sim/generator';
 import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from '../sim/state';
 
 /**
@@ -21,10 +21,10 @@ export interface SceneDef {
 }
 
 export const SCENES: readonly SceneDef[] = [
-  { id: 'rebond', name: 'Le rebond', intro: 'Les surfaces à chevrons renvoient ton élan : une chute devient une remontée.' },
-  { id: 'cassable', name: 'La paroi cassable', intro: 'Une paroi fissurée se traverse si tu arrives assez vite.' },
+  { id: 'rebond', name: 'Le trampoline', intro: 'La prise suivante est trop loin : tombe sur le tapis, il te renvoie en l\'air.' },
+  { id: 'cassable', name: 'Le mur à percer', intro: 'Pas de trou dans ce mur : tire à pleine puissance pour le traverser.' },
   { id: 'porte', name: 'La porte', intro: 'La porte se ferme et s\'ouvre : tire quand elle est ouverte.' },
-  { id: 'anneau', name: 'Les anneaux', intro: 'Traverse les anneaux au centre pour marquer davantage.' },
+  { id: 'anneau', name: 'Le cerceau', intro: 'La prise est trop loin : passe l\'anneau au centre, il t\'accélère.' },
   { id: 'courant', name: 'Le courant', intro: 'Le courant te porte : lâche dedans et laisse-toi monter.' },
   { id: 'derive', name: 'La dérive', intro: 'Dans la bande, le courant te pousse de côté : vise avant d\'entrer.' },
   { id: 'fusee', name: 'La fusée', intro: 'Le couloir t\'accélère, la zone qui suit te freine : rattrape la prise en haut.' },
@@ -79,20 +79,9 @@ function box(b: Builder, x0: number, y0: number, x1: number, y1: number, kind: O
   return o;
 }
 
-function star(b: Builder, offset: Vec2): void {
-  b.pickups.push({ id: b.ids.pickup, pos: { x: b.origin.x + FIRST_ANCHOR_OFFSET.x + offset.x, y: b.origin.y + FIRST_ANCHOR_OFFSET.y + offset.y }, taken: false });
-  b.ids.pickup += 1;
-}
-
 function ring(b: Builder, offset: Vec2): void {
   b.rings.push({ id: b.ids.ring, pos: { x: b.origin.x + FIRST_ANCHOR_OFFSET.x + offset.x, y: b.origin.y + FIRST_ANCHOR_OFFSET.y + offset.y }, radius: RING_RADIUS, closest: null, taken: false });
   b.ids.ring += 1;
-}
-
-/** Le premier point, puis la chaîne de démonstration. */
-function chain(b: Builder): void {
-  anchor(b, { x: 0, y: 0 });
-  for (const p of CHAIN) anchor(b, p);
 }
 
 /**
@@ -134,19 +123,30 @@ export function buildScene(id: SceneId, ids: IdCounters, origin: Vec2): Segment 
       anchor(b, { x: -1, y: ROCKET_EXIT_RISE + 7.2 });
       break;
     }
-    case 'rebond':
-      chain(b);
-      // Un tapis de rebond à gauche, sous le deuxième point mais hors de sa zone de pendaison : une chute y rebondit jusqu'à reprendre le point.
-      box(b, -5.8, -0.8, -3.4, -0.4, 'rebond');
-      // Un mur de rebond à droite, à hauteur du quatrième point : un lâcher vers la droite revient vers la chaîne.
-      box(b, 3.8, 5, 4.2, 9.5, 'rebond');
+    case 'rebond': {
+      // Un lanceur, une chicane qui barre le tir direct vers le trou, et un mur de rebond à droite qui renvoie dans le trou (brief, L5).
+      anchor(b, { x: 0, y: 0 });
+      anchor(b, CHAIN[0]!);
+      const launcher = anchor(b, { x: -0.4, y: 7 }, 'lanceur');
+      const { boxes, exit } = ricochet(b.ids, launcher.pos, RICOCHET_WALL_RISE, 1, HALF_WIDTH);
+      b.obstacles.push(...boxes);
+      b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
+      b.ids.anchor += 1;
+      anchor(b, { x: 2.4, y: 19.8 });
       break;
-    case 'cassable':
-      chain(b);
-      // Une paroi cassable à droite de la chaîne, entre le quatrième et le cinquième point, une étoile au-dessus : seule la vitesse y mène.
-      box(b, 0.2, 9.2, 2.8, 9.6, 'cassable');
-      star(b, { x: 1.5, y: 10.6 });
+    }
+    case 'cassable': {
+      // Un lanceur sous un mur cassable sans trou : il faut tirer à pleine puissance ; un tir mou rebondit sur le mur.
+      anchor(b, { x: 0, y: 0 });
+      anchor(b, CHAIN[0]!);
+      const launcher = anchor(b, { x: -0.4, y: 7 }, 'lanceur');
+      const { wall, exit } = smashWall(b.ids, launcher.pos, 5, 0.6, HALF_WIDTH);
+      b.obstacles.push(wall);
+      b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
+      b.ids.anchor += 1;
+      anchor(b, { x: -2.4, y: 19.8 });
       break;
+    }
     case 'porte':
       // Un lanceur sous un mur dont le trou est une porte : le tir prouvé passe quand elle est ouverte, il faut attendre le bon moment.
       anchor(b, { x: 0, y: 0 });
@@ -158,15 +158,21 @@ export function buildScene(id: SceneId, ids: IdCounters, origin: Vec2): Segment 
       anchor(b, { x: 1.8, y: 16.4 });
       anchor(b, { x: -1.4, y: 20 });
       break;
-    case 'anneau':
-      chain(b);
-      // Un anneau au milieu de chaque vol, un peu au-dessus de la ligne entre les deux points.
-      for (let i = 0; i < CHAIN.length - 1; i += 1) {
-        const a = CHAIN[i]!;
-        const c = CHAIN[i + 1]!;
-        ring(b, { x: (a.x + c.x) / 2, y: (a.y + c.y) / 2 + 0.5 });
-      }
+    case 'anneau': {
+      // Un lanceur sous un mur dont le seul passage est un anneau, étroit et décalé : un tir de précision ; puis un anneau libre sur la chaîne.
+      anchor(b, { x: 0, y: 0 });
+      anchor(b, CHAIN[0]!);
+      const launcher = anchor(b, { x: -0.4, y: 7 }, 'lanceur');
+      const { walls, ring: hole, exit } = hoop(b.ids, launcher.pos, 5, launcher.pos.x + 2.3, HALF_WIDTH);
+      b.obstacles.push(...walls);
+      b.rings.push(hole);
+      b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
+      b.ids.anchor += 1;
+      const next: Vec2 = { x: -1.6, y: 19.8 };
+      ring(b, { x: (exit.x - FIRST_ANCHOR_OFFSET.x + next.x) / 2, y: (exit.y - FIRST_ANCHOR_OFFSET.y + next.y) / 2 + 0.5 });
+      anchor(b, next);
       break;
+    }
   }
   return { anchors: b.anchors, obstacles: b.obstacles, pickups: b.pickups, rings: b.rings, zones: b.zones, junctionId: null, branchIds: [] };
 }
