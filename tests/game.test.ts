@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { Game, PALETTE_FADE_SECONDS, readSettings } from '../src/app/game';
+import { DEFAULT_PULSE_BPM, Game, PALETTE_FADE_SECONDS, readSettings } from '../src/app/game';
 import { Music, type AudioPlayer } from '../src/audio/music';
+import { BEAT_DECAY, SILENT_PULSE, pulseAt, syntheticRhythm, type Pulse } from '../src/audio/rhythm';
+import { fixedRhythms, type RhythmSource } from '../src/audio/rhythms';
 import { loadProfile as loadSavedProfile } from '../src/meta/profile';
 import { LEVELS, levelById } from '../src/data/levels';
 import { createProfile, loadProfile, memoryStorage, saveProfile, type LevelOutcome, type Profile, type ProfileStorage, type RunOutcome } from '../src/meta/profile';
@@ -45,6 +47,7 @@ interface Seen {
   lastLevelsPage: number;
   /** L'ambiance que la dernière image a reçue. */
   lastPalette: Palette | null;
+  lastPulse: Pulse | null;
 }
 
 /** Profil d'un joueur déjà avancé : de l'expérience et des talismans équipés. */
@@ -53,7 +56,7 @@ function profileWith(xp: number, equipped: TalismanId[] = []): Profile {
 }
 
 /** Jeu relié à un faux rendu qui note ce qu'on lui demande de dessiner, et à un stockage mémoire, vide ou garni d'un profil. */
-function makeGame(search = '', saved?: Profile, music?: Music): { game: Game; seen: Seen; storage: ProfileStorage } {
+function makeGame(search = '', saved?: Profile, music?: Music, rhythms?: RhythmSource): { game: Game; seen: Seen; storage: ProfileStorage } {
   const seen: Seen = {
     screens: [],
     lastCause: null,
@@ -74,6 +77,7 @@ function makeGame(search = '', saved?: Profile, music?: Music): { game: Game; se
     hit: () => null,
     lastLevelsPage: 0,
     lastPalette: null,
+    lastPulse: null,
   };
   const view = {
     width: 390,
@@ -92,6 +96,7 @@ function makeGame(search = '', saved?: Profile, music?: Music): { game: Game; se
       seen.lastTestMode = frame.testMode;
       seen.lastLevelsPage = frame.levelsPage;
       seen.lastPalette = frame.palette;
+      seen.lastPulse = frame.pulse;
       seen.lastProfile = frame.profile;
       seen.lastOutcome = frame.outcome;
       seen.lastResult = frame.result;
@@ -102,7 +107,7 @@ function makeGame(search = '', saved?: Profile, music?: Music): { game: Game; se
   };
   const storage = memoryStorage();
   if (saved) saveProfile(storage, saved);
-  return { game: new Game(view, readSettings(search), storage, music), seen, storage };
+  return { game: new Game(view, readSettings(search), storage, music, rhythms), seen, storage };
 }
 
 /** Comme `makeGame`, mais la course libre est déjà lancée, sans appui d'accroche : l'URL (brume, hauteur des paliers, graine) y règne, ce qu'un niveau ne permet pas. */
@@ -203,6 +208,11 @@ describe('réglages d\'URL', () => {
     expect(readSettings('?graine=3&test=oui').testMode).toBe(true);
     expect(readSettings('').testMode).toBe(false);
     expect(readSettings('?test=0').testMode).toBe(false);
+    expect(readSettings('?pouls=90').pulseBpm).toBe(90);
+    expect(readSettings('?pouls').pulseBpm).toBe(DEFAULT_PULSE_BPM);
+    expect(readSettings('?pouls=abc').pulseBpm).toBeNull();
+    expect(readSettings('?pouls=-5').pulseBpm).toBeNull();
+    expect(readSettings('').pulseBpm).toBeNull();
     expect(readSettings('?test=non').testMode).toBe(false);
   });
 });
@@ -305,6 +315,7 @@ describe('jeu', () => {
     expect(Object.keys(game.debugState()).sort()).toEqual(
       [
         'attached',
+        'bpm',
         'cause',
         'combo',
         'equipped',
@@ -329,6 +340,7 @@ describe('jeu', () => {
         'pos',
         'pullX',
         'pullY',
+        'pulse',
         'ropeLength',
         'runs',
         'score',
@@ -1626,7 +1638,7 @@ describe('liste des niveaux : deux pages de dix', () => {
 describe('musique', () => {
   /** Un faux lecteur : il suffit de savoir ce qui joue. */
   function fakeAudio(): (src: string) => AudioPlayer {
-    return () => ({ loop: false, volume: 1, paused: true, play: () => undefined, pause: () => undefined, release: () => undefined });
+    return () => ({ loop: false, volume: 1, paused: true, currentTime: 0, play: () => undefined, pause: () => undefined, release: () => undefined });
   }
 
   it('rien avant le premier appui ; puis la piste du niveau, celle du menu sur le titre, et en course libre celle du niveau qui couvre la hauteur', () => {
@@ -1667,7 +1679,7 @@ describe('musique', () => {
 describe('ambiance', () => {
   /** Un faux lecteur : il suffit de savoir ce qui joue. */
   function fakeAudio(): (src: string) => AudioPlayer {
-    return () => ({ loop: false, volume: 1, paused: true, play: () => undefined, pause: () => undefined, release: () => undefined });
+    return () => ({ loop: false, volume: 1, paused: true, currentTime: 0, play: () => undefined, pause: () => undefined, release: () => undefined });
   }
 
   /** Joue `seconds` de temps réel en images de 50 ms. */
@@ -1821,3 +1833,78 @@ describe('ambiance', () => {
 function distanceOfBackground(a: Palette, b: Palette): number {
   return Math.max(...[16, 8, 0].map((shift) => Math.abs(((a.background >> shift) & 0xff) - ((b.background >> shift) & 0xff))));
 }
+
+describe('pouls', () => {
+  /** Un faux lecteur dont la position de lecture se règle de l'extérieur. */
+  function seekableAudio(): { factory: (src: string) => AudioPlayer; players: { currentTime: number }[] } {
+    const players: { currentTime: number }[] = [];
+    const factory = (): AudioPlayer => {
+      const player = { loop: false, volume: 1, paused: true, currentTime: 0, play: () => undefined, pause: () => undefined, release: () => undefined };
+      players.push(player);
+      return player;
+    };
+    return { factory, players };
+  }
+
+  it('sans musique ni métronome, le rendu reçoit le pouls du silence', () => {
+    const { game, seen } = makeGame('');
+    game.frame(0.016);
+    expect(seen.lastPulse).toBe(SILENT_PULSE);
+    expect(game.debugState()).toMatchObject({ pulse: 0, bpm: 0 });
+  });
+
+  it('le métronome de ?pouls= bat sur le temps réel, musique ou non', () => {
+    const { game, seen } = makeGame('?pouls=120');
+    game.frame(0.016);
+    expect(game.debugState().bpm).toBe(120);
+    expect(game.debugState().pulse).toBeCloseTo(Math.exp((-BEAT_DECAY * 0.016) / 0.5), 6);
+    expect(seen.lastPulse?.beat).toBe(game.debugState().pulse);
+    // Juste avant le temps suivant, le pouls est au plus bas ; sur le temps, il remonte à 1.
+    for (let i = 0; i < 30; i += 1) game.frame(0.016);
+    expect(game.debugState().pulse).toBeLessThan(0.1);
+    game.frame(0.004);
+    expect(game.debugState().pulse).toBeCloseTo(1, 6);
+    expect(seen.lastPulse?.inBar).toBe(1);
+  });
+
+  it('avec une piste qui joue et un rythme connu, le pouls suit la position de lecture ; musique coupée, le silence', () => {
+    const { factory, players } = seekableAudio();
+    const music = new Music(factory);
+    const rhythm = syntheticRhythm(100, 10);
+    const { game, seen } = makeGame('', clearedProfile(2), music, fixedRhythms(rhythm));
+    game.frame(0.016);
+    // Rien ne joue avant le premier geste : silence.
+    expect(seen.lastPulse).toBe(SILENT_PULSE);
+    game.press(10, 10);
+    game.frame(0.016);
+    expect(game.debugState().track).toBe('biome2-1');
+    // Le dernier lecteur créé est celui de la piste du niveau ; celui du menu s'éteint en fondu.
+    const player = players[players.length - 1]!;
+    player.currentTime = 0.75;
+    game.frame(0.016);
+    expect(seen.lastPulse).toEqual(pulseAt(rhythm, 0.75));
+    expect(game.debugState()).toMatchObject({ pulse: pulseAt(rhythm, 0.75).beat, bpm: 100 });
+    player.currentTime = 1.2;
+    game.frame(0.016);
+    expect(seen.lastPulse?.count).toBe(2);
+    // Musique coupée : plus de piste, plus de pouls.
+    game.restart();
+    game.frame(0.016);
+    seen.hit = () => 'music';
+    game.press(1, 1);
+    game.frame(0.016);
+    expect(game.debugState()).toMatchObject({ musicOn: false, pulse: 0, bpm: 0 });
+    expect(seen.lastPulse).toBe(SILENT_PULSE);
+  });
+
+  it('une piste sans rythme connu joue sans pouls', () => {
+    const { factory, players } = seekableAudio();
+    const { game, seen } = makeGame('', clearedProfile(2), new Music(factory));
+    game.press(10, 10);
+    game.frame(0.016);
+    expect(game.debugState().track).toBe('biome2-1');
+    players[players.length - 1]!.currentTime = 2;
+    game.frame(0.016);
+    expect(seen.lastPulse).toBe(SILENT_PULSE);
+  });
+});

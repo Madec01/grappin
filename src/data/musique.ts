@@ -10,6 +10,9 @@ export type TrackId = 'menu' | 'biome1-1' | 'biome1-2' | 'biome2-1' | 'biome2-2'
 
 export const TITLE_TRACK: TrackId = 'menu';
 
+/** Toutes les pistes, dans l'ordre des fichiers. */
+export const TRACK_IDS: readonly TrackId[] = ['menu', 'biome1-1', 'biome1-2', 'biome2-1', 'biome2-2', 'biome3-1', 'biome3-2', 'biome4-1', 'biome4-2', 'boss1', 'boss2', 'boss3', 'boss4'];
+
 /**
  * La famille d'une piste : un biome, les combats de boss, ou le menu. C'est elle
  * qui donne à l'écran son ambiance (voir `render/palette.ts`) : toutes les pistes
@@ -70,4 +73,9 @@ export function levelTrack(id: number): TrackId {
 /** Chemin du fichier d'une piste, relatif à la racine du site (`import.meta.env.BASE_URL` s'y ajoute). */
 export function trackFile(id: TrackId): string {
   return `musique/${id}.mp3`;
+}
+
+/** Chemin du fichier de rythme d'une piste (voir `audio/rhythm.ts`), à côté de la musique. */
+export function rhythmFile(id: TrackId): string {
+  return `musique/${id}.rythme.json`;
 }

@@ -1,5 +1,7 @@
 import type { Vec2 } from '../core/math/vec2';
 import { Music, silentAudio } from '../audio/music';
+import { SILENT_PULSE, pulseAt, syntheticRhythm, type Pulse, type Rhythm } from '../audio/rhythm';
+import { silentRhythms, type RhythmSource } from '../audio/rhythms';
 import { LEVELS, levelById, type LevelDef } from '../data/levels';
 import { TITLE_TRACK, levelTrack, trackFamily, type MusicFamily, type TrackId } from '../data/musique';
 import { levelFor } from '../meta/levels';
@@ -48,6 +50,8 @@ const MAX_FRAME_SECONDS = 0.1;
 const END_LOCK_SECONDS = 0.6;
 /** Durée du fondu entre la palette d'une famille de musique et celle de la suivante, en secondes de temps réel. */
 export const PALETTE_FADE_SECONDS = 1;
+/** Tempo du métronome de `?pouls=` quand il est demandé sans valeur. */
+export const DEFAULT_PULSE_BPM = 120;
 /** Tolérance de la comparaison du fondu à sa durée : dix images de 0,1 s font 0,9999999999999999 s, et le fondu est fini. */
 const FADE_EPSILON = 1e-9;
 
@@ -64,6 +68,11 @@ export interface GameSettings {
    * profil à part (voir `main.ts`), pour ne rien mêler à la vraie.
    */
   readonly testMode: boolean;
+  /**
+   * Pouls de métronome, `?pouls=120` : le rendu pulse à ce tempo sur le temps
+   * réel, musique ou non. Pour voir et tester le pouls sans son ; null sinon.
+   */
+  readonly pulseBpm: number | null;
 }
 
 /** Instantané lisible de l'extérieur : tests de bout en bout et séances de réglage. */
@@ -118,6 +127,9 @@ export interface DebugState {
   readonly track: TrackId | null;
   /** Famille de la musique voulue en ce moment, donc l'ambiance visée : la palette y arrive en fondu si elle vient de changer. */
   readonly palette: MusicFamily;
+  /** Le pouls du moment : 1 sur un temps de la musique, retombe vers 0 ; et le tempo de la piste, 0 sans rythme. */
+  readonly pulse: number;
+  readonly bpm: number;
   /** Direction unitaire de la gravité : (0, -1) d'ordinaire, qui tourne vers (±1, 0) pendant une bascule. */
   readonly gravityX: number;
   readonly gravityY: number;
@@ -162,7 +174,14 @@ export function readSettings(search: string): GameSettings {
   const seedText = params.get('graine')?.trim();
   const seed = seedText ? Number(seedText) : Number.NaN;
   const test = params.get('test')?.trim();
-  return { seed: Number.isInteger(seed) ? seed : null, tuning: withTuning(DEFAULT_TUNING, overrides), testMode: test !== undefined && test !== '0' && test !== 'non' };
+  const pulseText = params.get('pouls')?.trim();
+  const pulseBpm = pulseText === undefined ? null : pulseText === '' ? DEFAULT_PULSE_BPM : Number(pulseText);
+  return {
+    seed: Number.isInteger(seed) ? seed : null,
+    tuning: withTuning(DEFAULT_TUNING, overrides),
+    testMode: test !== undefined && test !== '0' && test !== 'non',
+    pulseBpm: pulseBpm !== null && Number.isFinite(pulseBpm) && pulseBpm > 0 ? pulseBpm : null,
+  };
 }
 
 /** Hauteur autour du personnage, en mètres, dont les points comptent pour la largeur à montrer. */
@@ -242,11 +261,20 @@ export class Game {
   private paletteFrom: Palette = this.palette;
   private paletteSeconds = PALETTE_FADE_SECONDS;
 
-  constructor(view: GameView, settings: GameSettings, storage: ProfileStorage, music: Music = new Music(silentAudio())) {
+  /** Les rythmes des pistes, et le pouls du moment, recalculé à chaque image depuis la position de lecture. */
+  private readonly rhythms: RhythmSource;
+  private pulse: Pulse = SILENT_PULSE;
+  /** Le métronome de `?pouls=`, et le temps réel écoulé qui le fait battre. */
+  private readonly metronome: Rhythm | null;
+  private clock = 0;
+
+  constructor(view: GameView, settings: GameSettings, storage: ProfileStorage, music: Music = new Music(silentAudio()), rhythms: RhythmSource = silentRhythms()) {
     this.view = view;
     this.settings = settings;
     this.storage = storage;
     this.music = music;
+    this.rhythms = rhythms;
+    this.metronome = settings.pulseBpm === null ? null : syntheticRhythm(settings.pulseBpm);
     this.profile = loadProfile(storage);
     this.run = this.newFreeRun(settings.seed ?? randomSeed());
   }
@@ -385,6 +413,8 @@ export class Game {
     this.music.update(dt);
     // L'ambiance suit la piste voulue, que la musique joue ou non.
     this.fadePalette(trackFamily(track), elapsedSeconds);
+    this.clock += Math.max(0, elapsedSeconds);
+    this.pulse = this.currentPulse();
     // Le monde tourné pendant une bascule : les textes flottent là où le personnage est affiché, pas là où il est dans le repère du monde.
     const heroOnScreen = camera.worldToDisplay(hero.pos);
     for (const event of sim.drain()) {
@@ -407,7 +437,21 @@ export class Game {
       testMode: this.settings.testMode,
       levelsPage: this.levelsPage,
       palette: this.palette,
+      pulse: this.pulse,
     });
+  }
+
+  /**
+   * Le pouls de l'image : celui de la piste qui joue, à sa position de lecture,
+   * si son rythme est connu ; sinon le métronome de `?pouls=` sur le temps réel ;
+   * sinon le silence.
+   */
+  private currentPulse(): Pulse {
+    const position = this.music.position();
+    const rhythm = position ? this.rhythms.get(position.id) : null;
+    if (position && rhythm) return pulseAt(rhythm, position.time);
+    if (this.metronome) return pulseAt(this.metronome, this.clock);
+    return SILENT_PULSE;
   }
 
   /** Les points d'accroche encore là, pour un pilote de test qui doit viser (un lanceur, un trou dans un mur). */
@@ -451,6 +495,8 @@ export class Game {
       musicOn: this.profile.music,
       track: this.music.playing,
       palette: trackFamily(this.wantedTrack()),
+      pulse: this.pulse.beat,
+      bpm: this.pulse.bpm,
       gravityX: state.env.gravityDir.x,
       gravityY: state.env.gravityDir.y,
       windX: state.env.wind.x,

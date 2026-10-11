@@ -20,7 +20,8 @@
     "lint": "eslint .",
     "check": "npm run lint && npm run typecheck && npm run test",
     "captures": "tsx scripts/capture.ts",
-    "robot": "tsx scripts/robot.ts"
+    "robot": "tsx scripts/robot.ts",
+    "rythme": "tsx scripts/rythme.ts"
   },
   "dependencies": {
     "pixi.js": "8.22.0"

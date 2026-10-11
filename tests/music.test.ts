@@ -12,6 +12,7 @@ function fakeFactory(): { factory: (src: string) => AudioPlayer; players: (Audio
       loop: false,
       volume: 1,
       paused: true,
+      currentTime: 0,
       played: 0,
       released: false,
       play() {

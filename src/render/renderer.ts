@@ -1,4 +1,5 @@
 import { Application, Container, Graphics, type Text } from 'pixi.js';
+import type { Pulse } from '../audio/rhythm';
 import type { Vec2 } from '../core/math/vec2';
 import type { LevelOutcome, Profile, RunOutcome } from '../meta/profile';
 import type { LevelResult } from '../meta/traversee';
@@ -72,6 +73,8 @@ export interface GameFrame {
   readonly levelsPage: number;
   /** L'ambiance du moment : la palette de la famille de musique, ou son fondu quand la famille change. */
   readonly palette: Palette;
+  /** Le pouls de la musique à cet instant ; `SILENT_PULSE` quand rien ne joue ou que le rythme de la piste est inconnu. */
+  readonly pulse: Pulse;
 }
 
 const TAU = Math.PI * 2;

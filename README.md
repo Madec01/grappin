@@ -26,7 +26,8 @@ Le jeu se joue aussi à la souris, avec le même geste : clic maintenu, puis rel
 Des paramètres d'adresse permettent de régler le jeu sans toucher au code :
 
 - `?graine=12` rejoue toujours le même parcours.
-- La musique est celle du propriétaire (dépôt Way), une piste par niveau, dans `public/musique/`.
+- La musique est celle du propriétaire (dépôt Way), une piste par niveau, dans `public/musique/`. À côté de chaque piste, son fichier de rythme (`<piste>.rythme.json`, produit par `npm run rythme`) fait pulser l'ambiance et les éléments du jeu au tempo ; musique coupée, rien ne pulse.
+- `?pouls=120` fait battre un métronome visuel à ce tempo, sans son : pour regarder le pouls, et pour les tests.
 - `?test=1` ouvre le mode test : tous les niveaux se jouent sans les avoir débloqués, la liste des niveaux dit les événements de chacun, et la progression se fait sur un profil à part, sans toucher à la vraie. En ligne : https://madec01.github.io/grappin/?test=1
 - Dans la console du navigateur, `__grappin.resetProfile()` efface la progression, `__grappin.profile()` l'affiche.
 - Tout réglage de `src/sim/tuning.ts` se surcharge par son nom, par exemple `?gravity=9&ropeMax=6&kickSpeed=4`.
@@ -53,6 +54,7 @@ Vite affiche une adresse locale et une adresse réseau. Ouvrez l'adresse réseau
 | `npm run typecheck` | TypeScript strict |
 | `npm run check` | Lint, typage et tests |
 | `npm run captures -- <dossier> [graine]` | Captures d'écran et vidéo d'une partie jouée par un robot, après `npm run build` |
+| `npm run rythme -- [piste ...]` | Analyse le rythme des musiques (ffmpeg requis) et écrit `public/musique/<piste>.rythme.json` ; toutes les pistes sans argument |
 | `npm run robot -- [clé=valeur ...] [profil=débutant]` | Robots joueurs en Node qui mesurent hauteur, rythme, vitesses et cause de la fin pour un réglage, par exemple `reelSpeed=4` |
 
 Pour Playwright avec un Chromium déjà installé : `PW_CHROMIUM_PATH=/chemin/vers/chrome npm run test:e2e`. Pour le GIF des captures : `FFMPEG_PATH=/chemin/vers/ffmpeg`.

@@ -1,5 +1,6 @@
 import { Game, readSettings, type DebugAnchor, type DebugState } from './app/game';
 import { Music, browserAudio } from './audio/music';
+import { browserRhythms } from './audio/rhythms';
 import { trackPointer } from './input/pointer';
 import { STORAGE_KEY, TEST_STORAGE_KEY, browserStorage, type Profile } from './meta/profile';
 import type { TalismanId } from './meta/talismans';
@@ -47,7 +48,7 @@ async function start(): Promise<void> {
   const renderer = await Renderer.create();
   // Le mode test joue sur son propre profil : la vraie progression n'en sait rien.
   // La musique vit dans public/musique, servie sous la base du site.
-  const game = new Game(renderer, settings, browserStorage(settings.testMode ? TEST_STORAGE_KEY : STORAGE_KEY), new Music(browserAudio(import.meta.env.BASE_URL)));
+  const game = new Game(renderer, settings, browserStorage(settings.testMode ? TEST_STORAGE_KEY : STORAGE_KEY), new Music(browserAudio(import.meta.env.BASE_URL)), browserRhythms(import.meta.env.BASE_URL));
 
   renderer.onFrame((elapsedSeconds) => game.frame(elapsedSeconds));
   trackPointer(renderer.canvas, { onPress: (x, y) => game.press(x, y), onMove: (x, y) => game.move(x, y), onRelease: () => game.release() });

@@ -18,6 +18,8 @@ export interface AudioPlayer {
   loop: boolean;
   volume: number;
   readonly paused: boolean;
+  /** Position de lecture, en secondes depuis le début de la piste. */
+  readonly currentTime: number;
   play(): Promise<void> | void;
   pause(): void;
   /** Libère le fichier. */
@@ -48,6 +50,9 @@ export function browserAudio(base: string): AudioFactory {
       get paused() {
         return element.paused;
       },
+      get currentTime() {
+        return element.currentTime;
+      },
       play: () => element.play().catch(() => undefined),
       pause: () => element.pause(),
       release: () => {
@@ -61,7 +66,7 @@ export function browserAudio(base: string): AudioFactory {
 
 /** Un lecteur muet : les tests, et le jeu quand aucun son n'est branché. */
 export function silentAudio(): AudioFactory {
-  return () => ({ loop: false, volume: 1, paused: true, play: () => undefined, pause: () => undefined, release: () => undefined });
+  return () => ({ loop: false, volume: 1, paused: true, currentTime: 0, play: () => undefined, pause: () => undefined, release: () => undefined });
 }
 
 export class Music {
@@ -103,6 +108,11 @@ export class Music {
   /** La piste en cours de lecture, ou null. */
   get playing(): TrackId | null {
     return this.current?.id ?? null;
+  }
+
+  /** La piste en cours et sa position de lecture en secondes, ou null : de quoi lire son rythme. */
+  position(): { readonly id: TrackId; readonly time: number } | null {
+    return this.current ? { id: this.current.id, time: this.current.player.currentTime } : null;
   }
 
   /** Avance les fondus de `dt` secondes. */
