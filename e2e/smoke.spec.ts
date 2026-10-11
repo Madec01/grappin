@@ -9,9 +9,10 @@ import { LEVELS, levelById } from '../src/data/levels';
  * tient d'une partie et d'un rechargement à l'autre, la bascule du niveau 5
  * se joue sans erreur, la liste des niveaux se tourne en deux pages, le
  * lanceur se tire au doigt (souris et toucher) puis se franchit au pilote
- * automatique, la pause fige la partie et se reprend sans lâcher la corde, et
- * les réglages du titre (Sons, Départ) survivent au rechargement. Tout passe
- * par `window.__grappin`.
+ * automatique, la pause fige la partie et se reprend sans lâcher la corde, les
+ * réglages du titre (Sons, Départ) survivent au rechargement, la fenêtre de
+ * lâcher s'ouvre puis se referme pendant un balancement, et le premier conseil
+ * du tutoriel apparaît à la première accroche. Tout passe par `window.__grappin`.
  */
 
 const CENTER = { x: 195, y: 422 };
@@ -76,7 +77,9 @@ for (const gesture of gestures) {
     expect((await state(page)).screen).toBe('title');
 
     const lift = await gesture.down(page);
-    await expect.poll(async () => (await state(page)).screen, { timeout: 500 }).toBe('playing');
+    // Le passage en partie est immédiat dans le jeu ; le délai couvre la première image d'une partie sous rendu logiciel, sur la machine
+    // chargée de l'intégration continue (le navigateur est froid : c'est le premier test de la session).
+    await expect.poll(async () => (await state(page)).screen, { timeout: 2000 }).toBe('playing');
     expect((await state(page)).attached).toBe(true);
 
     await page.waitForTimeout(600);

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { PERFECT_PITCH_STEPS, RECIPES, cueFor, perfectPitch, silentSfx, type SoundId } from '../src/audio/sfx';
+import { describe, expect, it, vi } from 'vitest';
+import { PERFECT_PITCH_STEPS, RECIPES, browserSfx, cueFor, perfectPitch, silentSfx, type SoundId } from '../src/audio/sfx';
 import type { RuleEvent } from '../src/sim/state';
 
 const release = (parts: Partial<Extract<RuleEvent, { type: 'release' }>>): RuleEvent => ({ type: 'release', perfect: false, combo: 0, held: 0.5, kind: 'normal', forced: false, ...parts });
@@ -49,6 +49,41 @@ describe('les bruitages', () => {
         expect(part.to, id).toBeGreaterThanOrEqual(40);
         expect(Math.max(part.from, part.to), id).toBeLessThanOrEqual(8000);
       }
+    }
+  });
+
+  it('le lecteur du navigateur crée son contexte audio à la construction, pas au premier geste, et le geste le reprend', () => {
+    const calls: string[] = [];
+    class FakeContext {
+      state = 'suspended';
+      sampleRate = 100;
+      currentTime = 0;
+      destination = {};
+      constructor() {
+        calls.push('new');
+      }
+      createGain() {
+        return { gain: { value: 0 }, connect: () => undefined };
+      }
+      createBuffer(_channels: number, frames: number) {
+        return { getChannelData: () => new Float32Array(frames) };
+      }
+      resume() {
+        calls.push('resume');
+        this.state = 'running';
+        return Promise.resolve();
+      }
+    }
+    vi.stubGlobal('AudioContext', FakeContext);
+    try {
+      const player = browserSfx();
+      expect(calls).toEqual(['new']);
+      player.unlock();
+      expect(calls).toEqual(['new', 'resume']);
+      player.unlock();
+      expect(calls).toEqual(['new', 'resume']);
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 

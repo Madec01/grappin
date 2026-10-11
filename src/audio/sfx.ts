@@ -149,9 +149,13 @@ export function silentSfx(): SoundPlayer {
 }
 
 /**
- * Le lecteur du navigateur. Le contexte audio naît et reprend au premier geste
- * (`unlock`), comme les navigateurs l'exigent ; une note demandée avant, ou
- * sons coupés, est ignorée.
+ * Le lecteur du navigateur. Le contexte audio naît dès la construction, au
+ * chargement : sa création coûte des dizaines de millisecondes (bien plus sur
+ * un petit téléphone ou une machine chargée), et la faire au premier toucher,
+ * comme avant, bloquait la page au moment même où le joueur pose le doigt. Il
+ * reste suspendu tant que le joueur n'a rien touché ; `unlock`, appelé dans le
+ * geste comme les navigateurs l'exigent, le reprend. Une note demandée avant,
+ * ou sons coupés, est ignorée.
  */
 export function browserSfx(): SoundPlayer {
   let context: AudioContext | null = null;
@@ -173,6 +177,7 @@ export function browserSfx(): SoundPlayer {
     for (let i = 0; i < frames; i += 1) data[i] = Math.random() * 2 - 1;
     return context;
   };
+  ensure();
 
   const envelope = (ctx: AudioContext, start: number, seconds: number, gain: number): GainNode => {
     const node = ctx.createGain();

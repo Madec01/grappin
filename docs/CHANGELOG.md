@@ -16,9 +16,14 @@ Demande du propriétaire : « finis le lot 1 ». Restaient les aides visuelles e
 
 - **Lanceur L4, passage sous un plafond.** Essayé en quatre géométries, mesuré en simulation : dans ce moteur, une prise s'attrape à n'importe quelle vitesse dès qu'elle est à portée (visée automatique, six mètres), si bien qu'aucun mur ni plafond ne rend la pleine puissance « excessive » avant l'accroche ; et une sortie posée sous une dalle piège tout le monde, pas seulement les tirs forts. Pour que la puissance compte, il faudrait une règle d'accroche qui dépende de la vitesse (une fenêtre d'accroche plus courte à grande vitesse), ce qui change le ressenti de toutes les accroches : décision du propriétaire, à prendre avant de rouvrir L4.
 
+### Corrigé
+
+- **Plus d'à-coup au premier toucher (B-011).** Le contexte audio des bruitages naissait dans le premier geste, et sa création bloquait la page quelques dizaines de millisecondes sur un ordinateur, bien plus sur un petit téléphone ou sur la machine chargée de l'intégration continue, qui a refusé 0.10.0 une première fois sur ce point. Il naît maintenant au chargement, suspendu, et le premier geste ne fait que le reprendre.
+
 ### Technique
 
 - `src/app/coach.ts` (pur, testé), `src/meta/learning.ts` (pur, testé), `inReleaseWindow` dans `render/cues.ts`, `effects.tip` (ton 'tip' des bannières), `Profile.tips`, `debugState().releaseWindow` et `.tip`.
+- Test de bout en bout du toucher : le passage en partie se vérifie en 2 s au lieu de 0,5 s, le temps de la première image sous rendu logiciel sur un navigateur froid.
 
 ## [0.9.0] — 2026-10-11 — Lot 1 du brief : un lanceur qui se vise, des bruitages, la pause, un univers abstrait
 
