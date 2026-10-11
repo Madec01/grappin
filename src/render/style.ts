@@ -26,6 +26,13 @@ export const COLOR = {
   white: 0xffffff,
   /** Blanc froid fixe : le cœur des tubes qui ne suivent pas l'ambiance (élastique tendu du lanceur, coche, « Arrivée »). */
   hot: 0xe6fbff,
+  /**
+   * Fenêtre de lâcher : quand lâcher maintenant serait parfait, la corde et le halo du personnage prennent cette teinte chaude, la même
+   * sur toutes les ambiances (un cœur blanc crème, un halo orange), que l'ambiance, froide ou blanc chaud, ne donne jamais. Ce n'est pas
+   * une couleur de prise : plus profonde que l'orange électrique et que le halo des étoiles, elle ne se pose que sur le personnage et sa corde.
+   */
+  release: 0xfff0d2,
+  releaseHalo: 0xff8c32,
   /** Étoiles : jaune néon, halo chaud. */
   star: 0xffe66d,
   starHalo: 0xffb347,

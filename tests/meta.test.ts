@@ -248,3 +248,18 @@ describe('incohérences du brief du 11 octobre 2026', () => {
     expect(loadProfile(memoryStorage(JSON.stringify(blank))).missions).toEqual(createProfile().missions);
   });
 });
+
+describe('conseils du tutoriel dans le profil', () => {
+  it('les conseils vus se gardent, se relisent, et une liste douteuse ramène à aucun conseil', () => {
+    const storage = memoryStorage();
+    const profile = { ...createProfile(), tips: ['grab', 'window'] };
+    saveProfile(storage, profile);
+    expect(loadProfile(storage).tips).toEqual(['grab', 'window']);
+    expect(loadProfile(memoryStorage(JSON.stringify({ ...createProfile(), tips: 'grab' }))).tips).toEqual([]);
+    expect(loadProfile(memoryStorage(JSON.stringify({ ...createProfile(), tips: ['grab', 3, null] }))).tips).toEqual(['grab']);
+    // Un profil d'avant ce réglage n'a pas la clé : aucun conseil vu.
+    const old: Record<string, unknown> = { ...createProfile() };
+    delete old['tips'];
+    expect(loadProfile(memoryStorage(JSON.stringify(old))).tips).toEqual([]);
+  });
+});

@@ -2,7 +2,7 @@ import type { Vec2 } from '../core/math/vec2';
 import { isLit } from '../sim/cycles';
 import { freeFlightAt } from '../sim/physics';
 import { lightIsOff } from '../sim/events';
-import { releaseVelocity } from '../sim/rules';
+import { isPerfectRelease, releaseVelocity } from '../sim/rules';
 import type { Anchor, AnchorKind, SimState } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
 
@@ -41,6 +41,18 @@ export function shadowPoints(state: SimState, tuning: Tuning, seconds: number = 
     points.push(freeFlightAt(body, (seconds * i) / SHADOW_POINTS, tuning, state.env));
   }
   return points;
+}
+
+/**
+ * La fenêtre de lâcher : vrai quand lâcher maintenant serait un lâcher parfait
+ * (la vitesse de lâcher, propulseur compris, monte entre 30° et 60°, assez
+ * vite). Faux sans corde, et toujours faux sur un lanceur, qui ne se juge pas.
+ * Le rendu la montre discrètement ; le tutoriel s'en sert pour dire « lâche ».
+ */
+export function inReleaseWindow(state: SimState, tuning: Tuning): boolean {
+  if (!state.rope || heldKind(state) === 'lanceur') return false;
+  const vel = releaseVelocity(state, tuning);
+  return isPerfectRelease(vel.x, vel.y, tuning, state.env);
 }
 
 /** Usure de l'accroche fragile en main : sa position et la part de tenue écoulée, de 0 (saisie) à 1 (elle casse). */

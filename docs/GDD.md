@@ -143,6 +143,8 @@ Répartition dans les niveaux : pluie au 3, panne au 4, bascule au 5, vent au 6,
 - Pas de vibration. Le son et l'image portent le feedback.
 - Le son ne démarre qu'après un premier tap : écran « Toucher pour jouer ».
 - **Bruitages du geste [livrés en 0.9.0].** Accroche courte et nette, souffle au lâcher, son propre au parfait dont la note monte avec la série, lancer, propulsion, étoile, frôlement, choc, décharge, casse, brume, chute, arrivée, palier. Synthétisés, sans fichier ; coupés par le réglage « Sons ». Le son confirme les actions sans imposer de jouer sur le tempo de la musique.
+- **Fenêtre de lâcher visible [livrée en 0.10.0].** Quand lâcher maintenant serait parfait, la corde et le halo du personnage prennent une teinte chaude et l'ombre prédictive s'allume un cran ; un état, pas une animation, rien ne change de taille.
+- **Tutoriel par l'action [livré en 0.10.0].** Pas d'écran d'explications : un conseil court au moment du geste (première accroche, première fenêtre de lâcher, premier vol, premier lanceur, premier parfait), une seule fois par profil, qui s'efface donc de lui-même. Tant que 30 m n'ont jamais été atteints, la brume monte à 60 % et l'ombre prédictive porte deux fois plus loin ; ensuite tout revient au réglage normal.
 - **Pause et reprise [livrées en 0.9.0].** Un bouton de pause pendant la partie, et la pause automatique quand l'application passe en arrière-plan ou que le système annule le geste. « Reprendre » ne lâche jamais une corde tenue ni ne déclenche un tir : le joueur reprend la corde en main en appuyant de nouveau.
 
 

@@ -39,6 +39,7 @@ Des paramètres d'adresse permettent de régler le jeu sans toucher au code :
 - `?pouls=120` fait battre un métronome visuel à ce tempo, sans son : pour regarder le pouls, et pour les tests.
 - Les bruitages du geste sont synthétisés (aucun fichier) ; « Sons : oui/non » sur le titre les coupe. « Départ : avancé / du sol » choisit d'où part la course libre.
 - Pause : le bouton en haut à droite pendant la partie, ou automatiquement quand l'application passe en arrière-plan ; « Reprendre » ne lâche jamais la corde, on la reprend en main en appuyant de nouveau.
+- Pour qui apprend (jamais 30 m atteints), la brume monte à 60 % et l'ombre prédictive porte plus loin ; des conseils courts apparaissent au moment du geste, une seule fois chacun. La fenêtre de lâcher parfait se voit : corde et halo chauds.
 - `?comboMissPenalty=0` garde le multiplicateur tel quel sur un lâcher correct (1 par défaut : il redescend d'un cran ; les chocs et décharges le remettent à zéro).
 - `?test=1` ouvre le mode test : tous les niveaux se jouent sans les avoir débloqués, la liste des niveaux dit les événements de chacun, et la progression se fait sur un profil à part, sans toucher à la vraie. En ligne : https://madec01.github.io/grappin/?test=1
 - Dans la console du navigateur, `__grappin.resetProfile()` efface la progression, `__grappin.profile()` l'affiche.

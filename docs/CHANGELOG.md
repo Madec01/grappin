@@ -2,6 +2,24 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.10.0] — 2026-10-11 — Fin du lot 1 : apprendre en jouant
+
+Demande du propriétaire : « finis le lot 1 ». Restaient les aides visuelles et le tutoriel par l'action ; le lanceur sous plafond (L4) est reporté, voir plus bas.
+
+### Ajouté
+
+- **La fenêtre de lâcher se voit.** Quand lâcher maintenant serait un lâcher parfait, la corde et le halo du personnage prennent une teinte chaude et l'ombre prédictive s'allume un cran. Un état, pas une animation ; rien ne change de taille.
+- **Le tutoriel par l'action.** Plus d'écran d'explications : un conseil court au moment même du geste, chacun une seule fois par profil, puis plus jamais. « Garde le doigt posé · Tu prends de l'élan » à la première accroche ; « Lâche en montant ! » la première fois que la fenêtre s'ouvre ; « Appuie pour rattraper » au premier vol ; « Tire le doigt vers le bas · Lâche pour partir » au premier lanceur ; « Parfait ! · Enchaîne pour monter le multiplicateur » au premier parfait. Un conseil attend si une bannière de niveau ou d'événement est en cours. Les conseils vus se gardent dans le profil.
+- **Menace tolérante et aide plus explicite pour qui apprend.** Tant qu'un joueur n'a jamais atteint 30 m, la brume monte à 60 % de sa vitesse et l'ombre prédictive porte 0,5 s au lieu de 0,25 s. Dès 30 m atteints une fois, tout revient au réglage normal : l'aide s'efface quand le geste est compris.
+
+### Reporté
+
+- **Lanceur L4, passage sous un plafond.** Essayé en quatre géométries, mesuré en simulation : dans ce moteur, une prise s'attrape à n'importe quelle vitesse dès qu'elle est à portée (visée automatique, six mètres), si bien qu'aucun mur ni plafond ne rend la pleine puissance « excessive » avant l'accroche ; et une sortie posée sous une dalle piège tout le monde, pas seulement les tirs forts. Pour que la puissance compte, il faudrait une règle d'accroche qui dépende de la vitesse (une fenêtre d'accroche plus courte à grande vitesse), ce qui change le ressenti de toutes les accroches : décision du propriétaire, à prendre avant de rouvrir L4.
+
+### Technique
+
+- `src/app/coach.ts` (pur, testé), `src/meta/learning.ts` (pur, testé), `inReleaseWindow` dans `render/cues.ts`, `effects.tip` (ton 'tip' des bannières), `Profile.tips`, `debugState().releaseWindow` et `.tip`.
+
 ## [0.9.0] — 2026-10-11 — Lot 1 du brief : un lanceur qui se vise, des bruitages, la pause, un univers abstrait
 
 Le propriétaire a remis un brief complet (synthèse des échanges du 11 octobre 2026, voir `docs/BACKLOG.md`, « Programme du brief »). Décision prioritaire : abandonner le thème de la ville, garder un univers abstrait, minimaliste et lumineux. Ce lot couvre le lot 0 (inventaire, incohérences, direction artistique) et le cœur du lot 1.

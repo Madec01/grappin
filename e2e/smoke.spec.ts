@@ -265,6 +265,55 @@ test('pouls : avec ?test=1&pouls=120 le pouls bat à 120 temps par minute ; sans
   expect(errors).toEqual([]);
 });
 
+test('fenêtre de lâcher : pendant un balancement, state().releaseWindow passe par vrai puis faux', async ({ page }) => {
+  const errors = watchErrors(page);
+  // Horloge figée puis menée à la main, une image simulée (16 ms) à la fois : la fenêtre ne dure que quelques dixièmes de seconde, et le
+  // rendu logiciel, à quelques images par seconde, pourrait ne jamais l'échantillonner.
+  await page.clock.install({ time: 0 });
+  await open(page, '/?graine=7');
+  await page.clock.pauseAt(60_000);
+  // Sans corde, lâcher ne serait pas un lâcher : pas de fenêtre.
+  expect((await state(page)).releaseWindow).toBe(false);
+
+  await page.evaluate(() => window.__grappin!.playFree());
+  await page.evaluate(() => window.__grappin!.press());
+  expect((await state(page)).attached).toBe(true);
+
+  // Deux secondes de balancement : la fenêtre s'ouvre (le lâcher monterait entre 30° et 60°) et se referme.
+  const seen: boolean[] = [];
+  for (let frame = 0; frame < 125; frame += 1) {
+    await page.clock.runFor(16);
+    const sample = await state(page);
+    expect(sample.attached).toBe(true);
+    seen.push(sample.releaseWindow);
+  }
+  expect(seen).toContain(true);
+  expect(seen).toContain(false);
+
+  // Lâcher la corde ferme la fenêtre : sans corde, elle reste fausse.
+  await page.evaluate(() => window.__grappin!.release());
+  await page.clock.runFor(16);
+  expect(await state(page)).toMatchObject({ attached: false, releaseWindow: false });
+  expect(errors).toEqual([]);
+});
+
+test('tutoriel : le premier conseil apparaît à la première accroche, et state().tip le donne', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.clock.install({ time: 0 });
+  await open(page, '/?graine=7');
+  await page.clock.pauseAt(60_000);
+  // Profil neuf (un contexte de test est vierge) : aucun conseil avant l'accroche.
+  await page.evaluate(() => window.__grappin!.playFree());
+  await page.clock.runFor(100);
+  expect((await state(page)).tip).toBeNull();
+
+  await page.evaluate(() => window.__grappin!.press());
+  // Le conseil se dessine par la bannière douce : quelques images, fondu d'entrée compris, sans erreur de console.
+  for (let frame = 0; frame < 30; frame += 1) await page.clock.runFor(16);
+  expect(await state(page)).toMatchObject({ attached: true, tip: 'Garde le doigt posé' });
+  expect(errors).toEqual([]);
+});
+
 test('un pilote automatique grimpe au-delà de 10 m sans erreur de console', async ({ page }) => {
   const errors = watchErrors(page);
   // Brume ralentie : sur les machines lentes de l'intégration continue, le pilote réagit à la cadence

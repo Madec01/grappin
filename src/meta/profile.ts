@@ -43,6 +43,8 @@ export interface Profile {
   /** Réglage « Sons » : les bruitages du geste. */
   readonly sfx: boolean;
   readonly freeStart: FreeStart;
+  /** Conseils du tutoriel déjà donnés (voir `app/coach.ts`) : chacun une seule fois. */
+  readonly tips: string[];
 }
 
 /** Lecture et écriture d'un texte : `localStorage` dans le navigateur, une mémoire dans les tests. */
@@ -69,6 +71,7 @@ export function createProfile(): Profile {
     music: true,
     sfx: true,
     freeStart: 'advanced',
+    tips: [],
   };
 }
 
@@ -137,6 +140,7 @@ export function loadProfile(storage: ProfileStorage): Profile {
       music: raw.music !== false,
       sfx: raw.sfx !== false,
       freeStart: raw.freeStart === 'ground' ? 'ground' : 'advanced',
+      tips: Array.isArray(raw.tips) ? raw.tips.filter((id): id is string => typeof id === 'string') : [],
     };
     return refillMissions(profile);
   } catch {

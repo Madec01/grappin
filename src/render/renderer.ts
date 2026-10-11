@@ -11,8 +11,8 @@ import { pauseRect, type ButtonId, type ButtonRect } from './buttons';
 import type { Camera, ViewBounds } from './camera';
 import { bandsInView, cityBand } from './city';
 import { electricState, type ElectricState } from '../sim/cycles';
-import { fragileGauge, heldKind, isDark, isOff, shadowPoints } from './cues';
-import { alertAlpha, bannerAlpha, flicker, floatAlpha, floatRise, pulse, sizzle, type Effects } from './effects';
+import { fragileGauge, heldKind, inReleaseWindow, isDark, isOff, shadowPoints } from './cues';
+import { alertAlpha, bannerAlpha, flicker, floatAlpha, floatRise, pulse, sizzle, type Banner, type Effects } from './effects';
 import { formatDecimal } from './format';
 import { neonCircle, neonDiscs, neonFill, neonLine, neonRects, neonStroke, type NeonStrokeStyle } from './neon';
 import { ambientHalo, cityLots, fogSheetAlpha, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow, type HaloBoost } from './pulse';
@@ -44,6 +44,14 @@ import { COLOR, GlowText, PALETTES, makeText, readSafeInset, starPoints, type Pa
  * et des teintes, jamais une forme, une taille ni une position, ni la couleur
  * d'une espèce de prise ; au silence, chaque facteur vaut 1 et chaque ajout 0,
  * et le rendu est celui d'avant.
+ *
+ * Deux aides du tutoriel se dessinent ici, discrètement. La fenêtre de lâcher
+ * (`inReleaseWindow`) : tant que lâcher serait parfait, la corde et le halo du
+ * personnage prennent la teinte chaude de `COLOR.release`, un cran plus lumineux,
+ * et les points de l'ombre s'allument ; un état, pas une animation, et hors
+ * fenêtre le rendu est exactement celui d'avant. Un conseil (bannière
+ * `tone: 'tip'`) se dit plus bas et plus doucement qu'une annonce : texte pâle,
+ * plus petit, sans halo.
  *
  * Tout le décor vit dans un conteneur, `world`, que la bascule fait tourner
  * autour du centre de l'écran : on y dessine donc en coordonnées de la caméra,
@@ -202,6 +210,12 @@ const SHADOW_ALPHA = 0.55;
 const LAUNCH_SHADOW_SECONDS = 0.6;
 const LAUNCH_SHADOW_DOT_RADIUS = 2.6;
 const LAUNCH_SHADOW_ALPHA = 0.9;
+/**
+ * Fenêtre de lâcher (voir `inReleaseWindow`) : un état, pas une animation. La corde et le halo du personnage passent à la teinte chaude de
+ * `COLOR.release`, un peu plus lumineux (même taille, même forme), et les points de l'ombre s'allument d'un cran, de la même teinte.
+ */
+const READY_STRENGTH = 1.35;
+const READY_SHADOW_ALPHA = 0.9;
 
 /**
  * Lanceur tenu : le cercle qui borne la traction (tireté, pâle, plus net quand
@@ -262,6 +276,16 @@ const BANNER_FONT_SIZE = 24;
 /** Seconde ligne de la bannière (l'intro d'un niveau), et distance qui la sépare de la première. */
 const BANNER_DETAIL_FONT_SIZE = 16;
 const BANNER_DETAIL_GAP = 4;
+/**
+ * Un conseil du tutoriel (bannière `tone: 'tip'`) se dit plus doucement qu'une annonce : plus petit, en texte pâle sans halo, et posé sous
+ * le personnage, à cette part de la hauteur de l'écran. Le personnage reste entre 45 % et 70 % de la hauteur et les prises à venir sont au-dessus
+ * de lui : dessous, il n'y a que le toit et la brume, rien à cacher.
+ */
+const TIP_FONT_SIZE = 17;
+const TIP_DETAIL_FONT_SIZE = 14;
+const TIP_DETAIL_GAP = 3;
+const TIP_TOP_RATIO = 0.75;
+const TIP_ALPHA = 0.92;
 /** Objectif d'un niveau à côté de la hauteur, plus petit. */
 const GOAL_FONT_SIZE = 22;
 const GOAL_GAP = 8;
@@ -290,6 +314,8 @@ const SPECIES_TUBE: Record<Exclude<AnchorKind, 'normal'>, Tube> = {
   lanceur: { color: COLOR.launcher, halo: COLOR.launcher },
 };
 const CHARGED_TUBE: Tube = { color: COLOR.electricCharged, halo: COLOR.electricCharged };
+/** Corde et halo du personnage dans la fenêtre de lâcher : la même teinte chaude sur toutes les ambiances. */
+const READY_TUBE: Tube = { color: COLOR.release, halo: COLOR.releaseHalo };
 /** Dans quel groupe tombe une prise électrique selon son cycle. */
 const ELECTRIC_GROUP: Record<ElectricState, 'calm' | 'warning' | 'charged'> = { calme: 'calm', avertit: 'warning', chargee: 'charged' };
 const KINDS: readonly AnchorKind[] = ['normal', 'fragile', 'booster', 'electrique', 'eclipse', 'lanceur'];
@@ -411,6 +437,9 @@ export class Renderer {
   private readonly bannerText = new GlowText('', BANNER_FONT_SIZE, COLOR.text, PALETTES.menu.accent, { bold: true, outlined: true });
   /** Seconde ligne de la bannière : sa largeur de retour à la ligne est fixée par `layout()`. */
   private readonly bannerDetail = new GlowText('', BANNER_DETAIL_FONT_SIZE, COLOR.text, PALETTES.menu.accent, { outlined: true, wrap: 0 });
+  /** Un conseil du tutoriel : deux lignes de texte pâle, sans halo, au contour sombre. Seconde ligne : sa largeur de retour à la ligne est fixée par `layout()`. */
+  private readonly tipText = makeText('', TIP_FONT_SIZE, COLOR.textDim, { bold: true, outlined: true });
+  private readonly tipDetail = makeText('', TIP_DETAIL_FONT_SIZE, COLOR.textDim, { outlined: true, wrap: 0 });
   /** « Arrivée », petit, à droite de la ligne d'arrivée, au halo du tube. */
   private readonly finishLabel = new GlowText('Arrivée', FINISH_FONT_SIZE, COLOR.hot, PALETTES.menu.halo, { bold: true });
 
@@ -450,6 +479,8 @@ export class Renderer {
     this.scoreText.anchor.set(0, 0);
     this.bannerText.anchorAt(0.5, 0);
     this.bannerDetail.anchorAt(0.5, 0);
+    this.tipText.anchor.set(0.5, 0);
+    this.tipDetail.anchor.set(0.5, 0);
     this.finishLabel.anchorAt(1, 1);
     this.world.addChild(
       this.city,
@@ -476,6 +507,8 @@ export class Renderer {
       this.hud,
       this.bannerText,
       this.bannerDetail,
+      this.tipText,
+      this.tipDetail,
       this.screens.root,
     );
   }
@@ -545,10 +578,12 @@ export class Renderer {
     this.drawCables(state, camera);
     this.drawAnchors(state, camera, view, tuning, effects);
     this.drawTargetRing(state, camera, tuning, effects);
-    this.drawRope(state, camera, tuning, effects);
+    // La fenêtre de lâcher ne se montre que pendant la partie (et sous le voile de la pause, qui fige l'image) : jamais sur un écran de fin.
+    const ready = (frame.screen === 'playing' || frame.screen === 'paused') && inReleaseWindow(state, tuning);
+    this.drawRope(state, camera, tuning, effects, ready);
     this.drawFog(state, camera, view, effects);
-    this.drawShadow(state, camera, tuning);
-    this.drawHero(state, camera, tuning);
+    this.drawShadow(state, camera, tuning, ready);
+    this.drawHero(state, camera, tuning, ready);
     this.drawFloatingTexts(effects);
     this.drawHud(state, frame, tuning);
     this.drawBanner(effects);
@@ -614,6 +649,9 @@ export class Renderer {
     this.bannerText.position.set(width / 2, top + BANNER_OFFSET);
     this.bannerDetail.position.x = width / 2;
     this.bannerDetail.wrapWidth = width - 2 * BANNER_SIDE_MARGIN;
+    this.tipText.position.set(width / 2, Math.round(height * TIP_TOP_RATIO));
+    this.tipDetail.position.x = width / 2;
+    this.tipDetail.style.wordWrapWidth = width - 2 * BANNER_SIDE_MARGIN;
   }
 
   /** Les deux barres du bouton de pause, au centre de sa zone : tracées une fois, quand la taille de l'écran change. */
@@ -1060,7 +1098,7 @@ export class Renderer {
    * premiers centièmes de seconde : un tube de la palette. À un lanceur, il n'y a
    * pas de corde : l'élastique de la fronde prend sa place.
    */
-  private drawRope(state: SimState, camera: Camera, tuning: Tuning, effects: Effects): void {
+  private drawRope(state: SimState, camera: Camera, tuning: Tuning, effects: Effects, ready: boolean): void {
     const g = this.rope.clear();
     if (!state.rope) return;
     const { anchorId } = state.rope;
@@ -1077,7 +1115,10 @@ export class Renderer {
     // La vitesse se lit sur la corde : plus le treuil accélère le balancement, plus elle épaissit et brille, jusqu'au plafond du treuil.
     const speed = Math.hypot(state.hero.vel.x, state.hero.vel.y);
     const heat = Math.min(1, Math.max(0, (speed - ROPE_CALM_SPEED) / (tuning.reelMaxSpeed - ROPE_CALM_SPEED)));
-    neonLine(g, from, tip, { ...this.normalTube, width: ROPE_WIDTH + ROPE_HEAT_WIDTH * heat, strength: (1 + ROPE_HEAT_GLOW * heat) * this.halo.strength, spread: (1 + ROPE_HEAT_SPREAD * heat) * this.halo.spread, cap: 'round' });
+    // Dans la fenêtre de lâcher, la corde prend la teinte chaude et brille un cran de plus ; hors fenêtre, rien ne change.
+    const tube = ready ? READY_TUBE : this.normalTube;
+    const glow = ready ? READY_STRENGTH : 1;
+    neonLine(g, from, tip, { ...tube, width: ROPE_WIDTH + ROPE_HEAT_WIDTH * heat, strength: (1 + ROPE_HEAT_GLOW * heat) * this.halo.strength * glow, spread: (1 + ROPE_HEAT_SPREAD * heat) * this.halo.spread, cap: 'round' });
   }
 
   /**
@@ -1149,22 +1190,24 @@ export class Renderer {
   /**
    * Ombre prédictive : quelques points pâles, discrets, qui montrent où irait
    * le personnage s'il lâchait maintenant. Tenu à un lanceur, elle est la visée :
-   * plus longue, plus grosse, plus nette.
+   * plus longue, plus grosse, plus nette. Dans la fenêtre de lâcher, ses points
+   * s'allument d'un cran et prennent la teinte chaude : même nombre, même taille.
    */
-  private drawShadow(state: SimState, camera: Camera, tuning: Tuning): void {
+  private drawShadow(state: SimState, camera: Camera, tuning: Tuning, ready: boolean): void {
     const g = this.shadow.clear();
     const aiming = heldKind(state) === 'lanceur';
     for (const point of shadowPoints(state, tuning, aiming ? LAUNCH_SHADOW_SECONDS : tuning.shadowSeconds)) {
       const p = camera.worldToScreen(point);
       g.circle(p.x, p.y, aiming ? LAUNCH_SHADOW_DOT_RADIUS : SHADOW_DOT_RADIUS);
     }
-    g.fill({ color: this.palette.pale, alpha: aiming ? LAUNCH_SHADOW_ALPHA : SHADOW_ALPHA });
+    g.fill({ color: ready ? COLOR.release : this.palette.pale, alpha: aiming ? LAUNCH_SHADOW_ALPHA : ready ? READY_SHADOW_ALPHA : SHADOW_ALPHA });
   }
 
-  /** Le personnage : un disque pâle, le plus lumineux du jeu, au halo de la palette plus large que celui des points. */
-  private drawHero(state: SimState, camera: Camera, tuning: Tuning): void {
+  /** Le personnage : un disque pâle, le plus lumineux du jeu, au halo de la palette plus large que celui des points. Dans la fenêtre de lâcher, son halo prend la teinte chaude. */
+  private drawHero(state: SimState, camera: Camera, tuning: Tuning, ready: boolean): void {
     const p = camera.worldToScreen(state.hero.pos);
-    neonDiscs(this.hero.clear(), [p], tuning.heroRadius * camera.scale, { ...this.normalTube, spread: 1.4 * this.halo.spread, strength: this.halo.strength });
+    const tube = ready ? READY_TUBE : this.normalTube;
+    neonDiscs(this.hero.clear(), [p], tuning.heroRadius * camera.scale, { ...tube, spread: 1.4 * this.halo.spread, strength: this.halo.strength * (ready ? READY_STRENGTH : 1) });
   }
 
   /** Textes flottants près du personnage : ils montent un peu et s'effacent. Jamais coupés par le bord de l'écran. */
@@ -1197,19 +1240,38 @@ export class Renderer {
   /**
    * Bannière au centre-haut, qui apparaît puis s'efface : nom et hauteur d'un
    * palier, ou, au départ d'un niveau, son titre et en dessous sa phrase d'intro.
+   * Un conseil du tutoriel (`tone: 'tip'`) prend la place d'une annonce, mais se
+   * dessine à part, plus doucement : voir `drawTip`.
    */
   private drawBanner(effects: Effects): void {
     const { banner } = effects;
-    this.bannerText.visible = banner !== null;
-    this.bannerDetail.visible = banner !== null && banner.detail !== null;
+    const tip = banner?.tone === 'tip';
+    this.bannerText.visible = banner !== null && !tip;
+    this.bannerDetail.visible = banner !== null && !tip && banner.detail !== null;
+    this.tipText.visible = banner !== null && tip;
+    this.tipDetail.visible = banner !== null && tip && banner.detail !== null;
     if (!banner) return;
     const alpha = bannerAlpha(banner.age, banner.seconds);
+    if (tip) {
+      this.drawTip(banner, alpha);
+      return;
+    }
     this.bannerText.text = banner.text;
     this.bannerText.alpha = alpha;
     if (banner.detail === null) return;
     this.bannerDetail.text = banner.detail;
     this.bannerDetail.alpha = alpha;
     this.bannerDetail.position.y = this.bannerText.y + this.bannerText.textHeight + BANNER_DETAIL_GAP;
+  }
+
+  /** Le conseil : un titre court et sa phrase en texte pâle, sous le personnage, sans halo ; même fondu que les autres bannières, un peu transparent. */
+  private drawTip(tip: Readonly<Banner>, alpha: number): void {
+    this.tipText.text = tip.text;
+    this.tipText.alpha = alpha * TIP_ALPHA;
+    if (tip.detail === null) return;
+    this.tipDetail.text = tip.detail;
+    this.tipDetail.alpha = alpha * TIP_ALPHA;
+    this.tipDetail.position.y = this.tipText.y + this.tipText.height + TIP_DETAIL_GAP;
   }
 
   /**

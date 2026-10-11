@@ -26,6 +26,8 @@ export const BANNER_SECONDS = 2;
 export const INTRO_SECONDS = 3;
 /** L'annonce d'un événement de niveau (bascule, vent, panne...) ou du retour au calme. */
 export const EVENT_SECONDS = 2.5;
+/** Vie d'un conseil du tutoriel, en secondes : le temps de le lire en jouant. */
+export const TIP_SECONDS = 3;
 
 /** Alerte : la ligne claire de la brume clignote ce nombre de fois par seconde, entre ces deux opacités. */
 export const ALERT_BLINK_HZ = 2;
@@ -78,6 +80,8 @@ export interface Banner {
   /** Vie de la bannière, en secondes. */
   readonly seconds: number;
   age: number;
+  /** Un conseil du tutoriel, plutôt qu'un événement ou un titre : le rendu peut le montrer plus doucement. */
+  readonly tone?: 'tip';
 }
 
 /**
@@ -250,6 +254,13 @@ export class Effects {
   /** Annonce un événement de niveau, ou son retour au calme : un titre et, souvent, une phrase. Remplace la bannière en cours. */
   announce(title: string, detail: string | null): void {
     this.current = { text: title, detail, seconds: EVENT_SECONDS, age: 0 };
+  }
+
+  /** Un conseil du tutoriel, au bon moment du geste : un titre court et, souvent, une phrase. Ne remplace pas une bannière de niveau ou d'événement en cours : rend alors faux, le conseil attendra une autre occasion. */
+  tip(title: string, detail: string | null): boolean {
+    if (this.current && this.current.tone !== 'tip' && this.current.age < this.current.seconds) return false;
+    this.current = { text: title, detail, seconds: TIP_SECONDS, age: 0, tone: 'tip' };
+    return true;
   }
 
   /** Hauteur, longueur et rapidité d'une traînée qui naît ; son abscisse dépend d'où elle entre. */

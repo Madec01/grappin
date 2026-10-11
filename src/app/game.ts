@@ -4,6 +4,8 @@ import { SILENT_PULSE, pulseAt, syntheticRhythm, type Pulse, type Rhythm } from 
 import { bestLaunch } from '../sim/pilot';
 import { silentRhythms, type RhythmSource } from '../audio/rhythms';
 import { cueFor, silentSfx, type SoundPlayer } from '../audio/sfx';
+import { Coach } from './coach';
+import { learningTuning } from '../meta/learning';
 import { LEVELS, levelById, type LevelDef } from '../data/levels';
 import { TITLE_TRACK, levelTrack, trackFamily, type MusicFamily, type TrackId } from '../data/musique';
 import { levelFor } from '../meta/levels';
@@ -13,7 +15,7 @@ import { TALISMANS, applyTalismans, type TalismanId } from '../meta/talismans';
 import { freeRunStartY, isUnlocked, levelPlan, levelTuning, unlockedLevel, type LevelResult } from '../meta/traversee';
 import { levelOfButton, levelPageCount, pageOfLevel, type ButtonId } from '../render/buttons';
 import { Camera } from '../render/camera';
-import { heldKind, windSide } from '../render/cues';
+import { heldKind, windSide, inReleaseWindow } from '../render/cues';
 import { Effects } from '../render/effects';
 import { eventAnnouncement, levelTitle } from '../render/labels';
 import { mixPalette, paletteFor, type Palette } from '../render/palette';
@@ -21,7 +23,7 @@ import type { DeathCause, GameScreen, Renderer } from '../render/renderer';
 import type { CoursePlan } from '../sim/course';
 import type { EventKind } from '../sim/events';
 import { Simulation } from '../sim/simulation';
-import type { AnchorKind, SimState } from '../sim/state';
+import type { AnchorKind, SimState, RuleEvent } from '../sim/state';
 import { DEFAULT_TUNING, withTuning, type Tuning } from '../sim/tuning';
 
 /**
@@ -148,6 +150,10 @@ export interface DebugState {
   readonly events: { readonly kind: EventKind; readonly started: boolean; readonly ended: boolean }[];
   /** Espèce du point tenu en ce moment, ou null sans corde : « lanceur » dit que la traction du doigt compte. */
   readonly heldKind: AnchorKind | null;
+  /** Lâcher maintenant serait parfait : la fenêtre de lâcher, que le rendu montre. */
+  readonly releaseWindow: boolean;
+  /** Le conseil du tutoriel affiché en ce moment, ou null. */
+  readonly tip: string | null;
   /** Traction du doigt sur un lanceur tenu, en mètres de monde (y vers le haut), plafonnée ; nulle sinon. */
   readonly pullX: number;
   readonly pullY: number;
@@ -259,6 +265,8 @@ export class Game {
   private readonly sfx: SoundPlayer;
   /** Après une reprise, le lever du doigt qui finit l'appui sur « Reprendre » ne doit pas lâcher la corde. */
   private swallowRelease = false;
+  /** Le tutoriel par l'action : un conseil par geste, une fois par profil ; neuf à chaque partie, avec les conseils déjà vus. */
+  private coach = new Coach();
 
   /**
    * L'ambiance : la famille visée, la palette montrée en ce moment (celle de la
@@ -472,7 +480,8 @@ export class Game {
     this.pulse = this.currentPulse();
     // Le monde tourné pendant une bascule : les textes flottent là où le personnage est affiché, pas là où il est dans le repère du monde.
     const heroOnScreen = camera.worldToDisplay(hero.pos);
-    for (const event of sim.drain()) {
+    const events = sim.drain();
+    for (const event of events) {
       tracker.handle(event);
       if (event.type === 'death') this.conclude(event.cause);
       if (event.type === 'finish') this.conclude(null);
@@ -483,6 +492,7 @@ export class Game {
       // Un niveau porte déjà son nom : pas de bannière de palier.
       if (event.type !== 'tier' || this.run.level === null) effects.handle(event, heroOnScreen);
     }
+    if (this.screen === 'playing') this.coachFrame(events);
     this.view.draw(sim.state, camera, {
       screen: this.screen,
       deathCause: this.run.deathCause,
@@ -496,6 +506,21 @@ export class Game {
       palette: this.palette,
       pulse: this.pulse,
     });
+  }
+
+  /** Le tutoriel regarde l'image ; un conseil s'affiche et se note dans le profil, pour ne jamais revenir. */
+  private coachFrame(events: readonly RuleEvent[]): void {
+    const { sim, tuning, effects } = this.run;
+    const { state } = sim;
+    const heldSeconds = state.rope ? (state.step - state.attachStep) * tuning.stepSeconds : 0;
+    const tip = this.coach.observe(state, events, inReleaseWindow(state, tuning), heldSeconds);
+    if (!tip) return;
+    if (!effects.tip(tip.title, tip.detail)) {
+      this.coach.forget(tip.id);
+      return;
+    }
+    this.profile = { ...this.profile, tips: this.coach.ids };
+    saveProfile(this.storage, this.profile);
   }
 
   /**
@@ -568,6 +593,8 @@ export class Game {
       fogFactor: state.fogFactor,
       events: state.schedule.map((event, index) => ({ kind: event.kind, started: state.eventRuntimes[index]!.startStep !== null, ended: state.eventRuntimes[index]!.endStep !== null })),
       heldKind: heldKind(state),
+      releaseWindow: inReleaseWindow(state, this.run.tuning),
+      tip: this.run.effects.banner?.tone === 'tip' ? this.run.effects.banner.text : null,
       pullX: state.pull.x,
       pullY: state.pull.y,
     };
@@ -600,12 +627,12 @@ export class Game {
   /** Course libre neuve sur une graine, depuis la zone la plus haute franchie, avec les talismans équipés. */
   private newFreeRun(seed: number): Run {
     const plan: CoursePlan = { kind: 'infinite', startY: this.profile.freeStart === 'ground' ? 0 : freeRunStartY(this.profile) };
-    return this.buildRun(null, seed, applyTalismans(this.settings.tuning, this.profile.equipped), plan);
+    return this.buildRun(null, seed, learningTuning(applyTalismans(this.settings.tuning, this.profile.equipped), this.profile), plan);
   }
 
   /** Niveau neuf : sa graine, son plan, et sa brume par-dessus les talismans équipés. L'URL n'en change pas la graine. */
   private newLevelRun(level: LevelDef): Run {
-    return this.buildRun(level, level.seed, levelTuning(level, applyTalismans(this.settings.tuning, this.profile.equipped)), levelPlan(level));
+    return this.buildRun(level, level.seed, learningTuning(levelTuning(level, applyTalismans(this.settings.tuning, this.profile.equipped)), this.profile), levelPlan(level));
   }
 
   /** La caméra est placée d'un coup sur le personnage. */
@@ -628,6 +655,7 @@ export class Game {
   private begin(run: Run, grab: boolean): void {
     this.run = run;
     this.screen = 'playing';
+    this.coach = new Coach(this.profile.tips);
     if (run.level) run.effects.intro(levelTitle(run.level), run.level.intro);
     if (grab) run.sim.press();
   }

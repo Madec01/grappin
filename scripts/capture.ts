@@ -462,6 +462,41 @@ async function main(): Promise<void> {
     console.log(`Pouls : image du temps à ${onBeat.toFixed(2)}, du creux à ${trough.toFixed(2)}, ${st.bpm} bpm, palette ${st.palette}, écran ${st.screen}`);
     await pulseContext.close();
 
+    // La fenêtre de lâcher et le premier conseil : un contexte neuf (un profil vierge, donc un tutoriel qui n'a rien montré), l'horloge de la
+    // page figée avant la partie comme pour le pouls, puis le doigt posé et les images menées une à une. La corde, le halo du personnage
+    // et l'ombre passent à la teinte chaude pendant la fenêtre : on photographie la première image où `state().releaseWindow` est vrai.
+    // Le conseil « Garde le doigt posé » se dessine dès l'accroche ; on le photographie une fois son fondu d'entrée fini, avant la fenêtre.
+    const windowContext = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    const windowPage = await windowContext.newPage();
+    await windowPage.clock.install({ time: 0 });
+    await windowPage.goto(`http://localhost:${PORT}/?graine=${seed}`);
+    await windowPage.waitForFunction(() => window.__grappin?.state().screen === 'title');
+    await windowPage.clock.pauseAt(PULSE_CLOCK_MS);
+    await windowPage.evaluate(() => window.__grappin!.playFree());
+    await windowPage.evaluate(() => window.__grappin!.press());
+    let tipShot = false;
+    let tipSince = -1;
+    let windowStep = -1;
+    for (let frame = 0; frame < 240 && windowStep < 0; frame += 1) {
+      await windowPage.clock.runFor(FRAME_MS);
+      const st = await windowPage.evaluate(() => window.__grappin!.state());
+      if (st.tip !== null && tipSince < 0) tipSince = frame;
+      // Le fondu d'entrée d'une bannière dure un quart de seconde, une quinzaine d'images.
+      if (!tipShot && !st.releaseWindow && st.tip !== null && frame - tipSince >= 20) {
+        await windowPage.screenshot({ path: join(outDir, '27-conseil.png') });
+        tipShot = true;
+        console.log(`Conseil : « ${st.tip} », image ${frame}`);
+      }
+      if (st.releaseWindow) {
+        await windowPage.screenshot({ path: join(outDir, '26-fenetre-de-lacher.png') });
+        windowStep = st.step;
+      }
+    }
+    if (windowStep < 0) console.warn('26-fenetre-de-lacher : la fenêtre de lâcher ne s\'ouvre pas en 240 pas, prise omise');
+    else console.log(`Fenêtre de lâcher : ouverte au pas ${windowStep}`);
+    if (!tipShot) console.warn('27-conseil : aucun conseil affiché avant la fenêtre de lâcher, prise omise');
+    await windowContext.close();
+
     if (errors.length > 0) console.warn('Erreurs console :', errors);
 
     const videoPath = await page.video()?.path();

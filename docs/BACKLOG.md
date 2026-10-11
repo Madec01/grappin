@@ -37,11 +37,11 @@ Le brief complet du propriétaire (synthèse des échanges du 11 octobre 2026) e
 | Incohérence C : missions réinjectées en fin de catalogue | 4 | fait (0.9.0, B-009) |
 | Documents en retard sur le code | 4 | fait (0.9.0, README, GDD, ARCHITECTURE, ROADMAP à jour) |
 | Bruitages du geste | 5 | fait (0.9.0, synthèse Web Audio) ; montée sonore pendant une série : fait (la note du parfait monte) |
-| Aides visuelles : trajectoire plus explicite au début, fenêtre de lâcher montrée | 5 | à faire (lot 1) |
+| Aides visuelles : trajectoire plus explicite au début, fenêtre de lâcher montrée | 5 | fait (0.10.0 : ombre 0,5 s pour qui apprend, fenêtre de lâcher teintée) |
 | Combo parfait / correct / erreur | 5 | fait en prototype (0.9.0, `comboMissPenalty`) ; à revoir sur ressenti |
 | Lanceur L1 ouverture décalée | 6 | fait (0.9.0) |
 | Lanceur L2 deux ouvertures (sûre / étroite étoilée) | 6 | fait (0.9.0) |
-| Lanceur L4 passage sous un plafond | 6 | à faire (lot 1) |
+| Lanceur L4 passage sous un plafond | 6 | à revoir : impossible tel quel, une prise s'attrape à toute vitesse ; demande une accroche qui dépende de la vitesse (décision du propriétaire), voir CHANGELOG 0.10.0 |
 | Lanceur L3 ouverture mobile, L5 tir avec rebond | 6 | à faire (lot 2, avec portes et surfaces de rebond) |
 | P1 Roue motorisée | 7 | à faire (lot 2) |
 | P2 Rail de lancement | 7 | à faire (lot 5) |
@@ -65,7 +65,7 @@ Le brief complet du propriétaire (synthèse des échanges du 11 octobre 2026) e
 | Déblocages visuels abstraits (traînées, cordes, formes de bille) | 15 | à revoir (constellation : adaptation possible, non validée) |
 | Parcours du jour, fantôme personnel | 16 | à faire (lot 4) |
 | Accueil « Continuer », « Rang » distinct de « Niveau » | 17 | fait (0.9.0) |
-| Tutoriel par l'action, aides qui s'effacent | 17 | à faire (lot 1 ou 4) |
+| Tutoriel par l'action, aides qui s'effacent | 17 | fait (0.10.0 : conseils au geste, une fois par profil ; brume tolérante et ombre longue jusqu'à 30 m) |
 | Pause, reprise maîtrisée | 17 | fait (0.9.0) |
 | Intensité des pulsations réglable, indépendante de la musique | 17 | à faire (lot 4) |
 | Options pour téléphones modestes, validation mobile réelle | 17 | à faire (lot 4) ; les performances réelles restent à mesurer sur appareil |

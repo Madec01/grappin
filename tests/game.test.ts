@@ -343,6 +343,7 @@ describe('jeu', () => {
         'pullX',
         'pullY',
         'pulse',
+        'releaseWindow',
         'ropeLength',
         'runs',
         'score',
@@ -354,6 +355,7 @@ describe('jeu', () => {
         'targetId',
         'tier',
         'testMode',
+        'tip',
         'musicOn',
         'track',
         'unlockedLevel',
@@ -393,8 +395,8 @@ describe('mort et cause', () => {
   it('une nouvelle partie efface le palier, la cause et les effets en cours', () => {
     const { game, seen } = makeFreeGame('?graine=3&tierHeight=4');
     const play = makePilot(game);
-    // Joue jusqu'à la première bannière de palier : des effets sont alors en cours.
-    for (let frames = 0; frames < 600 && seen.lastBanner === null; frames += 1) play();
+    // Joue jusqu'à la première bannière de palier (« nom · hauteur ») : des effets sont alors en cours. Un conseil du tutoriel peut passer avant.
+    for (let frames = 0; frames < 600 && !(seen.lastBanner ?? '').includes(' · '); frames += 1) play();
     expect(seen.lastBanner).not.toBeNull();
     expect(game.debugState().tier).toBeGreaterThan(0);
 
@@ -769,7 +771,8 @@ describe('niveaux : lancer une partie', () => {
   });
 
   it('un niveau ignore la brume de l\'URL pour la sienne, et garde les talismans équipés', () => {
-    const { game, seen } = makeGame('?fogBaseSpeed=9', profileWith(0, ['treuil']));
+    // Un profil aguerri (30 m atteints) : pas d'adoucissement d'apprentissage sur la brume.
+    const { game, seen } = makeGame('?fogBaseSpeed=9', { ...profileWith(0, ['treuil']), bestHeight: 80 });
     expect(game.playLevel(1)).toBe(true);
     game.frame(0.016);
     expect(seen.lastTuning?.fogBaseSpeed).toBe(levelOf(1).fogBaseSpeed);
@@ -2075,5 +2078,52 @@ describe('sons et départ', () => {
     seen.hit = () => 'start';
     game.press(1, 1);
     expect(game.debugState().freeStart).toBe('advanced');
+  });
+});
+
+describe('tutoriel et apprentissage', () => {
+  it('le premier conseil apparaît à la première accroche, se garde dans le profil, et ne revient pas après rechargement', () => {
+    const { game, seen, storage } = makeGame('?graine=3');
+    // En course libre, pas de bannière de niveau : le conseil a la place.
+    game.playFree();
+    game.press(10, 10);
+    game.frame(0.016);
+    for (let i = 0; i < 30 && !game.debugState().attached; i += 1) game.frame(0.016);
+    expect(game.debugState().tip).toBe('Garde le doigt posé');
+    expect(seen.lastBanner).toBe('Garde le doigt posé');
+    expect(loadSavedProfile(storage).tips).toContain('grab');
+    // Rechargé : le conseil est connu, la première accroche d'une nouvelle partie ne le redonne pas.
+    game.restart();
+    game.frame(0.016);
+    game.playFree();
+    game.press(10, 10);
+    game.frame(0.016);
+    for (let i = 0; i < 30 && !game.debugState().attached; i += 1) game.frame(0.016);
+    expect(game.debugState().tip).toBeNull();
+    expect(seen.lastBanner).not.toBe('Garde le doigt posé');
+  });
+
+  it('pendant la bannière d\'un niveau, un conseil attend : il n\'est pas perdu', () => {
+    const { game, seen } = makeGame('?graine=3');
+    game.press(10, 10);
+    game.frame(0.016);
+    for (let i = 0; i < 30 && !game.debugState().attached; i += 1) game.frame(0.016);
+    // L'intro du niveau occupe la bannière : pas de conseil, et rien de noté.
+    expect(game.debugState().tip).toBeNull();
+    expect(seen.lastBanner).toBe('Niveau 1 · Les premiers anneaux');
+    expect(game.currentProfile().tips).toEqual([]);
+  });
+
+  it('un profil qui apprend joue avec une brume plus lente et une ombre plus longue ; un profil aguerri non', () => {
+    const { game, seen } = makeGame('?graine=3');
+    game.press(10, 10);
+    game.frame(0.016);
+    expect(seen.lastTuning!.fogBaseSpeed).toBeCloseTo(levelById(1)!.fogBaseSpeed * 0.6, 9);
+    expect(seen.lastTuning!.shadowSeconds).toBe(0.5);
+    const { game: veteran, seen: seenVeteran } = makeGame('?graine=3', { ...createProfile(), bestHeight: 80 });
+    veteran.press(10, 10);
+    veteran.frame(0.016);
+    expect(seenVeteran.lastTuning!.fogBaseSpeed).toBeCloseTo(levelById(1)!.fogBaseSpeed, 9);
+    expect(seenVeteran.lastTuning!.shadowSeconds).toBe(DEFAULT_TUNING.shadowSeconds);
   });
 });

@@ -91,6 +91,31 @@ describe('les couleurs d\'effet', () => {
   });
 });
 
+describe('la teinte de la fenêtre de lâcher', () => {
+  const TONES = { release: COLOR.release, releaseHalo: COLOR.releaseHalo };
+
+  it('est chaude : le rouge domine, puis le vert, puis le bleu', () => {
+    for (const [name, color] of Object.entries(TONES)) {
+      const [red = 0, green = 0, blue = 0] = channels(color);
+      expect(red, name).toBeGreaterThanOrEqual(green);
+      expect(green, name).toBeGreaterThan(blue);
+    }
+  });
+
+  it('est loin de toute couleur d\'espèce, comme les couleurs d\'effet : un halo de personnage ne passe pour aucune prise', () => {
+    for (const [tone, color] of Object.entries(TONES)) {
+      for (const [name, species] of Object.entries(SPECIES)) {
+        expect(color, `${tone} / ${name}`).not.toBe(species);
+        expect(distance(color, species), `${tone} / ${name}`).toBeGreaterThan(40);
+      }
+    }
+  });
+
+  it('se voit sur chaque ambiance : son halo n\'a rien de celui de la palette, froide ou blanc chaud', () => {
+    for (const family of FAMILIES) expect(distance(COLOR.releaseHalo, PALETTES[family].halo), family).toBeGreaterThan(100);
+  });
+});
+
 describe('mixPalette', () => {
   const a = PALETTES.biome1;
   const b = PALETTES.boss;

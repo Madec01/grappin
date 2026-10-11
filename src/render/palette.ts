@@ -11,7 +11,8 @@ import { mixColor } from './sling';
  * rails des câbles. Le langage du jeu reste, lui, dans `COLOR` (style.ts) et ne
  * bouge jamais : étoiles jaunes, fragile magenta, propulseur cyan vif, prise
  * électrique orange puis rouge, prise à éclipse violette, lanceur vert d'eau,
- * obstacles et bords de la zone jouable rouge-magenta, textes blancs.
+ * obstacles et bords de la zone jouable rouge-magenta, textes blancs, et la
+ * corde et le halo orangés du personnage dans la fenêtre de lâcher.
  *
  * Pour que l'ambiance ne se confonde jamais avec une espèce de prise, le halo
  * ambiant reste hors des couleurs d'espèce (un test le garde) : les points
