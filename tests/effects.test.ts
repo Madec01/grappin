@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   ALERT_BLINK_HZ,
   BANNER_SECONDS,
+  BOOST_SECONDS,
   EVENT_SECONDS,
   Effects,
   FLOAT_SECONDS,
@@ -13,6 +14,7 @@ import {
   SIZZLE_HZ,
   alertAlpha,
   bannerAlpha,
+  boostStreaks,
   flicker,
   floatAlpha,
   floatRise,
@@ -530,5 +532,102 @@ describe('éclats', () => {
     effects.handle({ type: 'boost' }, HERO);
     effects.handle({ type: 'bump', obstacleId: 1 }, HERO);
     expect(effects.flashes).toHaveLength(0);
+  });
+});
+
+describe('signe de vitesse d\'un anneau traversé', () => {
+  const HERO_RADIUS = 10;
+
+  it('naît avec l\'anneau traversé (au centre ou non), dure 0,3 s de temps réel, puis disparaît', () => {
+    expect(BOOST_SECONDS).toBe(0.3);
+    const effects = new Effects(DEFAULT_TUNING);
+    expect(effects.ringBoosts).toHaveLength(0);
+    effects.handle({ type: 'ring', ringId: 1, centred: false }, HERO);
+    expect(effects.ringBoosts).toHaveLength(1);
+    expect(effects.ringBoosts[0]).toMatchObject({ centred: false, age: 0 });
+    effects.update(0.29);
+    expect(effects.ringBoosts).toHaveLength(1);
+    effects.update(0.02);
+    expect(effects.ringBoosts).toHaveLength(0);
+  });
+
+  it('retient si l\'anneau était pris au centre (la teinte), et n\'en garde que deux à la fois', () => {
+    const effects = new Effects(DEFAULT_TUNING);
+    effects.handle({ type: 'ring', ringId: 1, centred: true }, HERO);
+    effects.update(0.01);
+    effects.handle({ type: 'ring', ringId: 2, centred: false }, HERO);
+    effects.update(0.01);
+    effects.handle({ type: 'ring', ringId: 3, centred: false }, HERO);
+    expect(effects.ringBoosts.map((boost) => boost.centred)).toEqual([false, false]);
+    expect(effects.ringBoosts[0]!.age).toBeGreaterThan(effects.ringBoosts[1]!.age);
+  });
+
+  it('ni un rebond, ni un fracas, ni aucun autre événement n\'en fait naître', () => {
+    const effects = new Effects(DEFAULT_TUNING);
+    for (const event of [{ type: 'bounce', obstacleId: 1 }, { type: 'smash', obstacleId: 1 }, { type: 'boost' }, { type: 'pickup', pickupId: 1, bonus: false }] as const) effects.handle(event, HERO);
+    expect(effects.ringBoosts).toHaveLength(0);
+  });
+
+  it('dessine trois traits derrière le personnage, parallèles à sa vitesse, le plus long au milieu', () => {
+    // Le personnage file vers la droite : les traits sont à gauche de lui, horizontaux, de part et d\'autre de son axe.
+    const streaks = boostStreaks(0, 1, 0, HERO_RADIUS);
+    expect(streaks).toHaveLength(3);
+    for (const streak of streaks) {
+      expect(streak.y0).toBeCloseTo(streak.y1, 9);
+      expect(streak.x0).toBeLessThan(-HERO_RADIUS);
+      expect(streak.x1).toBeLessThan(streak.x0);
+    }
+    const [middle, left, right] = streaks;
+    expect(middle!.y0).toBeCloseTo(0, 9);
+    expect(left!.y0).toBeCloseTo(-right!.y0, 9);
+    expect(left!.y0).not.toBe(0);
+    expect(Math.abs(middle!.x1 - middle!.x0)).toBeGreaterThan(Math.abs(left!.x1 - left!.x0));
+    expect(middle!.alpha).toBeGreaterThan(left!.alpha);
+  });
+
+  it('suit la direction de la vitesse, quelle que soit sa norme', () => {
+    // Vers le haut de l\'écran (y négatif) : les traits sont sous le personnage.
+    for (const streak of boostStreaks(0.1, 0, -5, HERO_RADIUS)) {
+      expect(streak.y0).toBeGreaterThan(HERO_RADIUS);
+      expect(streak.y1).toBeGreaterThan(streak.y0);
+      expect(streak.x0).toBeCloseTo(streak.x1, 9);
+    }
+    // En diagonale, haut-droite : derrière lui, en bas à gauche, parallèles à (1, -1).
+    for (const streak of boostStreaks(0.1, 3, -3, HERO_RADIUS)) {
+      expect(streak.x1).toBeLessThan(streak.x0);
+      expect(streak.y1).toBeGreaterThan(streak.y0);
+      expect(streak.x1 - streak.x0).toBeCloseTo(-(streak.y1 - streak.y0), 9);
+    }
+    const slow = boostStreaks(0.1, 0.01, 0, HERO_RADIUS);
+    const fast = boostStreaks(0.1, 20, 0, HERO_RADIUS);
+    expect(slow).toEqual(fast);
+  });
+
+  it('s\'efface en reculant et en raccourcissant, jamais plus opaque ni plus près qu\'à la naissance', () => {
+    let previous = boostStreaks(0, 1, 0, HERO_RADIUS)[0]!;
+    for (let age = 0.03; age < BOOST_SECONDS; age += 0.03) {
+      const streak = boostStreaks(age, 1, 0, HERO_RADIUS)[0]!;
+      expect(streak.alpha).toBeLessThan(previous.alpha);
+      expect(streak.x0).toBeLessThan(previous.x0);
+      expect(streak.x0 - streak.x1).toBeLessThan(previous.x0 - previous.x1);
+      previous = streak;
+    }
+    expect(boostStreaks(0, 1, 0, HERO_RADIUS)[0]!.alpha).toBeLessThanOrEqual(1);
+    // Discret : pas plus de quarante-cinq pixels de long, jamais collé au personnage.
+    for (const streak of boostStreaks(0, 1, 0, HERO_RADIUS)) {
+      expect(Math.abs(streak.x1 - streak.x0)).toBeLessThanOrEqual(45);
+      expect(Math.abs(streak.x0)).toBeGreaterThan(HERO_RADIUS);
+    }
+  });
+
+  it('ne dessine rien hors de sa vie, ni pour un personnage immobile', () => {
+    expect(boostStreaks(BOOST_SECONDS, 1, 0, HERO_RADIUS)).toEqual([]);
+    expect(boostStreaks(1, 1, 0, HERO_RADIUS)).toEqual([]);
+    expect(boostStreaks(-0.1, 1, 0, HERO_RADIUS)).toEqual([]);
+    expect(boostStreaks(0.1, 0, 0, HERO_RADIUS)).toEqual([]);
+  });
+
+  it('un trait plus loin du personnage pour un personnage plus gros', () => {
+    expect(boostStreaks(0, 1, 0, 20)[0]!.x0).toBeLessThan(boostStreaks(0, 1, 0, 10)[0]!.x0);
   });
 });

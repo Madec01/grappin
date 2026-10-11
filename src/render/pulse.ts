@@ -31,6 +31,9 @@ import { mixColor } from './sling';
  * 0,65, un temps sur deux sous 0,5 : le coup restait à moitié. Le coup vaut
  * désormais `floor + (1 − floor) × √force` (voir `punch`) : un temps moyen frappe
  * presque à plein, un temps deviné dans un passage calme frappe encore à moitié.
+ * Deux garde-fous, vus en capture : le halo ambiant ne gagne pas plus qu'avant
+ * en intensité (au-delà, il sature en disque plat au lieu de luire), et la teinte
+ * du fond reste faible (au-delà, le temps fort grise toute l'image).
  * De même, les graves des pistes ne descendent presque jamais sous 0,2 : ce qui
  * les suit restait allumé en continu ; ils ne comptent qu'au-dessus d'un seuil.
  *
@@ -52,7 +55,7 @@ export const PULSE = {
   /** Les graves : rien en dessous de `from`, puis de 0 à 1 jusqu'à fond. Sans ce seuil, ce qu'ils mènent resterait allumé en continu. */
   bass: { from: 0.3 },
   /** Fond : il monte vers la brume de cette part sur le temps (× coup) et avec les graves, sans jamais dépasser `max` ; et il se teinte de la couleur d'effet de `tint` sur le temps. */
-  background: { beat: 0.3, bass: 0.1, max: 0.4, tint: 0.2 },
+  background: { beat: 0.3, bass: 0.1, max: 0.4, tint: 0.12 },
   /** Crête de la brume : part de couleur d'effet prise sur le temps (× coup), puis part de blanc ajoutée. */
   fogEdge: { tint: 0.8, beat: 0.9 },
   /** Nappe de la brume : opacité ajoutée avec les graves. */
@@ -62,7 +65,7 @@ export const PULSE = {
   /** Structures du décor (`city`) : part de la couleur d'effet mélangée aux traits avec les graves ; sur celles qui dansent, part de la couleur d'effet sur le temps (× coup) ; et sur le temps (× coup), de combien leurs traits s'épaississent et s'opacifient. */
   city: { bass: 0.8, dance: 1, width: 0.8, alpha: 0.6 },
   /** Halo des tubes ambiants : de combien la portée et l'intensité grandissent sur le temps (× coup). */
-  halo: { spread: 1, strength: 1.4 },
+  halo: { spread: 0.8, strength: 1 },
   /** Halo des espèces de prises : intensité ajoutée sur le temps (× coup). Leurs couleurs ne bougent pas. */
   species: { strength: 0.9 },
   /** Halo du cerne des obstacles : intensité ajoutée, sur le temps (× coup) ou avec les graves, le plus fort des deux. */

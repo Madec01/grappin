@@ -178,15 +178,15 @@ describe('bornes', () => {
 
   it('les réglages de pleine force sont ceux annoncés, et le temps fort frappe plus fort', () => {
     const full = pulse({ beat: 1, strength: 1, bass: 1, count: 1, inBar: 1 });
-    expect(ambientHalo(full).spread).toBeCloseTo(2, 10);
-    expect(ambientHalo(full).strength).toBeCloseTo(2.4, 10);
+    expect(ambientHalo(full).spread).toBeCloseTo(1.8, 10);
+    expect(ambientHalo(full).strength).toBeCloseTo(2, 10);
     expect(speciesGlow(full)).toBeCloseTo(1.9, 10);
     expect(rimBoost(full)).toBeCloseTo(2, 10);
     expect(multiplierPop(full)).toBeCloseTo(1.3, 10);
     expect(cityStroke(full).width).toBeCloseTo(1.8, 10);
     expect(cityStroke(full).alpha).toBeCloseTo(1.6, 10);
     const downbeat = pulse({ beat: 1, strength: 1, bass: 1, count: 4, inBar: 0 });
-    expect(ambientHalo(downbeat).spread).toBeCloseTo(1 + 1 * PUNCH_MAX, 10);
+    expect(ambientHalo(downbeat).spread).toBeCloseTo(1 + 0.8 * PUNCH_MAX, 10);
     expect(multiplierPop(downbeat)).toBeCloseTo(1 + 0.3 * PUNCH_MAX, 10);
     expect(PUNCH_MAX).toBeCloseTo(1.5, 10);
   });

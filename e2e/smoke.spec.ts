@@ -3,6 +3,7 @@ import { LEVELS, levelById } from '../src/data/levels';
 import { doorState, type DoorState } from '../src/sim/cycles';
 import { Simulation } from '../src/sim/simulation';
 import { DEFAULT_TUNING } from '../src/sim/tuning';
+import { newMemory, pilotFrame, sceneWorld } from '../scripts/pilote';
 
 /**
  * Test de fumée sur écran de téléphone (390 × 844, tactile) : la page charge,
@@ -15,8 +16,8 @@ import { DEFAULT_TUNING } from '../src/sim/tuning';
  * automatique, la pause fige la partie et se reprend sans lâcher la corde, les
  * réglages du titre (Sons, Départ) survivent au rechargement, la fenêtre de
  * lâcher s'ouvre puis se referme pendant un balancement, et le premier conseil
- * du tutoriel apparaît à la première accroche, les quatre scènes de démonstration du lot 2 (rebond, paroi cassable, porte, anneau)
- * se jouent et se dessinent sans erreur, et les trois scènes de zones (courant ascendant, dérive, fusée) chargent leurs zones et voient le
+ * du tutoriel apparaît à la première accroche, les quatre scènes de démonstration du lot 2 (le ricochet, le mur à percer, la porte, le cerceau)
+ * se jouent et se dessinent sans erreur et le pilote y prouve la mécanique exigée (rebond, fracas, anneau traversé), et les trois scènes de zones (courant ascendant, dérive, fusée) chargent leurs zones et voient le
  * pilote y entrer. Tout passe par `window.__grappin`.
  */
 
@@ -339,10 +340,10 @@ test('un pilote automatique grimpe au-delà de 10 m sans erreur de console', asy
 });
 
 /**
- * Scènes de démonstration du lot 2 (`?scene=`) : un premier segment construit à la main, qui montre une mécanique isolée. Chacune se
- * charge, la course libre commence par elle, et ses images se dessinent sans erreur de console. L'horloge de la page est figée puis menée
- * à la main : peu d'images suffisent, et le test ne dépend pas de la vitesse du rendu logiciel. Le pilote ne sait pas forcément casser
- * une paroi ni rebondir : la paroi cassable et le rebond se contentent de se charger et de se dessiner.
+ * Scènes de démonstration du lot 2 (`?scene=`) : un premier segment construit à la main, qui montre une mécanique isolée, celle que le jeu
+ * EXIGE (0.12.1) : le ricochet (`rebond`), le mur à percer (`cassable`), la porte, le cerceau (`anneau`). Chacune se charge, la course libre
+ * commence par elle, et ses images se dessinent sans erreur de console. L'horloge de la page est figée puis menée à la main : peu d'images
+ * suffisent, et le test ne dépend pas de la vitesse du rendu logiciel. Les tests qui suivent jouent la mécanique elle-même.
  */
 for (const scene of ['rebond', 'cassable', 'porte', 'anneau'] as const) {
   test(`scène « ${scene} » : ?scene=${scene} commence la course libre par elle, et ses images se dessinent sans erreur`, async ({ page }) => {
@@ -355,8 +356,8 @@ for (const scene of ['rebond', 'cassable', 'porte', 'anneau'] as const) {
     for (let frame = 0; frame < 40; frame += 1) await page.clock.runFor(16);
     const shown = await state(page);
     expect(shown).toMatchObject({ screen: 'playing', scene, smashed: 0, rings: 0 });
-    // Les scènes à obstacles en ont chargé ; l'anneau n'en a pas besoin, mais a son premier segment.
-    if (scene !== 'anneau') expect(shown.obstacles).toBeGreaterThanOrEqual(1);
+    // Chaque scène a ses obstacles : le ricochet en a quatre, le mur à percer un, la porte trois, le cerceau deux pans autour de son anneau.
+    expect(shown.obstacles).toBeGreaterThanOrEqual(1);
     expect(shown.step).toBeGreaterThan(0);
     // Le doigt posé : la corde part vers le premier point de la scène et la partie continue, sans erreur.
     await page.evaluate(() => window.__grappin!.press());
@@ -390,50 +391,122 @@ test('scène « porte » : un cycle complet (6 s) se joue, et le rendu voit la p
   expect(errors).toEqual([]);
 });
 
-test('scène « anneau » : le pilote automatique traverse au moins un anneau, et state().rings le compte', async ({ page }) => {
-  // Le pilote joue en temps réel et peut mourir ou manquer l'anneau sur une machine lente : on rejoue la scène, quelques fois au plus.
-  test.setTimeout(120_000);
+/**
+ * Les trois scènes dont le jeu exige la mécanique (0.12.1), jouées image par image sur l'horloge figée de la page, par le pilote des
+ * scènes (`scripts/pilote.ts`) : il applique les règles du robot (il ne rattrape pas un point sous lui en montant, ni un point dont le
+ * balancement heurte un mur), tient le lanceur au moins 0,35 s, puis tire la traction prouvée par le vérificateur (`launchAim`) ; au cerceau,
+ * il en choisit une qui traverse l'anneau (`ringShot` : le vérificateur n'exige pas l'anneau, un autre tir attrape la sortie sans lui).
+ * Dans les trois cas le lanceur est en (0,4 ; 11).
+ */
+const FRAME_MS = 16;
+
+/** Ouvre la scène `scene` sur une horloge figée, la joue, et laisse défiler la bannière d'intro. */
+async function openFrozenScene(page: Page, scene: string): Promise<void> {
+  await page.clock.install({ time: 0 });
+  await open(page, `/?scene=${scene}&graine=5&fogBaseSpeed=0.1`);
+  await page.clock.pauseAt(60_000);
+  await page.evaluate(() => window.__grappin!.playFree());
+  for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
+}
+
+const speedOf = (s: { vel: { x: number; y: number } }): number => Math.hypot(s.vel.x, s.vel.y);
+
+test('scène « cassable » : le pilote tient le lanceur, tire à pleine puissance, et la paroi sans trou se brise (state().smashed passe à 1)', async ({ page }) => {
   const errors = watchErrors(page);
-  await open(page, '/?scene=anneau&graine=5&fogBaseSpeed=0.15');
-  let rings = 0;
-  for (let attempt = 0; attempt < 4 && rings < 1; attempt += 1) {
-    expect(await page.evaluate(() => window.__grappin!.playScene('anneau'))).toBe(true);
-    // Les anneaux sont au milieu des quatre premiers vols : à 16 m, le pilote a dû en traverser.
-    await page.evaluate(autopilot(16, 30_000));
-    rings = (await state(page)).rings;
+  await openFrozenScene(page, 'cassable');
+  const world = sceneWorld('cassable', 5);
+  const memory = newMemory();
+  let heldFrames = 0;
+  let fastest = 0;
+  let seen = await state(page);
+  expect(seen).toMatchObject({ scene: 'cassable', smashed: 0 });
+  for (let frame = 0; frame < 400 && seen.smashed === 0; frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    seen = await pilotFrame(page, memory, frame * FRAME_MS, { world });
+    expect(seen.screen).toBe('playing');
+    if (seen.heldKind === 'lanceur') heldFrames += 1;
+    // La paroi s'allume (elle peut céder) quand la vitesse suffit : sur le lanceur tenu elle est nulle, la paroi est donc éteinte jusqu'au vol.
+    if (seen.smashed === 0 && seen.pos.y > 12) fastest = Math.max(fastest, speedOf(seen));
   }
-  expect(rings).toBeGreaterThanOrEqual(1);
-  expect((await state(page)).scene).toBe('anneau');
+  // Le lanceur est tenu au moins le temps de bander la fronde (0,35 s), puis le tir franchit la paroi à pleine puissance.
+  expect(heldFrames * FRAME_MS).toBeGreaterThanOrEqual(350);
+  expect(fastest).toBeGreaterThanOrEqual(DEFAULT_TUNING.smashSpeed);
+  // Les éclats de la paroi se dessinent, sans erreur, pendant que le vol continue.
+  for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
+  const after = await state(page);
+  expect(after.smashed).toBe(1);
+  expect(after.pos.y).toBeGreaterThan(16.4);
+  expect(after.screen).toBe('playing');
   expect(errors).toEqual([]);
 });
 
-/**
- * Une image du pilote pour une page à l'horloge figée (`page.clock`), décidée côté test : mêmes règles que le pilote du banc de captures
- * (`scripts/capture.ts`) et que le robot (`src/sim/robot.ts`). Il accroche dès qu'un point est visé, sauf s'il est porté vers le haut (un
- * courant, une fusée) et que le point visé est sous lui : il monte d'abord, comme un joueur. Il lâche dans la fenêtre du lâcher parfait,
- * ou, la fenêtre étant étroite sur la première oscillation, dès qu'il va assez vite (ou que la corde est au plus court) en montant à
- * 30° à 60° ; jamais plus de 2,5 s tenu. `nowMs` est le temps simulé écoulé. Rend l'état vu avant l'action.
- */
-interface PilotMemory {
-  holdSince: number;
-}
-
-async function pilotFrame(page: Page, memory: PilotMemory, nowMs: number): Promise<Awaited<ReturnType<typeof state>>> {
-  const s = await state(page);
-  if (!s.attached && s.targetId !== null) {
-    const target = (await page.evaluate(() => window.__grappin!.anchors())).find((a) => a.id === s.targetId);
-    const rising = s.vel.y > 1 && target !== undefined && target.y < s.pos.y - 0.5;
-    if (!rising) {
-      await page.evaluate(() => window.__grappin!.press());
-      memory.holdSince = nowMs;
-    }
-  } else if (s.attached && nowMs - memory.holdSince > 80) {
-    const ready = Math.hypot(s.vel.x, s.vel.y) >= 8 || (s.ropeLength !== null && s.ropeLength <= 1.5 + 1e-9);
-    const slope = s.vel.x !== 0 ? s.vel.y / Math.abs(s.vel.x) : Infinity;
-    if (s.releaseWindow || (ready && s.vel.y > 1 && slope > 0.6 && slope < 1.8) || nowMs - memory.holdSince > 2500) await page.evaluate(() => window.__grappin!.release());
+test('scène « cassable » : un tir à moitié de puissance bute sur la paroi, qui reste entière', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'cassable');
+  const world = sceneWorld('cassable', 5);
+  const memory = newMemory();
+  let highest = 0;
+  for (let frame = 0; frame < 230; frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world, shot: 'mou' });
+    highest = Math.max(highest, seen.pos.y);
   }
-  return s;
-}
+  // Le tir mou arrive au mur (à 16 m) moins vite que `smashSpeed` : la paroi tient, le personnage ne la franchit pas.
+  expect(highest).toBeGreaterThan(14);
+  expect(highest).toBeLessThan(16);
+  expect((await state(page)).smashed).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('scène « rebond » : le tir prouvé passe sous la chicane, rebondit sur le mur de droite (vel.x change de signe) et atteint plus de 19 m par le trou', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'rebond');
+  const world = sceneWorld('rebond', 5);
+  const memory = newMemory();
+  let before: Awaited<ReturnType<typeof state>> | null = null;
+  let bounceFrame = 0;
+  let highest = 0;
+  for (let frame = 0; frame < 500 && highest <= 19; frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world });
+    expect(seen.screen).toBe('playing');
+    highest = Math.max(highest, seen.pos.y);
+    // En vol libre après le tir : le mur de rebond renvoie le personnage vers la gauche, par-dessus la chicane et dans le trou.
+    if (memory.launchedAt > 0 && !seen.attached) {
+      if (before && !before.attached && before.vel.x > 2 && seen.vel.x < -2 && bounceFrame === 0) bounceFrame = frame;
+      before = seen;
+    } else before = null;
+  }
+  expect(bounceFrame, 'vel.x change de signe en vol (le rebond)').toBeGreaterThan(0);
+  expect(highest).toBeGreaterThan(19);
+  expect(errors).toEqual([]);
+});
+
+test('scène « anneau » : le tir passe par l\'anneau du mur, qui accélère le personnage (state().rings ≥ 1), au-dessus de 16,5 m', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'anneau');
+  const world = sceneWorld('anneau', 5);
+  const memory = newMemory();
+  let previous = await state(page);
+  let boost = 0;
+  let highest = 0;
+  for (let frame = 0; frame < 500 && (highest <= 16.5 || previous.rings < 1); frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    // Le tir passe l'anneau ; le pilote n'attrape rien avant de l'avoir traversé (la sortie, de côté, se rattrape après).
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world, shot: 'anneau', wait: (s, pilot) => pilot.launchedAt > 0 && s.rings < 1 });
+    expect(seen.screen).toBe('playing');
+    highest = Math.max(highest, seen.pos.y);
+    if (previous.rings === 0 && seen.rings >= 1) boost = speedOf(seen) / speedOf(previous);
+    previous = seen;
+  }
+  expect((await state(page)).rings).toBeGreaterThanOrEqual(1);
+  // Tout anneau traversé accélère : `ringBoost`, moins le peu que la gravité reprend dans l'image.
+  expect(boost).toBeGreaterThan(1.15);
+  expect(highest).toBeGreaterThan(16.5);
+  // L'éclat et le signe de vitesse de la traversée se dessinent sans erreur.
+  for (let frame = 0; frame < 30; frame += 1) await page.clock.runFor(FRAME_MS);
+  expect(errors).toEqual([]);
+});
 
 /**
  * Zones qui modifient le mouvement (0.12.0), trois scènes de démonstration : le courant ascendant, la dérive, la fusée (couloir
@@ -460,7 +533,7 @@ for (const { scene, zone } of ZONE_SCENES) {
     expect(loaded).toMatchObject({ screen: 'playing', scene, zone: null });
     expect(loaded.zones).toBeGreaterThanOrEqual(1);
 
-    const memory: PilotMemory = { holdSince: 0 };
+    const memory = newMemory();
     const seen: (typeof loaded.zone)[] = [];
     let highest = 0;
     for (let frame = 0; frame < 400; frame += 1) {

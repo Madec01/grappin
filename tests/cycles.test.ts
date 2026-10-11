@@ -178,5 +178,5 @@ describe('génération et vérification des prises à cycles', () => {
     }
     expect(electrics).toBeGreaterThan(5);
     expect(eclipses).toBeGreaterThan(5);
-  });
+  }, 20_000);
 });

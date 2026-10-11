@@ -21,7 +21,7 @@ export interface SceneDef {
 }
 
 export const SCENES: readonly SceneDef[] = [
-  { id: 'rebond', name: 'Le trampoline', intro: 'La prise suivante est trop loin : tombe sur le tapis, il te renvoie en l\'air.' },
+  { id: 'rebond', name: 'Le ricochet', intro: 'La chicane barre le trou : tire sous elle vers le mur violet, il te renvoie dedans.' },
   { id: 'cassable', name: 'Le mur à percer', intro: 'Pas de trou dans ce mur : tire à pleine puissance pour le traverser.' },
   { id: 'porte', name: 'La porte', intro: 'La porte se ferme et s\'ouvre : tire quand elle est ouverte.' },
   { id: 'anneau', name: 'Le cerceau', intro: 'La prise est trop loin : passe l\'anneau au centre, il t\'accélère.' },

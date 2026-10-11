@@ -7,7 +7,7 @@ import { formatDecimal } from './format';
 
 /**
  * Effets de temps réel : textes flottants, éclats (rebond, fracas, anneau),
- * bannière (palier, intro d'un niveau ou événement), animation du trait du grappin, traînées du vent,
+ * traits de vitesse d'un anneau traversé, bannière (palier, intro d'un niveau ou événement), animation du trait du grappin, traînées du vent,
  * horloge du clignotement de l'alerte, et les ondes qui font vivre les tubes
  * de néon (pulsation, grésillement, scintillement).
  *
@@ -35,6 +35,25 @@ const FLASH_MAX = 6;
 /** Rayon final de chaque éclat, en pixels, et part de ce rayon où il naît. */
 const FLASH_RADIUS: Record<FlashKind, number> = { bounce: 38, smash: 56, ring: 46, centre: 64 };
 const FLASH_START = 0.35;
+
+/**
+ * Signe de vitesse d'un anneau traversé (tout anneau accélère le personnage, `ringBoost`) : quelques traits dans l'axe de sa vitesse, derrière
+ * lui, dans la teinte de l'anneau, qui reculent en s'effaçant. Discret et bref : `BOOST_SECONDS` de temps réel, `BOOST_AT_ONCE` signes au plus
+ * à la fois. Chaque trait : son décalage de côté, sa longueur (pixels) et sa part de l'opacité ; ils s'écartent du bord du personnage de
+ * `BOOST_GAP` pixels et reculent encore de `BOOST_DRIFT` pendant leur vie.
+ */
+export const BOOST_SECONDS = 0.3;
+const BOOST_AT_ONCE = 2;
+const BOOST_LINES: readonly { readonly side: number; readonly length: number; readonly weight: number }[] = [
+  { side: 0, length: 40, weight: 1 },
+  { side: -8, length: 28, weight: 0.65 },
+  { side: 8, length: 28, weight: 0.65 },
+];
+const BOOST_GAP = 5;
+const BOOST_DRIFT = 20;
+/** Opacité du trait le plus vif à la naissance, et part de sa longueur qu'il perd en s'effaçant. */
+const BOOST_ALPHA = 0.85;
+const BOOST_SHRINK = 0.5;
 
 /** Alerte : la ligne claire de la brume clignote ce nombre de fois par seconde, entre ces deux opacités. */
 export const ALERT_BLINK_HZ = 2;
@@ -102,6 +121,24 @@ export interface Flash {
   age: number;
 }
 
+/** Un signe de vitesse en cours : l'anneau a été traversé au centre ou non (la teinte), et depuis combien de temps réel. */
+export interface RingBoost {
+  readonly centred: boolean;
+  age: number;
+}
+
+/**
+ * Un trait de vitesse, en pixels relatifs au centre du personnage (y vers le bas) : de `x0, y0`, le plus près de lui, à `x1, y1`, le plus
+ * loin derrière.
+ */
+export interface BoostStreak {
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+  readonly alpha: number;
+}
+
 /**
  * Une traînée de vent, en fractions de la vue (0 à gauche et en haut, 1 à droite et en bas) :
  * le rendu la pose dans le repère du monde, où le vent souffle horizontalement.
@@ -155,6 +192,29 @@ export function flashAlpha(age: number): number {
 export function flashRadius(kind: FlashKind, age: number): number {
   const t = clamp01(age / FLASH_SECONDS);
   return FLASH_RADIUS[kind] * (FLASH_START + (1 - FLASH_START) * (1 - (1 - t) * (1 - t)));
+}
+
+/**
+ * Les traits de vitesse d'un anneau traversé, à l'âge `age` : parallèles à la vitesse `(dirX, dirY)` (en pixels d'écran, y vers le bas ; seule
+ * la direction compte), derrière un personnage de rayon `heroRadius` pixels. Ils partent du bord du personnage, reculent et raccourcissent en
+ * s'effaçant ; le trait du milieu est le plus long et le plus vif. Rien si l'âge est hors de la vie du signe ou si le personnage ne bouge pas.
+ */
+export function boostStreaks(age: number, dirX: number, dirY: number, heroRadius: number): BoostStreak[] {
+  const speed = Math.hypot(dirX, dirY);
+  if (speed < 1e-9 || age < 0 || age >= BOOST_SECONDS) return [];
+  // Vers l'arrière, et de côté.
+  const bx = -dirX / speed;
+  const by = -dirY / speed;
+  const t = clamp01(age / BOOST_SECONDS);
+  const drift = BOOST_DRIFT * (1 - (1 - t) * (1 - t));
+  const alpha = BOOST_ALPHA * (1 - t) * (1 - t);
+  const start = heroRadius + BOOST_GAP + drift;
+  return BOOST_LINES.map((line) => {
+    const end = start + line.length * (1 - BOOST_SHRINK * t);
+    const sideX = -by * line.side;
+    const sideY = bx * line.side;
+    return { x0: bx * start + sideX, y0: by * start + sideY, x1: bx * end + sideX, y1: by * end + sideY, alpha: alpha * line.weight };
+  });
 }
 
 /** Opacité de la bannière : fondu d'entrée, plateau, fondu de sortie, pour une bannière qui dure `seconds`. */
@@ -237,6 +297,7 @@ export class Effects {
   private readonly tuning: Tuning;
   private floating: FloatingText[] = [];
   private flashing: Flash[] = [];
+  private boosting: RingBoost[] = [];
   private current: Banner | null = null;
   private ropeAge = ROPE_DRAW_SECONDS;
   private elapsed = 0;
@@ -255,6 +316,11 @@ export class Effects {
   /** Les éclats en cours, du plus ancien au plus récent. */
   get flashes(): readonly Flash[] {
     return this.flashing;
+  }
+
+  /** Les signes de vitesse en cours (anneaux traversés il y a moins de `BOOST_SECONDS`), du plus ancien au plus récent. */
+  get ringBoosts(): readonly RingBoost[] {
+    return this.boosting;
   }
 
   get banner(): Readonly<Banner> | null {
@@ -291,6 +357,10 @@ export class Effects {
       for (const flash of this.flashing) flash.age += dtSeconds;
       this.flashing = this.flashing.filter((flash) => flash.age < FLASH_SECONDS);
     }
+    if (this.boosting.length > 0) {
+      for (const boost of this.boosting) boost.age += dtSeconds;
+      this.boosting = this.boosting.filter((boost) => boost.age < BOOST_SECONDS);
+    }
     if (this.current) {
       this.current.age += dtSeconds;
       if (this.current.age >= this.current.seconds) this.current = null;
@@ -305,6 +375,10 @@ export class Effects {
     if (flash !== null) {
       this.flashing.push({ kind: flash, x: hero.x, y: hero.y, age: 0 });
       if (this.flashing.length > FLASH_MAX) this.flashing.shift();
+    }
+    if (event.type === 'ring') {
+      this.boosting.push({ centred: event.centred, age: 0 });
+      if (this.boosting.length > BOOST_AT_ONCE) this.boosting.shift();
     }
     const text = floatingTextFor(event, this.tuning);
     if (text === null) return;

@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { createRng } from '../src/core/math/rng';
 import { SCENES, buildScene } from '../src/data/scenes';
 import { BOUNCE_RESTITUTION, SMASH_KEEP, flightStep, needsSteps, startFlight } from '../src/sim/flight';
-import { RICOCHET_WALL_RISE, buildSegment, hoop, ricochet, smashWall, type Archetype, type Segment, type TierProfile } from '../src/sim/generator';
+import { RICOCHET_WALL_RISE, buildSegment, doorWall, hoop, ricochet, smashWall, type Archetype, type Segment, type TierProfile } from '../src/sim/generator';
 import { pulledPosition } from '../src/sim/launcher';
 import { REASONABLE, playRobot } from '../src/sim/robot';
+import { WORLD_HALF_WIDTH } from '../src/sim/rules';
 import { Simulation } from '../src/sim/simulation';
 import type { Anchor, Obstacle, Ring } from '../src/sim/state';
 import { DEFAULT_TUNING as T, withTuning } from '../src/sim/tuning';
@@ -20,6 +21,11 @@ import { verifySegment } from '../src/sim/verifier';
 const SECOND = Math.round(1 / T.stepSeconds);
 const ids = () => ({ anchor: 1, obstacle: 1, pickup: 1, ring: 1, zone: 1 });
 const slab = (kind?: Obstacle['kind']): Obstacle => (kind ? { id: 7, x0: -2, y0: 4, x1: 2, y1: 4.4, kind } : { id: 7, x0: -2, y0: 4, x1: 2, y1: 4.4 });
+
+/** Un mur au-dessus d'un lanceur va d'un bord du monde à l'autre : on ne le contourne pas par les côtés. */
+function spansWorld(walls: readonly Obstacle[]): boolean {
+  return Math.min(...walls.map((o) => o.x0)) <= -WORLD_HALF_WIDTH && Math.max(...walls.map((o) => o.x1)) >= WORLD_HALF_WIDTH;
+}
 
 /** Le même segment, sa mécanique retirée : rebonds et parois cassables devenus solides, anneaux ôtés. */
 function stripped(segment: Segment): Segment {
@@ -108,6 +114,7 @@ describe('les usages exigés du générateur', () => {
       if (door) {
         doors += 1;
         expect(sas.segment.anchors.some((a) => a.kind === 'lanceur')).toBe(true);
+        expect(spansWorld(sas.segment.obstacles.filter((o) => o.y0 === door.y0))).toBe(true);
         expect(verifySegment([sas.entry], [], sas.segment, T)).toBe(true);
       }
       const cerceau = build(seed, 'cerceau');
@@ -116,7 +123,11 @@ describe('les usages exigés du générateur', () => {
         const ring = cerceau.segment.rings[0]!;
         const launcher = cerceau.segment.anchors.find((a) => a.kind === 'lanceur')!;
         // L'anneau est dans le mur, décalé du lanceur, et la sortie de côté : on ne la voit pas à travers l'anneau depuis le bas.
-        expect(cerceau.segment.obstacles.some((o) => Math.abs(o.y0 - (ring.pos.y - 0.2)) < 1e-6)).toBe(true);
+        const panes = cerceau.segment.obstacles.filter((o) => Math.abs(o.y0 - (ring.pos.y - 0.2)) < 1e-6);
+        expect(panes).toHaveLength(2);
+        // D'un bord du monde à l'autre, et le trou plus étroit que l'anneau : y passer, c'est le traverser.
+        expect(spansWorld(panes)).toBe(true);
+        expect((panes[1]!.x0 - panes[0]!.x1) / 2 - T.heroRadius).toBeLessThanOrEqual(ring.radius);
         expect(Math.abs(ring.pos.x - launcher.pos.x)).toBeGreaterThan(1.5);
         expect(verifySegment([cerceau.entry], [], cerceau.segment, T)).toBe(true);
       }
@@ -129,27 +140,34 @@ describe('les usages exigés du générateur', () => {
     const launcher = { x: 0.5, y: 20 };
     const { wall, exit } = smashWall(ids(), launcher, 5, 0.6, 4);
     expect(wall.kind).toBe('cassable');
-    expect(wall.x1 - wall.x0).toBeGreaterThan(16);
+    expect(spansWorld([wall])).toBe(true);
     expect(exit.y).toBeGreaterThan(wall.y1 + 3);
     const h = hoop(ids(), launcher, 5, 2.8, 4);
     expect(h.walls).toHaveLength(2);
     expect(h.ring.pos.x).toBeCloseTo(2.7, 6);
     expect(h.walls[0]!.x1).toBeLessThan(h.ring.pos.x);
     expect(h.walls[1]!.x0).toBeGreaterThan(h.ring.pos.x);
+    expect(spansWorld(h.walls)).toBe(true);
+    const d = doorWall(ids(), launcher, 5, 2.8, 4);
+    expect(d.walls.map((b) => b.kind ?? 'solide')).toEqual(['solide', 'porte', 'solide']);
+    expect(spansWorld(d.walls)).toBe(true);
     const r = ricochet(ids(), launcher, RICOCHET_WALL_RISE, 1, 4);
     expect(r.boxes.map((b) => b.kind ?? 'solide')).toEqual(['solide', 'solide', 'solide', 'rebond']);
+    expect(spansWorld(r.boxes.slice(0, 2))).toBe(true);
     expect(r.exit.x).toBeLessThan(launcher.x);
   });
 });
 
 describe('les scènes des usages exigés', () => {
-  it('le ricochet et le mur à percer ne se prouvent pas sans leur mécanique ; le robot raisonnable passe chaque scène', () => {
+  it('le ricochet et le mur à percer ne se prouvent pas sans leur mécanique ; le robot raisonnable passe chaque scène, par sa mécanique', () => {
     for (const scene of SCENES) {
       const segment = buildScene(scene.id, ids(), { x: 0, y: 0 });
       expect(verifySegment([], [], segment, T), scene.id).toBe(true);
       if (scene.id === 'rebond' || scene.id === 'cassable') expect(verifySegment([], [], stripped(segment), T), `${scene.id} sans`).toBe(false);
+      // Les rencontres comptées dans la scène elle-même (sous 30 m), pas dans la course libre qui la suit : on ne contourne pas la scène.
       const counts = { bounce: 0, smash: 0, ring: 0 };
-      const report = playRobot(5, T, 40, REASONABLE, { kind: 'scene', sceneId: scene.id, startY: 0 }, (_state, events) => {
+      const report = playRobot(5, T, 40, REASONABLE, { kind: 'scene', sceneId: scene.id, startY: 0 }, (state, events) => {
+        if (state.hero.pos.y > 30) return;
         for (const e of events) if (e.type === 'bounce' || e.type === 'smash' || e.type === 'ring') counts[e.type] += 1;
       });
       expect(report.height, scene.name).toBeGreaterThan(24);

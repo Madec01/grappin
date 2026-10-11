@@ -14,10 +14,10 @@ import type { Camera, ViewBounds } from './camera';
 import { bandsInView, cityBand } from './city';
 import { electricState, type ElectricState } from '../sim/cycles';
 import { fragileGauge, heldKind, inReleaseWindow, isDark, isOff, shadowPoints } from './cues';
-import { alertAlpha, bannerAlpha, flashAlpha, flashRadius, flicker, floatAlpha, floatRise, pulse, sizzle, type Banner, type Effects, type Flash } from './effects';
+import { alertAlpha, bannerAlpha, boostStreaks, flashAlpha, flashRadius, flicker, floatAlpha, floatRise, pulse, sizzle, type Banner, type Effects, type Flash } from './effects';
 import { formatDecimal } from './format';
 import { neonCircle, neonDiscs, neonFill, neonLine, neonRects, neonStroke, type NeonStrokeStyle } from './neon';
-import { ambientHalo, cityLots, fogSheetAlpha, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow, type HaloBoost } from './pulse';
+import { ambientHalo, cityLots, cityStroke, fogSheetAlpha, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow, type HaloBoost } from './pulse';
 import { Screens, type OverlayView } from './screens';
 import { SKIN, crackPattern, doorLook, ringPhase, springTeeth, type Crack, type DoorLook } from './skins';
 import { bandWidth, cupRadius, cupTips, mixColor, pullRatio, traceCup } from './sling';
@@ -85,7 +85,7 @@ import {
  * avant la fermeture, masse pleine fermée, indigo). L'anneau de précision est un cercle fin vert vif, son centre marqué. Tout ce qui
  * s'anime se lit du pas de simulation (cycle d'une porte), de l'état (vitesse, traversée en cours) ou du numéro de l'obstacle
  * (fissures) : jamais de l'horloge de l'écran, pour que chaque capture soit reproductible. Les obstacles solides, eux, sont dessinés
- * exactement comme avant. Un rebond, un fracas ou un anneau laisse aussi un éclat bref au personnage (voir `effects.ts`).
+ * exactement comme avant. Un rebond, un fracas ou un anneau laisse aussi un éclat bref au personnage, et un anneau traversé, qui accélère, quelques traits de vitesse derrière lui (voir `effects.ts`).
  *
  * Les zones qui modifient le mouvement (courant ascendant, dérive, couloir d'accélération, freinage) se dessinent comme des champs de
  * lumière plus que comme des objets, sous les obstacles et les anneaux, au-dessus du décor : un remplissage à peine visible, et dedans des
@@ -394,6 +394,10 @@ const FLASH_SHARDS = 8;
 const FLASH_SHARD_START = 0.55;
 const FLASH_CENTRE_RATIO = 0.6;
 
+/** Traits de vitesse d'un anneau traversé (voir `boostStreaks`) : épaisseur et halo, plus discrets qu'un éclat. */
+const BOOST_WIDTH = 2.2;
+const BOOST_HALO = 0.8;
+
 /** Ombre prédictive : rayon d'un point en pixels, opacité. */
 const SHADOW_DOT_RADIUS = 1.8;
 const SHADOW_ALPHA = 0.55;
@@ -646,6 +650,7 @@ export class Renderer {
   private readonly rope = new Graphics();
   private readonly fog = new Graphics();
   private readonly shadow = new Graphics();
+  private readonly boostLines = new Graphics();
   private readonly hero = new Graphics();
 
   // Par-dessus le décor, à l'écran.
@@ -769,6 +774,7 @@ export class Renderer {
       this.rope,
       this.fog,
       this.shadow,
+      this.boostLines,
       this.hero,
     );
     app.stage.addChild(
@@ -856,6 +862,7 @@ export class Renderer {
     this.drawRope(state, camera, tuning, effects, ready);
     this.drawFog(state, camera, view, effects);
     this.drawShadow(state, camera, tuning, ready);
+    this.drawBoostLines(state, camera, tuning, effects);
     this.drawHero(state, camera, tuning, ready);
     this.drawFlashes(effects);
     this.drawFloatingTexts(effects);
@@ -948,7 +955,8 @@ export class Renderer {
    * un peu moins vite que le monde pour la profondeur, d'après la hauteur seule :
    * le décor est le même à chaque partie (voir city.ts). Sur le temps, elles
    * dansent : celles d'index pair s'allument sur les temps pairs, les impaires
-   * sur les autres, en deux lots de couleur par rang au plus ; sans temps, un seul.
+   * sur les autres, en deux lots de couleur par rang au plus ; sans temps, un seul ;
+   * et leurs traits s'épaississent et s'opacifient sur le coup (`cityStroke`).
    */
   private drawCity(camera: Camera, view: ViewBounds): void {
     const g = this.city.clear();
@@ -956,6 +964,8 @@ export class Renderer {
     const shift = (1 - CITY_PARALLAX) * camera.centerY;
     const { first, last } = bandsInView(camera.worldYAt(view.bottom) - shift, camera.worldYAt(view.top) - shift);
     const lots = cityLots(this.palette, this.pulse);
+    // Sur le temps, les traits s'épaississent et s'opacifient : le seul endroit où le pouls touche une épaisseur, un décor, jamais une cible.
+    const stroke = cityStroke(this.pulse);
     // Par rang, puis par lot de couleur : sans danse, tout est dans le premier lot, comme avant.
     const rows: Vec2[][][][] = CITY_ROW_ALPHA.map(() => [[], []]);
     for (let band = first; band <= last; band += 1) {
@@ -975,7 +985,7 @@ export class Renderer {
         for (const line of lines) {
           line.forEach((point, index) => (index === 0 ? g.moveTo(point.x, point.y) : g.lineTo(point.x, point.y)));
         }
-        g.stroke({ width: CITY_WIDTH, color: lots?.[lot] ?? this.palette.city, alpha: CITY_ROW_ALPHA[row] ?? 1, join: 'round' });
+        g.stroke({ width: CITY_WIDTH * stroke.width, color: lots?.[lot] ?? this.palette.city, alpha: Math.min(1, (CITY_ROW_ALPHA[row] ?? 1) * stroke.alpha), join: 'round' });
       });
     });
   }
@@ -2018,6 +2028,25 @@ export class Renderer {
       g.circle(p.x, p.y, aiming ? LAUNCH_SHADOW_DOT_RADIUS : SHADOW_DOT_RADIUS);
     }
     g.fill({ color: ready ? COLOR.release : this.palette.pale, alpha: aiming ? LAUNCH_SHADOW_ALPHA : ready ? READY_SHADOW_ALPHA : SHADOW_ALPHA });
+  }
+
+  /**
+   * Le signe de vitesse d'un anneau traversé : deux ou trois traits dans l'axe de la vitesse, derrière le personnage, dans la teinte de
+   * l'anneau (plus claire s'il a été pris au centre), pendant un peu moins d'un tiers de seconde. Dans le monde, sous le personnage : le monde
+   * incliné les tourne avec lui.
+   */
+  private drawBoostLines(state: SimState, camera: Camera, tuning: Tuning, effects: Effects): void {
+    const g = this.boostLines.clear();
+    if (effects.ringBoosts.length === 0) return;
+    const p = camera.worldToScreen(state.hero.pos);
+    const radius = tuning.heroRadius * camera.scale;
+    for (const boost of effects.ringBoosts) {
+      const color = boost.centred ? SKIN.ringHot : COLOR.ring;
+      // La vitesse du monde (y vers le haut) devient une direction d'écran (y vers le bas).
+      for (const streak of boostStreaks(boost.age, state.hero.vel.x, -state.hero.vel.y, radius)) {
+        neonStroke(g, (target) => target.moveTo(p.x + streak.x0, p.y + streak.y0).lineTo(p.x + streak.x1, p.y + streak.y1), { color, halo: COLOR.ring, width: BOOST_WIDTH, alpha: streak.alpha, strength: BOOST_HALO, cap: 'round' });
+      }
+    }
   }
 
   /** Le personnage : un disque pâle, le plus lumineux du jeu, au halo de la palette plus large que celui des points. Dans la fenêtre de lâcher, son halo prend la teinte chaude. */

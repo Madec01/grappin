@@ -5,6 +5,7 @@ import { CABLE_HALF_LENGTH, CABLE_PERIOD_SECONDS, TRAVERSIERE_PERIOD_SECONDS } f
 import { circleBoxGap } from './geometry';
 import { LANCEUR_CLEARANCE } from './launcher';
 import { zoneAt } from './physics';
+import { WORLD_HALF_WIDTH } from './rules';
 import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from './state';
 
 /**
@@ -99,6 +100,14 @@ export const HALF_WIDTH = 4;
 export const MAX_SPREAD = 1.5;
 /** Les corniches s'accrochent un mètre au-delà de la largeur jouable. */
 const WALL_MARGIN = 1;
+/**
+ * Un mur au-dessus d'un lanceur va d'un bord du monde à l'autre : le monde
+ * s'arrête à ± `WORLD_HALF_WIDTH`, bien au-delà de la largeur des points, et un
+ * mur qui s'arrêtait un mètre après celle-ci se contournait par les côtés (le
+ * robot le faisait, en 0.12.1 en cours) : son trou, sa porte, son anneau ou sa
+ * paroi à percer n'obligeaient à rien.
+ */
+const WALL_EDGE = WORLD_HALF_WIDTH + 1;
 /** Un pas de chaîne ne dépasse jamais cette longueur, quel que soit l'écartement : la corde doit pouvoir suivre. */
 const STEP_MAX = 6.8;
 
@@ -265,14 +274,11 @@ const RICOCHET_PAD_TOP = 5.2;
 export const RICOCHET_WALL_RISE = 5.2;
 /** Percée : un plafond cassable de toute la largeur, `PERCEE_ABOVE_BOOST` au-dessus du couloir d'accélération, que seule sa vitesse perce. */
 const PERCEE_ABOVE_BOOST = 0.8;
-/** Un mur à percer couvre tout le monde jouable et au-delà : on ne le contourne pas par les côtés. */
-const SMASH_WALL_BEYOND = 6;
 
 /** Le mur cassable sans trou au-dessus d'un lanceur, et où la chaîne reprend. `rise` : hauteur du mur au-dessus du lanceur. Partagé avec les scènes. */
 export function smashWall(ids: IdCounters, launcher: Vec2, rise: number, exitDx: number, halfWidth: number): { wall: Obstacle; exit: Vec2 } {
-  const wallX = halfWidth + SMASH_WALL_BEYOND;
   const wallY = launcher.y + rise;
-  const wall: Obstacle = { id: ids.obstacle, x0: -wallX, y0: wallY, x1: wallX, y1: wallY + OBSTACLE_THICKNESS, kind: 'cassable' };
+  const wall: Obstacle = { id: ids.obstacle, x0: -WALL_EDGE, y0: wallY, x1: WALL_EDGE, y1: wallY + OBSTACLE_THICKNESS, kind: 'cassable' };
   ids.obstacle += 1;
   return { wall, exit: { x: clampX(launcher.x + exitDx, halfWidth), y: wallY + ABOVE_WALL } };
 }
@@ -284,7 +290,7 @@ export function smashWall(ids: IdCounters, launcher: Vec2, rise: number, exitDx:
  * hauteur du mur au-dessus du lanceur. Partagé avec les scènes.
  */
 export function doorWall(ids: IdCounters, launcher: Vec2, rise: number, gapX: number, halfWidth: number): { walls: Obstacle[]; exit: Vec2 } {
-  const wallX = halfWidth + WALL_MARGIN;
+  const wallX = WALL_EDGE;
   const wallY = launcher.y + rise;
   const x = clampX(gapX, halfWidth - GAP_HALF_WIDTH);
   const walls: Obstacle[] = [
@@ -298,7 +304,7 @@ export function doorWall(ids: IdCounters, launcher: Vec2, rise: number, gapX: nu
 
 /** L'anneau au milieu du vol depuis `from` vers un point trop loin pour un vol ordinaire, et ce point. Partagé avec les scènes. */
 export function hoop(ids: IdCounters, launcher: Vec2, rise: number, gapX: number, halfWidth: number): { walls: Obstacle[]; ring: Ring; exit: Vec2 } {
-  const wallX = halfWidth + WALL_MARGIN;
+  const wallX = WALL_EDGE;
   const wallY = launcher.y + rise;
   const x = clampX(gapX, halfWidth - HOOP_GAP_HALF);
   const walls: Obstacle[] = [
@@ -315,7 +321,7 @@ export function hoop(ids: IdCounters, launcher: Vec2, rise: number, gapX: number
 
 /** Le ricochet au-dessus d'un lanceur : mur à trou décalé du côté `side`, chicane qui barre le tir direct, mur de rebond de l'autre côté. Partagé avec les scènes. */
 export function ricochet(ids: IdCounters, launcher: Vec2, rise: number, side: -1 | 1, halfWidth: number): { boxes: Obstacle[]; exit: Vec2 } {
-  const wallX = halfWidth + WALL_MARGIN;
+  const wallX = WALL_EDGE;
   const wallY = launcher.y + rise;
   // `side` est le côté du mur de rebond ; le trou est de l'autre côté, un peu décalé.
   const gapX = clampX(launcher.x - side * RICOCHET_GAP_OFFSET, halfWidth);
@@ -504,7 +510,7 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
       const launcher = makeAnchor(ids, cur, 'lanceur');
       anchors[anchors.length - 1] = launcher;
       const wallY = cur.y + WALL_RISE_MIN + WALL_RISE_RANGE * rng.next();
-      const wallX = halfWidth + WALL_MARGIN;
+      const wallX = WALL_EDGE;
       const wall = (x0: number, x1: number): void => {
         fixed.push({ id: ids.obstacle, x0, y0: wallY, x1, y1: wallY + OBSTACLE_THICKNESS });
         ids.obstacle += 1;
@@ -603,9 +609,8 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
       const { boost, brake, exit } = rocket(ids, cur, halfWidth);
       zones.push(boost, brake);
       if (archetype === 'percee') {
-        const wallX = halfWidth + SMASH_WALL_BEYOND;
         const y0 = boost.y1 + PERCEE_ABOVE_BOOST;
-        fixed.push({ id: ids.obstacle, x0: -wallX, y0, x1: wallX, y1: y0 + OBSTACLE_THICKNESS, kind: 'cassable' });
+        fixed.push({ id: ids.obstacle, x0: -WALL_EDGE, y0, x1: WALL_EDGE, y1: y0 + OBSTACLE_THICKNESS, kind: 'cassable' });
         ids.obstacle += 1;
       }
       cur = exit;
