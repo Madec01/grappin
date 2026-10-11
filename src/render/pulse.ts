@@ -9,16 +9,30 @@ import { mixColor } from './sling';
  * Le pouls (voir `audio/rhythm.ts`) dit où en est le temps, quelle est sa force
  * et combien il y a de graves, de médiums et d'aigus. Ici, des fonctions pures
  * et sans PixiJS le traduisent en couleurs et en multiplicateurs, que le rendu
- * pose par-dessus la palette de la famille de musique. Rien d'autre que
- * l'intensité et la teinte ne bouge : jamais une forme, une taille ou une
- * position, et jamais la couleur d'une espèce de prise (`COLOR`, style.ts), qui
- * porte un sens.
+ * pose par-dessus la palette de la famille de musique. Sur ce qui se joue, rien
+ * d'autre que l'intensité et la teinte ne bouge : jamais une forme, une taille
+ * ou une position de point, d'obstacle ou de personnage, et jamais la couleur
+ * d'une espèce de prise (`COLOR`, style.ts), qui porte un sens. Seul le décor
+ * lointain, les traits de la ville, bat aussi en épaisseur et en opacité.
  *
  * Le propriétaire veut un jeu « hyper dynamique visuellement », aux couleurs
  * qui changent vite : la couleur d'effet change donc à chaque temps, parmi les
  * trois couleurs d'effet de la palette (A sur le temps fort, puis B, C, B), le
  * temps fort frappe plus fort que les trois autres, et le fond, la crête de
  * brume, la dalle du toit et les structures du décor prennent la couleur du moment.
+ *
+ * Retour du propriétaire sur la 0.12.0 : « les éléments de décor ne pulsent pas
+ * assez avec la musique, c'est trop faible ; je veux quelque chose de dynamique,
+ * de nerveux ». Trois causes, trois réponses. Les amplitudes étaient modestes :
+ * elles ont presque doublé. La retombée après un temps était douce : elle est
+ * plus sèche (`BEAT_DECAY`, audio/rhythm.ts), et la couleur d'effet claque plus
+ * vite. Et surtout, tout ce qui bat sur le temps était multiplié par la force du
+ * temps, or sur les pistes du jeu la force médiane d'un temps est entre 0,35 et
+ * 0,65, un temps sur deux sous 0,5 : le coup restait à moitié. Le coup vaut
+ * désormais `floor + (1 − floor) × √force` (voir `punch`) : un temps moyen frappe
+ * presque à plein, un temps deviné dans un passage calme frappe encore à moitié.
+ * De même, les graves des pistes ne descendent presque jamais sous 0,2 : ce qui
+ * les suit restait allumé en continu ; ils ne comptent qu'au-dessus d'un seuil.
  *
  * Règle absolue : au silence (`SILENT_PULSE`, ou tout pouls sans temps ni graves),
  * rien ne change. Chaque multiplicateur y vaut exactement 1, chaque ajout
@@ -28,36 +42,37 @@ import { mixColor } from './sling';
 
 /**
  * Tous les réglages du pouls, au même endroit. Les amplitudes sont des parts de
- * 0 à 1 de ce que le pouls donne : un temps franc (`beat` et `strength` à 1) ou
- * des graves à fond. Sur le temps fort de la mesure, le coup est renforcé de
- * `beat.downbeat` ; les multiplicateurs peuvent alors dépasser leur part nominale
- * d'autant.
+ * ce que le pouls donne : un temps franc (`beat` à 1, force à 1) ou des graves à
+ * fond. Sur le temps fort de la mesure, le coup est renforcé de `beat.downbeat` ;
+ * les multiplicateurs peuvent alors dépasser leur part nominale d'autant.
  */
 export const PULSE = {
-  /** Le coup : part de renfort sur le temps fort de chaque mesure. */
-  beat: { downbeat: 0.3 },
-  /** Fond : il monte vers la brume de cette part sur le temps (× force) et avec les graves, sans jamais dépasser `max` ; et il se teinte de la couleur d'effet de `tint` sur le temps. */
-  background: { beat: 0.16, bass: 0.06, max: 0.24, tint: 0.08 },
-  /** Crête de la brume : part de couleur d'effet prise sur le temps (× force), puis part de blanc ajoutée. */
-  fogEdge: { tint: 0.5, beat: 0.6 },
+  /** Le coup : part de renfort sur le temps fort de chaque mesure, et plancher de la force d'un temps (le coup vaut `floor + (1 − floor) × √force`). */
+  beat: { downbeat: 0.5, floor: 0.3 },
+  /** Les graves : rien en dessous de `from`, puis de 0 à 1 jusqu'à fond. Sans ce seuil, ce qu'ils mènent resterait allumé en continu. */
+  bass: { from: 0.3 },
+  /** Fond : il monte vers la brume de cette part sur le temps (× coup) et avec les graves, sans jamais dépasser `max` ; et il se teinte de la couleur d'effet de `tint` sur le temps. */
+  background: { beat: 0.3, bass: 0.1, max: 0.4, tint: 0.2 },
+  /** Crête de la brume : part de couleur d'effet prise sur le temps (× coup), puis part de blanc ajoutée. */
+  fogEdge: { tint: 0.8, beat: 0.9 },
   /** Nappe de la brume : opacité ajoutée avec les graves. */
-  fogSheet: { bass: 0.08 },
-  /** Dalle du toit de départ et plateformes : part de couleur d'effet prise sur le temps (× force). */
-  roof: { beat: 0.15 },
-  /** Structures du décor (`city`) : part de la couleur d'effet mélangée aux traits avec les graves, et, sur celles qui dansent, part de la couleur d'effet sur le temps (× force). */
-  city: { bass: 0.7, dance: 1 },
-  /** Halo des tubes ambiants : de combien la portée et l'intensité grandissent sur le temps (× force). */
-  halo: { spread: 0.7, strength: 1 },
-  /** Halo des espèces de prises : intensité ajoutée sur le temps (× force). Leurs couleurs ne bougent pas. */
-  species: { strength: 0.5 },
-  /** Halo du cerne des obstacles : intensité ajoutée, sur le temps (× force) ou avec les graves, le plus fort des deux. */
-  rim: { strength: 0.6 },
+  fogSheet: { bass: 0.15 },
+  /** Dalle du toit de départ et plateformes : part de couleur d'effet prise sur le temps (× coup). */
+  roof: { beat: 0.35 },
+  /** Structures du décor (`city`) : part de la couleur d'effet mélangée aux traits avec les graves ; sur celles qui dansent, part de la couleur d'effet sur le temps (× coup) ; et sur le temps (× coup), de combien leurs traits s'épaississent et s'opacifient. */
+  city: { bass: 0.8, dance: 1, width: 0.8, alpha: 0.6 },
+  /** Halo des tubes ambiants : de combien la portée et l'intensité grandissent sur le temps (× coup). */
+  halo: { spread: 1, strength: 1.4 },
+  /** Halo des espèces de prises : intensité ajoutée sur le temps (× coup). Leurs couleurs ne bougent pas. */
+  species: { strength: 0.9 },
+  /** Halo du cerne des obstacles : intensité ajoutée, sur le temps (× coup) ou avec les graves, le plus fort des deux. */
+  rim: { strength: 1 },
   /** Étoiles : amplitude du scintillement de la portée de leur halo avec les aigus, et nombre de ses à-coups par seconde. */
-  star: { reach: 0.7, hz: 10 },
-  /** Interface : de combien le multiplicateur grossit sur le temps (× force). */
-  ui: { multiplier: 0.18 },
+  star: { reach: 0.9, hz: 12 },
+  /** Interface : de combien le multiplicateur grossit sur le temps (× coup). */
+  ui: { multiplier: 0.3 },
   /** Couleur d'effet : part du temps pendant laquelle l'ancienne couleur fond vers la nouvelle (le reste du temps, la nouvelle est franche). */
-  effect: { blend: 0.3 },
+  effect: { blend: 0.15 },
 } as const;
 
 /** Les couleurs d'effet de la palette, dans l'ordre des temps de la mesure : A sur le temps fort, puis B, C, B. */
@@ -73,12 +88,20 @@ function unit(value: number): number {
 
 /**
  * Le coup du temps : 1 sur un temps franc, retombe vers 0 jusqu'au suivant,
- * d'autant plus faible que le temps l'est ; renforcé sur le temps fort de la
- * mesure, où il peut dépasser 1 de `PULSE.beat.downbeat`.
+ * plus faible quand le temps l'est, mais jamais sous le plancher `PULSE.beat.floor`
+ * de sa valeur (la force compte en racine : un temps moyen frappe presque à
+ * plein) ; renforcé sur le temps fort de la mesure, où il peut dépasser 1 de
+ * `PULSE.beat.downbeat`. Sans temps (`beat` à 0), exactement 0.
  */
 function punch(pulse: Pulse): number {
-  const hit = unit(pulse.beat) * unit(pulse.strength);
+  const { floor } = PULSE.beat;
+  const hit = unit(pulse.beat) * (floor + (1 - floor) * Math.sqrt(unit(pulse.strength)));
   return pulse.inBar === 0 && pulse.count >= 0 ? hit * (1 + PULSE.beat.downbeat) : hit;
+}
+
+/** Les graves qui comptent : 0 jusqu'au seuil `PULSE.bass.from`, puis de 0 à 1 jusqu'à des graves à fond. */
+function bassKick(pulse: Pulse): number {
+  return unit((unit(pulse.bass) - PULSE.bass.from) / (1 - PULSE.bass.from));
 }
 
 /** Le plus fort coup possible : un temps fort franc. */
@@ -137,7 +160,7 @@ export function effectColor(palette: Palette, pulse: Pulse): number {
  */
 export function pulsedPalette(palette: Palette, pulse: Pulse): Palette {
   const hit = punch(pulse);
-  const bass = unit(pulse.bass);
+  const bass = bassKick(pulse);
   const lift = Math.min(PULSE.background.max, PULSE.background.beat * hit + PULSE.background.bass * bass);
   const edge = Math.min(1, PULSE.fogEdge.beat * hit);
   const tint = Math.min(1, PULSE.city.bass * bass);
@@ -179,7 +202,7 @@ export function speciesGlow(pulse: Pulse): number {
 
 /** Multiplicateur d'intensité du halo du cerne des obstacles : sur le temps ou avec les graves, le plus fort des deux ; 1 au silence. */
 export function rimBoost(pulse: Pulse): number {
-  return 1 + PULSE.rim.strength * Math.max(punch(pulse), unit(pulse.bass));
+  return 1 + PULSE.rim.strength * Math.max(punch(pulse), bassKick(pulse));
 }
 
 /**
@@ -205,7 +228,23 @@ export function multiplierPop(pulse: Pulse): number {
 
 /** Opacité de la nappe de brume : `base`, un peu plus dense avec les graves, jamais au-delà de 1. */
 export function fogSheetAlpha(base: number, pulse: Pulse): number {
-  return Math.min(1, base + PULSE.fogSheet.bass * unit(pulse.bass));
+  return Math.min(1, base + PULSE.fogSheet.bass * bassKick(pulse));
+}
+
+/** Ce que le pouls fait aux traits du décor lointain : un multiplicateur d'épaisseur et un d'opacité, tous deux à 1 au silence. */
+export interface CityStroke {
+  readonly width: number;
+  readonly alpha: number;
+}
+
+/**
+ * Les traits de la ville battent sur le temps : plus épais et plus opaques,
+ * d'autant plus que le coup est fort, puis retombent. C'est le seul endroit où
+ * le pouls touche une épaisseur : la ville est un décor, jamais une cible.
+ */
+export function cityStroke(pulse: Pulse): CityStroke {
+  const hit = punch(pulse);
+  return { width: 1 + PULSE.city.width * hit, alpha: 1 + PULSE.city.alpha * hit };
 }
 
 /**

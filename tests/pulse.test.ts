@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BEAT_DECAY, SILENT_PULSE, pulseAt, syntheticRhythm, type Pulse } from '../src/audio/rhythm';
 import type { MusicFamily } from '../src/data/musique';
-import { PULSE, PUNCH_MAX, ambientHalo, cityLots, effectColor, fogSheetAlpha, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow } from '../src/render/pulse';
+import { PULSE, PUNCH_MAX, ambientHalo, cityLots, cityStroke, effectColor, fogSheetAlpha, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow } from '../src/render/pulse';
 import { COLOR, PALETTES, type Palette } from '../src/render/style';
 
 /** Les cinq ambiances ; le menu reprend la première. */
@@ -73,6 +73,7 @@ describe('au silence, rien ne bouge', () => {
 
   it('chaque multiplicateur vaut exactement 1, chaque ajout exactement 0', () => {
     expect(ambientHalo(SILENT_PULSE)).toEqual({ spread: 1, strength: 1 });
+    expect(cityStroke(SILENT_PULSE)).toEqual({ width: 1, alpha: 1 });
     expect(speciesGlow(SILENT_PULSE)).toBe(1);
     expect(rimBoost(SILENT_PULSE)).toBe(1);
     expect(multiplierPop(SILENT_PULSE)).toBe(1);
@@ -93,7 +94,8 @@ describe('au silence, rien ne bouge', () => {
 
 describe('bornes', () => {
   it('le fond ne s\'éclaircit jamais de plus de son plafond vers la brume', () => {
-    expect(PULSE.background.max).toBeLessThanOrEqual(0.25);
+    // Monté de 0,24 à 0,4 sur demande d'un pouls nerveux (0.12.1) : au-delà, le fond concurrencerait les tubes.
+    expect(PULSE.background.max).toBeLessThanOrEqual(0.4);
     for (const family of FAMILIES) {
       const palette = PALETTES[family];
       for (const sample of grid()) {
@@ -160,6 +162,11 @@ describe('bornes', () => {
       expect(rimBoost(sample)).toBeLessThanOrEqual(1 + PULSE.rim.strength * PUNCH_MAX);
       expect(multiplierPop(sample)).toBeGreaterThanOrEqual(1);
       expect(multiplierPop(sample)).toBeLessThanOrEqual(1 + PULSE.ui.multiplier * PUNCH_MAX);
+      const stroke = cityStroke(sample);
+      expect(stroke.width).toBeGreaterThanOrEqual(1);
+      expect(stroke.width).toBeLessThanOrEqual(1 + PULSE.city.width * PUNCH_MAX);
+      expect(stroke.alpha).toBeGreaterThanOrEqual(1);
+      expect(stroke.alpha).toBeLessThanOrEqual(1 + PULSE.city.alpha * PUNCH_MAX);
       expect(fogSheetAlpha(0.85, sample)).toBeGreaterThanOrEqual(0.85);
       expect(fogSheetAlpha(0.85, sample)).toBeLessThanOrEqual(0.85 + PULSE.fogSheet.bass);
       expect(fogSheetAlpha(0.99, sample)).toBeLessThanOrEqual(1);
@@ -171,14 +178,37 @@ describe('bornes', () => {
 
   it('les réglages de pleine force sont ceux annoncés, et le temps fort frappe plus fort', () => {
     const full = pulse({ beat: 1, strength: 1, bass: 1, count: 1, inBar: 1 });
-    expect(ambientHalo(full)).toEqual({ spread: 1.7, strength: 2 });
-    expect(speciesGlow(full)).toBeCloseTo(1.5, 10);
-    expect(rimBoost(full)).toBeCloseTo(1.6, 10);
-    expect(multiplierPop(full)).toBeCloseTo(1.18, 10);
+    expect(ambientHalo(full).spread).toBeCloseTo(2, 10);
+    expect(ambientHalo(full).strength).toBeCloseTo(2.4, 10);
+    expect(speciesGlow(full)).toBeCloseTo(1.9, 10);
+    expect(rimBoost(full)).toBeCloseTo(2, 10);
+    expect(multiplierPop(full)).toBeCloseTo(1.3, 10);
+    expect(cityStroke(full).width).toBeCloseTo(1.8, 10);
+    expect(cityStroke(full).alpha).toBeCloseTo(1.6, 10);
     const downbeat = pulse({ beat: 1, strength: 1, bass: 1, count: 4, inBar: 0 });
-    expect(ambientHalo(downbeat).spread).toBeCloseTo(1 + 0.7 * PUNCH_MAX, 10);
-    expect(multiplierPop(downbeat)).toBeCloseTo(1 + 0.18 * PUNCH_MAX, 10);
-    expect(PUNCH_MAX).toBeCloseTo(1.3, 10);
+    expect(ambientHalo(downbeat).spread).toBeCloseTo(1 + 1 * PUNCH_MAX, 10);
+    expect(multiplierPop(downbeat)).toBeCloseTo(1 + 0.3 * PUNCH_MAX, 10);
+    expect(PUNCH_MAX).toBeCloseTo(1.5, 10);
+  });
+
+  it('un temps moyen frappe presque à plein, un temps faible frappe encore, un temps absent pas du tout', () => {
+    const at = (strength: number): number => multiplierPop(pulse({ beat: 1, strength, count: 1, inBar: 1 })) - 1;
+    // Sur les pistes du jeu, la force médiane d'un temps est entre 0,35 et 0,65 : le coup y vaut plus des deux tiers du plein.
+    expect(at(0.35)).toBeGreaterThan(PULSE.ui.multiplier * 0.7);
+    expect(at(0.6)).toBeGreaterThan(PULSE.ui.multiplier * 0.8);
+    expect(at(0.05)).toBeGreaterThanOrEqual(PULSE.ui.multiplier * PULSE.beat.floor);
+    expect(at(1)).toBeCloseTo(PULSE.ui.multiplier, 10);
+    // Plus fort est le temps, plus fort est le coup, jamais au-delà du plein.
+    for (const [weak, strong] of [[0, 0.1], [0.1, 0.5], [0.5, 0.9], [0.9, 1]]) expect(at(weak!)).toBeLessThan(at(strong!));
+    expect(multiplierPop(pulse({ beat: 0, strength: 1, count: 1, inBar: 1 }))).toBe(1);
+  });
+
+  it('les graves ne comptent qu\'au-dessus de leur seuil, puis jusqu\'à fond', () => {
+    expect(rimBoost(pulse({ bass: PULSE.bass.from }))).toBe(1);
+    expect(fogSheetAlpha(0.5, pulse({ bass: PULSE.bass.from - 0.05 }))).toBe(0.5);
+    expect(rimBoost(pulse({ bass: 1 }))).toBeCloseTo(1 + PULSE.rim.strength, 10);
+    expect(rimBoost(pulse({ bass: (1 + PULSE.bass.from) / 2 }))).toBeCloseTo(1 + PULSE.rim.strength / 2, 10);
+    for (const family of FAMILIES) expect(pulsedPalette(PALETTES[family], pulse({ bass: PULSE.bass.from }))).toBe(PALETTES[family]);
   });
 
   it('un pouls hors domaine (négatif, trop grand, NaN) ne sort pas des mêmes bornes', () => {
@@ -363,7 +393,10 @@ describe('les structures du décor qui dansent', () => {
     expect(gap(lit(1), palette.city)).toBeGreaterThan(gap(lit(0.5), palette.city));
     expect(gap(lit(0.5), palette.city)).toBeGreaterThan(gap(lit(0.1), palette.city));
     expect(cityLots(palette, pulse({ beat: 0, strength: 1, count: 4, inBar: 0, bpm: 120 }))).toBeNull();
-    expect(cityLots(palette, pulse({ beat: 1, strength: 0, count: 4, inBar: 0, bpm: 120 }))).toBeNull();
+    // Un temps sans force frappe encore au plancher : la ville s'allume, moins qu'à plein.
+    const weak = cityLots(palette, pulse({ beat: 1, strength: 0, count: 4, inBar: 0, bpm: 120 }))?.[0] ?? palette.city;
+    expect(gap(weak, palette.city)).toBeGreaterThan(0);
+    expect(gap(weak, palette.city)).toBeLessThan(gap(lit(1), palette.city));
   });
 });
 
@@ -395,12 +428,14 @@ describe('le scintillement des étoiles', () => {
 });
 
 describe('les réglages', () => {
-  it('sont tous des parts entre 0 et 1, et le fond ne peut pas dépasser son plafond', () => {
-    for (const group of Object.values(PULSE)) {
+  it('sont des parts entre 0 et 1 ou des gains bornés, et le fond ne peut pas dépasser son plafond', () => {
+    // Les gains disent de combien un multiplicateur grandit sur un coup plein : jamais plus du double. Le reste sont des parts.
+    const gains = new Set(['beat.downbeat', 'halo.spread', 'halo.strength', 'species.strength', 'rim.strength', 'ui.multiplier', 'city.width', 'city.alpha']);
+    for (const [groupName, group] of Object.entries(PULSE)) {
       for (const [name, value] of Object.entries(group)) {
         if (name === 'hz') continue;
-        expect(value, name).toBeGreaterThanOrEqual(0);
-        expect(value, name).toBeLessThanOrEqual(1);
+        expect(value, `${groupName}.${name}`).toBeGreaterThanOrEqual(0);
+        expect(value, `${groupName}.${name}`).toBeLessThanOrEqual(gains.has(`${groupName}.${name}`) ? 2 : 1);
       }
     }
     expect(PULSE.background.beat + PULSE.background.bass).toBeLessThanOrEqual(PULSE.background.max + 1e-12);

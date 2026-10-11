@@ -124,7 +124,7 @@ Critère de sortie : chaque contrainte passe le vérificateur et ne dégrade pas
 ## Phase 7 — Confort — v0.7 — en cours
 
 - Installable sur le téléphone (application web installable, hors-ligne) : livré le 11 octobre 2026 en 0.7.0.
-- L'ambiance qui pulse au rythme de la musique : livré le 11 octobre 2026 en 0.8.0 et 0.8.1, réglages à affiner sur retour.
+- L'ambiance qui pulse au rythme de la musique : livré le 11 octobre 2026 en 0.8.0 et 0.8.1 ; réglages montés en 0.12.1 sur retour du propriétaire (« trop faible, je veux du dynamique, du nerveux »).
 - Pause et reprise maîtrisée, réglage Sons, départ de course libre au choix : livrés en 0.9.0.
 - Mode facile avec ombre prédictive longue, ligne de record, statistiques de fin de partie, davantage de niveaux.
 

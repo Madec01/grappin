@@ -61,9 +61,11 @@ export const SILENT_PULSE: Pulse = { beat: 0, strength: 0, count: -1, inBar: 0, 
 
 /**
  * Vitesse de la décroissance du pouls après un temps : `beat` tombe à e^-BEAT_DECAY,
- * soit 5 %, à l'instant du temps suivant. Un coup net, une retombée douce.
+ * soit 1 %, à l'instant du temps suivant, et à 10 % au milieu. Un coup sec, une
+ * retombée franche : le propriétaire veut un pouls nerveux (3 jusqu'à la 0.12.0,
+ * où la retombée, à 22 % au milieu du temps, paraissait molle).
  */
-export const BEAT_DECAY = 3;
+export const BEAT_DECAY = 4.5;
 
 /** Le dernier indice de `sorted` dont la valeur est au plus `t`, ou -1. */
 function lastAtOrBefore(sorted: readonly number[], t: number): number {
