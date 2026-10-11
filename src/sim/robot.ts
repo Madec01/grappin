@@ -2,6 +2,7 @@ import { FREE_RUN, type CoursePlan } from './course';
 import { flightStep, startFlight } from './flight';
 import { PULL_MAX } from './launcher';
 import { provableObstacles } from './obstacles';
+import { zoneAt } from './physics';
 import { bestLaunch } from './pilot';
 import { releaseVelocity } from './rules';
 import type { Anchor, RuleEvent, SimState } from './state';
@@ -40,6 +41,8 @@ export const LAUNCH_AIM_SECONDS = 0.35;
 /** Le robot qui monte à plus de cette vitesse ignore un point visé plus bas que lui de cette distance : il attend la suite. */
 const RISING_SPEED = 1;
 const RISING_BELOW = 0.5;
+/** Une zone où le vol du robot arrive dans ce temps compte comme « devant lui » : il monte vers elle. */
+const ZONE_AHEAD_SECONDS = 0.4;
 /** Avant de lâcher, le robot regarde ce temps de vol devant lui : s'il heurte un obstacle solide, il garde la corde et attend la suite du balancement. */
 const LOOK_AHEAD_SECONDS = 0.5;
 
@@ -97,11 +100,16 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
     if (!s.rope) {
       const target = s.targetId === null ? null : s.anchors.find((a) => a.id === s.targetId);
       const climbing = s.step - launchedStep > launchWaitSteps || (target !== null && target !== undefined && target.pos.y > launchedY + 1);
-      // Porté vers le haut (un courant, une fusée), le robot ne rattrape pas un point sous lui : il monte d'abord, comme un joueur.
-      const rising = s.hero.vel.y > RISING_SPEED && target !== null && target !== undefined && target.pos.y < s.hero.pos.y - RISING_BELOW;
+      // Porté vers le haut par une zone (un courant, une fusée), le robot ne rattrape pas un point sous lui : il monte d'abord, comme un
+      // joueur. Hors zone, il attrape ce qu'il vise : refuser un point plus bas en plein vol rapide, c'est finir hors du monde.
+      const ahead = (seconds: number): boolean => zoneAt(s.zones, { x: s.hero.pos.x + s.hero.vel.x * seconds, y: s.hero.pos.y + s.hero.vel.y * seconds }) !== null;
+      const towardsZone = ahead(0) || ahead(ZONE_AHEAD_SECONDS / 2) || ahead(ZONE_AHEAD_SECONDS);
+      const rising = towardsZone && s.hero.vel.y > RISING_SPEED && target !== null && target !== undefined && target.pos.y < s.hero.pos.y - RISING_BELOW;
       // Attraper ici mènerait-il dans un mur ? Saisi de loin, corde molle, le vol continue tout droit : le robot regarde le balancement
-      // qui suivrait, comme le vérificateur, et attend sinon (une prise électrique ou à éclipse ne compte pas, il la laisse de toute façon).
-      const safe = target !== null && target !== undefined && swingIsClear(target, { pos: s.hero.pos, vel: s.hero.vel }, s.anchors, provableObstacles(s.obstacles), tuning, s.env, s.zones);
+      // qui suivrait, comme le vérificateur, et attend un meilleur moment si un autre point est à portée ; mais un choc vaut mieux
+      // qu'une sortie du monde : s'il tombe, ou si ce point est le dernier à portée, il attrape quand même.
+      const others = target ? s.anchors.filter((a) => a.id !== target.id && !a.broken && Math.hypot(a.pos.x - s.hero.pos.x, a.pos.y - s.hero.pos.y) <= tuning.ropeMax).length : 0;
+      const safe = target !== null && target !== undefined && (s.hero.vel.y < 0 || others === 0 || swingIsClear(target, { pos: s.hero.pos, vel: s.hero.vel }, s.anchors, provableObstacles(s.obstacles), tuning, s.env, s.zones));
       if (target && climbing && !rising && safe && plannedPress < 0) plannedPress = s.step + reactionSteps;
       if (plannedPress >= 0 && s.step >= plannedPress) {
         plannedPress = -1;

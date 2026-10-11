@@ -15,7 +15,7 @@ Retour du propriétaire sur 0.11.0 : « tout fonctionne, mais les cassables ne s
 - **Sas (« sas »).** Un lanceur sous un mur dont le trou, décalé, est une porte : on tire quand elle est ouverte. Dès le palier 4, au niveau 18, scène `?scene=porte`.
 - **Cerceau (« cerceau »).** Un lanceur sous un mur dont le seul passage est un anneau, plus étroit que le trou d'un mur ordinaire et décalé : un tir de précision ; la sortie est de côté, au-dessus d'un pan, pour qu'on ne l'attrape pas à travers l'anneau avant de l'avoir passé. Dès le palier 2, au niveau 15, scène `?scene=anneau`.
 - **Tout anneau traversé accélère** (`ringBoost` 1,3) ; le centre rapporte et monte la série comme avant.
-- **Robots** : avant d'attraper, un robot regarde le balancement qui suivrait (comme le vérificateur) et attend si ce balancement heurte un mur ; avant de lâcher, il regarde une demi-seconde de vol et garde la corde si elle finit dans un mur.
+- **Robots** : avant d'attraper, un robot regarde le balancement qui suivrait (comme le vérificateur) et attend un meilleur moment si ce balancement heurte un mur, sauf s'il tombe ou si ce point est le dernier à portée (un choc vaut mieux qu'une sortie du monde) ; avant de lâcher, il regarde une demi-seconde de vol et garde la corde si elle finit dans un mur. La règle de 0.12.0 « porté vers le haut, ne pas rattraper un point sous soi » ne vaut plus que si une zone est devant lui (où son vol arrive en 0,4 s) : partout ailleurs, elle l'envoyait hors du monde (0.12.0 : trois robots raisonnables sur dix survivaient à soixante secondes ; 0.12.1 : dix sur dix, comme en 0.11.0).
 
 ### Corrigé
 

@@ -4,6 +4,7 @@ Thumbs.db
 
 # Dépendances et builds
 node_modules/
+node_modules
 dist/
 .vite/
 
