@@ -1,8 +1,9 @@
-import { doorGauge, doorState } from '../sim/cycles';
+import { doorGauge, doorState, switchGauge } from '../sim/cycles';
 import { cablePosition } from '../sim/events';
-import { ROTOR_THICKNESS } from '../sim/moving';
+import { ELASTIC_MAX_STRETCH, SWITCH_HOLD_SECONDS, railPoint } from '../sim/holds';
+import { ROTOR_THICKNESS, closerState, type CloserState } from '../sim/moving';
 import { RING_CENTRE_RATIO } from '../sim/rules';
-import type { Anchor, Obstacle, Ring, SimState } from '../sim/state';
+import type { Anchor, Obstacle, Rail, Ring, SimState } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
 import { noise } from './effects';
 import { mixColor } from './sling';
@@ -10,9 +11,10 @@ import { COLOR } from './style';
 
 /**
  * Habillages des obstacles à comportement (surface de rebond, paroi cassable,
- * porte, barre tournante), des anneaux de précision, de la roue motorisée et des
- * bandes de l'accordéon : ce qui, dans leur dessin, se calcule de l'état sans
- * PixiJS ni temps réel. Le
+ * porte, barre tournante, verrou d'interrupteur, passage qui se referme), des
+ * anneaux de précision, de la roue motorisée, des bandes de l'accordéon et des
+ * prises du lot 5 (aimant, rail, lien élastique) : ce qui, dans leur dessin, se
+ * calcule de l'état sans PixiJS ni temps réel. Le
  * rendu (`renderer.ts`) pose les formes, ce fichier dit quoi poser et dans quel
  * état.
  *
@@ -43,6 +45,17 @@ export const SKIN = {
   /** Masse d'une porte fermée, et le pâle de son contour tireté quand elle est ouverte et de sa jauge quand elle est fermée. */
   doorBody: mixColor(COLOR.obstacle, COLOR.door, 0.3),
   doorPale: mixColor(COLOR.door, COLOR.white, 0.45),
+  /** Verrou d'un interrupteur : la masse et le pâle de la porte, mais ambrés. */
+  lockBody: mixColor(COLOR.obstacle, COLOR.switch, 0.22),
+  lockPale: mixColor(COLOR.switch, COLOR.white, 0.45),
+  /** L'aimant tenu (le noyau s'allume), l'interrupteur actif, le cœur d'un rail et le lien élastique tenu : leur teinte éclaircie vers le blanc. */
+  magnetHot: mixColor(COLOR.magnet, COLOR.white, 0.55),
+  switchHot: mixColor(COLOR.switch, COLOR.white, 0.55),
+  railCore: mixColor(COLOR.rail, COLOR.white, 0.5),
+  elasticHot: mixColor(COLOR.elastic, COLOR.white, 0.55),
+  /** Panneau d'un passage qui se referme : la masse d'un solide, un peu plus chaude, et la teinte de son avertissement. */
+  closerBody: mixColor(COLOR.obstacle, COLOR.obstacleEdge, 0.2),
+  closerPale: mixColor(COLOR.obstacleEdge, COLOR.white, 0.45),
   /** Anneau traversé en cours : le cœur s'éclaircit vers le blanc. */
   ringHot: mixColor(COLOR.ring, COLOR.white, 0.55),
   /** Masse de la barre d'un tournant : sombre, avec un soupçon du rouge-magenta du danger, pour qu'une barre qui bouge ne se confonde pas avec un mur. */
@@ -305,4 +318,186 @@ export function accordionBands(anchors: readonly Anchor[], step: number, tuning:
 /** Combien de chevrons le panneau porte : un tous les `BAND_CHEVRON_SPACING` mètres, un au moins. Le chevron `k` est au milieu de la `k`-ième tranche. */
 export function bandChevronCount(band: AccordionBand): number {
   return Math.max(1, Math.round((band.top - band.bottom) / BAND_CHEVRON_SPACING));
+}
+
+/**
+ * Les prises du lot 5 (version 0.15.0). Tout se lit de l'état de la simulation ou, pour ce qui n'est qu'un mouvement du décor (les anneaux
+ * d'un champ qui convergent), d'une phase que le rendu tire de l'horloge des effets.
+ *
+ * L'aimant : des anneaux de champ concentriques autour du noyau, jusqu'au rayon d'action. Au repos, `MAGNET_RING_COUNT` anneaux fixes, également
+ * répartis ; tenu, ils convergent vers le noyau : chacun naît au bord, glisse vers le centre et s'efface à l'approche (`magnetRing`).
+ */
+export const MAGNET_RING_COUNT = 3;
+/** Les anneaux d'un champ tenu font ce nombre de pas d'un anneau à l'autre par seconde de l'horloge des effets : l'un traverse tout le champ en deux secondes environ. */
+export const MAGNET_RINGS_PER_SECOND = 1.5;
+
+/** Un anneau de champ : sa part du rayon d'action (0 au noyau, 1 au bord) et son opacité relative (de 0 à 1). */
+export interface MagnetRing {
+  readonly ratio: number;
+  readonly alpha: number;
+}
+
+/**
+ * L'anneau `k` (de 0 à `count - 1`) d'un champ d'aimant. Au repos (`held` faux), les anneaux sont fixes, entre le noyau et le bord, tous
+ * également visibles. Tenu, `phase` (de 0 à 1, qui avance sans cesse) les fait converger : l'anneau naît au bord, invisible, s'éclaire à
+ * mi-chemin et s'efface au noyau, et le suivant arrive derrière lui.
+ */
+export function magnetRing(k: number, count: number, phase: number, held: boolean): MagnetRing {
+  if (!held) return { ratio: (k + 1) / (count + 1), alpha: 1 };
+  const along = (k + phase) / count;
+  return { ratio: 1 - along, alpha: Math.sin(Math.PI * along) };
+}
+
+/** La phase des anneaux d'un champ tenu à cet instant de l'horloge des effets : de 0 (inclus) à 1 (exclu), elle revient à 0 `MAGNET_RINGS_PER_SECOND` fois par seconde. */
+export function magnetPhase(clock: number): number {
+  const turns = clock * MAGNET_RINGS_PER_SECOND;
+  return turns - Math.floor(turns);
+}
+
+/**
+ * Le verrou d'une prise interrupteur : une porte que l'on dessine comme les autres, mais ambrée. Ouverte tant que la prise est tenue, puis
+ * pendant `SWITCH_HOLD_SECONDS` : la jauge (`switchGauge`) se remplit pendant ce délai et la porte avertit pendant ses `SWITCH_WARNING_SECONDS`
+ * dernières secondes, comme une porte à cycle. Fermée ensuite, ou laissant passer le personnage qu'elle a surpris dedans.
+ */
+export const SWITCH_WARNING_SECONDS = 1;
+
+export interface LockLook extends DoorLook {
+  /** Vrai tant que le personnage tient la prise qui commande le verrou : il est franchement ouvert, rien ne s'écoule. */
+  readonly held: boolean;
+}
+
+/** Ce qu'il faut dessiner d'un verrou à ce pas ; `held` : la prise qui le commande est tenue en ce moment. */
+export function lockLook(box: Pick<Obstacle, 'id' | 'switchedBy' | 'openUntilStep'>, state: Pick<SimState, 'step' | 'doorsInside' | 'rope'>, tuning: Tuning): LockLook {
+  const held = box.switchedBy !== undefined && state.rope?.anchorId === box.switchedBy;
+  const open = box.openUntilStep !== undefined && state.step < box.openUntilStep;
+  if (!open) return { phase: state.doorsInside.includes(box.id) ? 'passage' : 'fermee', gauge: 0, beat: 1, held: false };
+  const gauge = switchGauge(box, state.step, tuning, SWITCH_HOLD_SECONDS);
+  const remaining = ((box.openUntilStep ?? 0) - state.step) * tuning.stepSeconds;
+  if (held || remaining > SWITCH_WARNING_SECONDS) return { phase: 'ouverte', gauge, beat: 1, held };
+  return { phase: 'avertit', gauge, beat: stepWave(state.step, tuning.stepSeconds, DOOR_BLINK_HZ), held: false };
+}
+
+/**
+ * Le point où le segment qui part du centre (`cx`, `cy`) d'un rectangle de demi-largeur `halfWidth` et de demi-hauteur `halfHeight`, vers (`tx`, `ty`), sort
+ * du rectangle : là où le trait qui relie une prise à son verrou touche le verrou, sans le traverser. Le centre lui-même si la cible y est.
+ */
+export function rectEdgePoint(cx: number, cy: number, halfWidth: number, halfHeight: number, tx: number, ty: number): { readonly x: number; readonly y: number } {
+  const dx = tx - cx;
+  const dy = ty - cy;
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+  // La part du segment parcourue avant de sortir par un côté vertical, puis par un côté horizontal : la plus courte des deux.
+  const alongX = dx === 0 ? Infinity : halfWidth / Math.abs(dx);
+  const alongY = dy === 0 ? Infinity : halfHeight / Math.abs(dy);
+  const k = Math.min(1, alongX, alongY);
+  return { x: cx + dx * k, y: cy + dy * k };
+}
+
+/**
+ * Le rail de lancement : un arc en dôme tracé sur `RAIL_SEGMENTS` segments (soit `RAIL_SEGMENTS + 1` positions réparties d'un bout à l'autre), et
+ * posé sur la prise. Les positions sont celles de la simulation (`railPoint`), en mètres relatifs à la prise (x vers la droite, y vers le haut),
+ * à plat (x, y, x, y...) ; l'arc ne dépend que du rail, il se calcule une fois par rail et se garde.
+ */
+export const RAIL_SEGMENTS = 14;
+
+const RAIL_ARCS = new WeakMap<Rail, readonly number[]>();
+const RAIL_ORIGIN = { x: 0, y: 0 };
+
+export function railArc(rail: Rail): readonly number[] {
+  let arc = RAIL_ARCS.get(rail);
+  if (!arc) {
+    const points: number[] = [];
+    for (let i = 0; i <= RAIL_SEGMENTS; i += 1) {
+      const p = railPoint(RAIL_ORIGIN, rail, i / RAIL_SEGMENTS);
+      points.push(p.x, p.y);
+    }
+    arc = points;
+    RAIL_ARCS.set(rail, arc);
+  }
+  return arc;
+}
+
+/** Les deux ailes d'une pointe de flèche de taille `size`, dans le repère de l'écran, relatives à la pointe, pour une flèche qui va dans la direction (`dx`, `dy`) : (x, y, x, y). Rien si la direction est nulle. */
+export function arrowWings(dx: number, dy: number, size: number): readonly [number, number, number, number] {
+  const length = Math.hypot(dx, dy);
+  if (length < 1e-9) return [0, 0, 0, 0];
+  const ux = dx / length;
+  const uy = dy / length;
+  // Chaque aile revient en arrière et s'écarte de côté d'une demi-taille.
+  const back = size;
+  const side = size / 2;
+  return [-ux * back - uy * side, -uy * back + ux * side, -ux * back + uy * side, -uy * back - ux * side];
+}
+
+/**
+ * Le lien élastique tenu. L'étirement (`elasticStretch`, de 0 à `ELASTIC_MAX_STRETCH`) se lit sur le trait : plus il est étiré, plus il est épais,
+ * clair et lumineux, jusqu'au blanc à l'étirement maximal, où la butée le retient. Mou (le personnage plus près de la prise que la longueur de
+ * repos), c'est un trait fin et lâche, qui ondule d'autant plus qu'il pend. Épaisseurs en pixels.
+ */
+export const ELASTIC_WIDTH_MIN = 1.5;
+export const ELASTIC_WIDTH_MAX = 5.5;
+export const ELASTIC_GLOW_MIN = 0.6;
+export const ELASTIC_GLOW_MAX = 1.8;
+/** Un lien mou ondule d'au plus ce nombre de pixels, à raison de ce nombre de pixels par mètre de mou ; son ondulation a ce nombre de creux et de bosses, et bat à ce rythme (Hz de la simulation). */
+export const ELASTIC_WIGGLE_MAX = 9;
+export const ELASTIC_WIGGLE_PER_SLACK = 0.5;
+export const ELASTIC_WAVES = 3;
+export const ELASTIC_WIGGLE_HZ = 2;
+
+export interface ElasticLook {
+  /** La part de l'étirement maximal atteinte, de 0 à 1. */
+  readonly ratio: number;
+  readonly width: number;
+  readonly color: number;
+  /** Force du halo. */
+  readonly glow: number;
+  /** Amplitude de l'ondulation, en pixels : 0 dès que le lien est tendu. */
+  readonly wiggle: number;
+}
+
+/** Ce qu'il faut dessiner d'un lien élastique étiré de `stretch` mètres, ou mou de `slack` mètres (l'un des deux est nul), à `scale` pixels par mètre. */
+export function elasticLook(stretch: number, slack: number, scale: number): ElasticLook {
+  const ratio = Math.min(1, Math.max(0, stretch / ELASTIC_MAX_STRETCH));
+  return {
+    ratio,
+    width: ELASTIC_WIDTH_MIN + (ELASTIC_WIDTH_MAX - ELASTIC_WIDTH_MIN) * ratio,
+    color: mixColor(COLOR.elastic, COLOR.white, ratio),
+    glow: ELASTIC_GLOW_MIN + (ELASTIC_GLOW_MAX - ELASTIC_GLOW_MIN) * ratio,
+    wiggle: Math.min(ELASTIC_WIGGLE_MAX, Math.max(0, slack) * scale * ELASTIC_WIGGLE_PER_SLACK),
+  };
+}
+
+/** Le décalage de côté, en pixels, d'un lien mou au point `u` de sa longueur (0 à la prise, 1 au personnage) : nul aux deux bouts, une onde entre. `phase` en radians, qui avance avec le pas de simulation. */
+export function strandOffset(u: number, amplitude: number, phase: number): number {
+  return amplitude * Math.sin(Math.PI * u) * Math.sin(2 * Math.PI * ELASTIC_WAVES * u + phase);
+}
+
+/** La phase de l'ondulation d'un lien mou au pas `step`. */
+export function strandPhase(step: number, stepSeconds: number): number {
+  return 2 * Math.PI * ELASTIC_WIGGLE_HZ * step * stepSeconds;
+}
+
+/**
+ * Le passage qui se referme (O6) : ses deux panneaux de sortie se dessinent là où ils sont (`obstacleAt`), comme des panneaux qui glissent, et
+ * un liseré d'avertissement dit où en est la séquence. Armé, un liseré discret ; il se ferme, le liseré pulse et une jauge se remplit ; fermé,
+ * la masse est pleine ; il rouvre, la jauge se vide.
+ */
+export const CLOSER_BLINK_HZ = 4;
+
+export interface CloserLook {
+  readonly phase: CloserState;
+  /** De 0 à 1 : la part de la fermeture faite (elle croît en se fermant) ou, en rouvrant, ce qu'il reste à rouvrir (elle décroît). 0 armé, 1 fermé. */
+  readonly gauge: number;
+  /** Clignotement de 0 à 1 pendant la fermeture, 1 ailleurs (le liseré est alors franc). */
+  readonly beat: number;
+}
+
+/** Ce qu'il faut dessiner d'un panneau de passage qui se referme à ce pas. */
+export function closerLook(box: Obstacle, step: number, tuning: Tuning): CloserLook {
+  const phase = closerState(box, step, tuning);
+  const closer = box.closer;
+  if (!closer || box.triggeredStep === undefined || phase === 'arme') return { phase: 'arme', gauge: 0, beat: 1 };
+  const elapsed = (step - box.triggeredStep) * tuning.stepSeconds;
+  if (phase === 'se ferme') return { phase, gauge: Math.min(1, elapsed / closer.closeSeconds), beat: stepWave(step, tuning.stepSeconds, CLOSER_BLINK_HZ) };
+  if (phase === 'ferme') return { phase, gauge: 1, beat: 1 };
+  return { phase, gauge: Math.max(0, 1 - (elapsed - closer.closeSeconds - closer.shutSeconds) / closer.closeSeconds), beat: 1 };
 }

@@ -1,7 +1,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { PERFECT_PITCH_STEPS, SAMPLES, browserSfx, cueFor, perfectPitch, silentSfx, type SoundId } from '../src/audio/sfx';
+import { ESCAPE_PITCH, PERFECT_PITCH_STEPS, SAMPLES, browserSfx, cueFor, perfectPitch, silentSfx, type SoundId } from '../src/audio/sfx';
 import type { RuleEvent } from '../src/sim/state';
 
 const release = (parts: Partial<Extract<RuleEvent, { type: 'release' }>>): RuleEvent => ({ type: 'release', perfect: false, combo: 0, held: 0.5, kind: 'normal', forced: false, ...parts });
@@ -25,6 +25,9 @@ describe('les bruitages', () => {
     expect(cueFor({ type: 'death', height: 10, cause: 'fall' })).toEqual({ id: 'fall', pitch: 1 });
     expect(cueFor({ type: 'finish', height: 120 })).toEqual({ id: 'finish', pitch: 1 });
     expect(cueFor({ type: 'tier', tier: 2, name: 'x' })).toEqual({ id: 'tier', pitch: 1 });
+    // Un rail lance comme un lanceur ; un passage qui se referme sonne grave, avec l'échantillon du rebond.
+    expect(cueFor(release({ kind: 'rail' }))).toEqual({ id: 'launch', pitch: 1 });
+    expect(cueFor({ type: 'escape', obstacleId: 4 })).toEqual({ id: 'bounce', pitch: ESCAPE_PITCH });
   });
 
   it('la série monte la note du parfait d\'un demi-ton par parfait, jusqu\'à huit', () => {

@@ -47,6 +47,11 @@ export const COLOR = {
   launcher: 0x3dffc0,
   /** Roue motorisée : tube bleu sarcelle, entre le cyan du propulseur et le vert d'eau du lanceur sans être ni l'un ni l'autre. */
   wheel: 0x1fb6c8,
+  /** Lot 5 : l'aimant (violet magnétique), la prise interrupteur (ambre), le rail de lancement (cuivre clair), le lien élastique (vert tendre). */
+  magnet: 0xb04cff,
+  switch: 0xffb13b,
+  rail: 0xf0a070,
+  elastic: 0x7ef0a0,
   /** Prise électrique : tube orange au calme, rouge vif quand elle est chargée (ne pas toucher). */
   electric: 0xffb547,
   electricCharged: 0xff4d4d,

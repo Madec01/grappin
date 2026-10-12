@@ -11,16 +11,24 @@ import { newMemory, pilotFrame, sceneWorld } from '../scripts/pilote';
  * graine d'URL est respectée, un pilote automatique grimpe sans erreur, la
  * progression (expérience, sauvegarde, talismans, boutons, niveaux et étoiles)
  * tient d'une partie et d'un rechargement à l'autre, la bascule du niveau 5
- * se joue sans erreur, la liste des niveaux se tourne en deux pages, le
+ * se joue sans erreur, la liste des niveaux se tourne en trois pages, le
  * lanceur se tire au doigt (souris et toucher) puis se franchit au pilote
  * automatique, la pause fige la partie et se reprend sans lâcher la corde, les
  * réglages du titre (Sons, Départ) survivent au rechargement, la fenêtre de
  * lâcher s'ouvre puis se referme pendant un balancement, et le premier conseil
  * du tutoriel apparaît à la première accroche, les quatre scènes de démonstration du lot 2 (le ricochet, le mur à percer, la porte, le cerceau)
  * se jouent et se dessinent sans erreur et le pilote y prouve la mécanique exigée (rebond, fracas, anneau traversé), les quatre scènes de zones (courant ascendant, dérive, fusée, poche de faible gravité) chargent leurs zones et voient le
- * pilote y entrer, les trois scènes de la fin du lot 2 (la roue motorisée, le tournant, la glissière) et les deux scènes de transformations du lot 3
- * (l'accordéon, le serpentin) se jouent au pilote sans erreur. Tout passe par `window.__grappin`.
+ * pilote y entrer, les trois scènes de la fin du lot 2 (la roue motorisée, le tournant, la glissière), les deux scènes de transformations du lot 3
+ * (l'accordéon, le serpentin) et les cinq scènes du lot 5 (l'aimant, l'interrupteur, le rail, le lien élastique, le passage qui se referme) se jouent au pilote
+ * sans erreur, chacune avec la preuve de sa mécanique. Tout passe par `window.__grappin`.
  */
+
+/**
+ * Les tests de ce fichier sont indépendants (chacun sa page, son contexte, son profil) : ils se répartissent sur les deux processus de Playwright, au lieu de
+ * se suivre un à un. La suite tient ainsi sous les quatre minutes ; mise bout à bout, elle les dépasse. Les scènes jouent sur une horloge figée, que rien ne
+ * presse : deux pages qui se partagent le processeur ne changent pas leur résultat.
+ */
+test.describe.configure({ mode: 'parallel' });
 
 const CENTER = { x: 195, y: 422 };
 
@@ -738,6 +746,208 @@ test('scène « serpentin » : le monde s\'incline (|gravityX| ≥ 0,6 pendant l
   expect(errors).toEqual([]);
 });
 
+/**
+ * Les cinq scènes du lot 5 (0.15.0), jouées par le pilote des scènes sur l'horloge figée de la page, sans erreur de console : chacune montre sa prise ou son
+ * obstacle, et le pilote dépasse 26 m.
+ *  - l'aimant (`aimant`) : le pilote tient l'aimant (`heldKind`), le champ le rapproche de son noyau, puis il lâche en montant ;
+ *  - l'interrupteur (`interrupteur`) : le verrou est fermé au départ ; tenue, la prise l'ouvre (`switchOpen`), et il reste ouvert un moment après le lâcher
+ *    (quatre secondes), puis se referme. Le robot ignore cette prise (le verrou ne gêne pas sa chaîne) : le pilote la veut (`hold`) ;
+ *  - le rail (`rail`) : le pilote tient le rail sans tirer ; un doigt glisse de côté (au toucher, comme au lanceur), `pullX` change et le personnage suit
+ *    l'arc ; levé à la position que le vérificateur a prouvée, le lancer part, et le pilote dépasse 26 m ;
+ *  - le lien élastique (`elastique`) : le pilote tient le lien, qui le rappelle ;
+ *  - le passage qui se referme (`evasion`) : dès que le personnage entre dans le couloir, `closing` devient vrai, et le pilote en sort par le haut avant la
+ *    fermeture.
+ */
+const LOT5_HEIGHT = 26;
+
+test('scène « aimant » : le pilote tient l\'aimant (heldKind), qui le rapproche de son noyau, puis il dépasse 26 m', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'aimant');
+  const world = sceneWorld('aimant', 5);
+  const core = world.anchors.find((a) => a.kind === 'aimant')!;
+  expect((await page.evaluate(() => window.__grappin!.anchors())).filter((a) => a.kind === 'aimant')).toHaveLength(1);
+  const memory = newMemory();
+  const gaps: number[] = [];
+  let highest = 0;
+  for (let frame = 0; frame < 1500 && highest <= LOT5_HEIGHT; frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world });
+    expect(seen.screen).toBe('playing');
+    if (seen.heldKind === 'aimant') gaps.push(Math.hypot(seen.pos.x - core.pos.x, seen.pos.y - core.pos.y));
+    highest = Math.max(highest, seen.pos.y);
+  }
+  expect(gaps.length, 'images tenues à l\'aimant').toBeGreaterThan(0);
+  // Le champ attire : le personnage est plus près du noyau à la dernière image tenue qu'à la première.
+  expect(gaps.at(-1)!, 'distance au noyau en fin de tenue').toBeLessThan(gaps[0]! - 0.5);
+  expect(highest, 'hauteur atteinte').toBeGreaterThan(LOT5_HEIGHT);
+  for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
+  expect((await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
+test('scène « interrupteur » : le verrou est fermé au départ, ouvert tant que la prise est tenue et quatre secondes après, puis se referme ; le pilote dépasse 26 m', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'interrupteur');
+  const world = sceneWorld('interrupteur', 5);
+  const lever = world.anchors.find((a) => a.kind === 'interrupteur')!;
+  const locks = world.obstacles.filter((box) => box.switchedBy === lever.id);
+  expect(locks).toHaveLength(1);
+  expect(locks[0]!.kind).toBe('porte');
+  expect((await state(page)).switchOpen, 'verrou au départ').toBe(false);
+  const memory = newMemory();
+  let heldFrames = 0;
+  let openWhileHeld = 0;
+  let releasedAt = -1;
+  let openJustAfter = false;
+  let closedAt = -1;
+  let highest = 0;
+  for (let frame = 0; frame < 1500 && !(highest > LOT5_HEIGHT && closedAt >= 0); frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world, hold: lever.id });
+    expect(seen.screen).toBe('playing');
+    if (seen.heldKind === 'interrupteur') {
+      heldFrames += 1;
+      if (seen.switchOpen) openWhileHeld += 1;
+    } else if (heldFrames > 0 && releasedAt < 0) {
+      releasedAt = frame;
+      openJustAfter = seen.switchOpen;
+    } else if (releasedAt >= 0 && closedAt < 0 && !seen.switchOpen) closedAt = frame;
+    highest = Math.max(highest, seen.pos.y);
+  }
+  expect(heldFrames, 'images tenues à l\'interrupteur').toBeGreaterThan(0);
+  expect(openWhileHeld, 'images où le verrou est ouvert pendant la tenue').toBe(heldFrames);
+  expect(openJustAfter, 'verrou juste après le lâcher').toBe(true);
+  // Le verrou se referme quatre secondes après le lâcher (à une image ou deux près : l\'horloge de la page n\'est pas celle des pas).
+  expect(closedAt, 'le verrou se referme').toBeGreaterThan(releasedAt);
+  expect((closedAt - releasedAt) * FRAME_MS, 'délai avant la fermeture (ms)').toBeGreaterThan(3500);
+  expect((closedAt - releasedAt) * FRAME_MS, 'délai avant la fermeture (ms)').toBeLessThan(4600);
+  expect(highest, 'hauteur atteinte').toBeGreaterThan(LOT5_HEIGHT);
+  for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
+  expect((await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
+test('scène « rail » : un doigt glissé de côté change la position (pullX) et le personnage suit l\'arc ; levé, il lance ; le pilote dépasse 26 m', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'rail');
+  const world = sceneWorld('rail', 5);
+  const rail = world.anchors.find((a) => a.kind === 'rail')!;
+  const memory = newMemory();
+  let frame = 0;
+  let seen = await state(page);
+  // Le pilote monte jusqu'au rail et le tient sans tirer : le doigt, lui, choisira la position.
+  for (; frame < 700 && seen.heldKind !== 'rail'; frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    seen = await pilotFrame(page, memory, frame * FRAME_MS, { world, launchNotBefore: Infinity });
+    expect(seen.screen).toBe('playing');
+  }
+  expect(seen.heldKind).toBe('rail');
+  for (let i = 0; i < 10; i += 1) await page.clock.runFor(FRAME_MS);
+  seen = await state(page);
+  expect(seen).toMatchObject({ attached: true, heldKind: 'rail', pullX: 0 });
+  // Posé au milieu de l'arc, au sommet : le milieu de la prise, un peu au-dessus.
+  expect(seen.pos.x).toBeCloseTo(rail.pos.x, 2);
+  expect(seen.pos.y).toBeGreaterThan(rail.pos.y);
+  const proved = await page.evaluate(() => window.__grappin!.launchAim());
+  expect(proved, 'la position prouvée par le vérificateur').not.toBeNull();
+  expect(Math.abs(proved!.x), 'la position prouvée n\'est pas le milieu').toBeGreaterThan(0.1);
+
+  // Le doigt se pose, puis glisse de côté (au toucher, par les événements du protocole, comme au lanceur).
+  const finger = await draggers[0]!.hold(page, { x: 195, y: 650 });
+  const slide = async (dx: number): Promise<number> => {
+    await finger.drag({ x: 195 + dx, y: 650 });
+    for (let i = 0; i < 3; i += 1) await page.clock.runFor(FRAME_MS);
+    return (await state(page)).pullX;
+  };
+  const perPixel = (await slide(40)) / 40;
+  expect(perPixel, 'traction par pixel').toBeGreaterThan(0);
+  const right = await state(page);
+  expect(right.pullX).toBeGreaterThan(0.5);
+  expect(right.pos.x, 'le personnage glisse vers le bout droit de l\'arc').toBeGreaterThan(rail.pos.x + 0.3);
+  const leftPull = await slide(-40);
+  expect(leftPull).toBeLessThan(-0.5);
+  expect((await state(page)).pos.x, 'puis vers le bout gauche').toBeLessThan(rail.pos.x - 0.3);
+  // Au bout de l'arc que le vérificateur a prouvé : la position suit le doigt, à une demi-image près.
+  const proven = await slide(proved!.x / perPixel);
+  expect(proven).toBeCloseTo(proved!.x, 1);
+
+  // Levé, le doigt lance : le personnage part dans la direction de cette position de l'arc.
+  await finger.lift();
+  const launched = await state(page);
+  expect(launched.attached).toBe(false);
+  expect(launched.heldKind).toBeNull();
+  expect(launched.vel.y).toBeGreaterThan(6);
+  expect(Math.sign(launched.vel.x)).toBe(Math.sign(proved!.x));
+  memory.launched = true;
+  memory.releasedAt = frame * FRAME_MS;
+  memory.releasedPos = { x: rail.pos.x, y: rail.pos.y };
+
+  let highest = launched.pos.y;
+  for (; frame < 1700 && highest <= LOT5_HEIGHT; frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    seen = await pilotFrame(page, memory, frame * FRAME_MS, { world });
+    expect(seen.screen).toBe('playing');
+    highest = Math.max(highest, seen.pos.y);
+  }
+  expect(highest, 'hauteur atteinte').toBeGreaterThan(LOT5_HEIGHT);
+  for (let i = 0; i < 20; i += 1) await page.clock.runFor(FRAME_MS);
+  expect((await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
+test('scène « elastique » : le pilote tient le lien (heldKind), qui le rappelle, puis il dépasse 26 m', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'elastique');
+  const world = sceneWorld('elastique', 5);
+  expect(world.anchors.filter((a) => a.kind === 'elastique')).toHaveLength(1);
+  const memory = newMemory();
+  let heldFrames = 0;
+  let highest = 0;
+  for (let frame = 0; frame < 1500 && highest <= LOT5_HEIGHT; frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world });
+    expect(seen.screen).toBe('playing');
+    if (seen.heldKind === 'elastique') heldFrames += 1;
+    highest = Math.max(highest, seen.pos.y);
+  }
+  // Le lien rebondit : il se tient au moins une demi-seconde avant que le vol attrape la suite.
+  expect(heldFrames * FRAME_MS, 'tenue au lien (ms)').toBeGreaterThan(500);
+  expect(highest, 'hauteur atteinte').toBeGreaterThan(LOT5_HEIGHT);
+  for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
+  expect((await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
+test('scène « evasion » : le passage se referme dès que le personnage entre dans le couloir (state().closing), et le pilote en sort par le haut puis dépasse 26 m', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'evasion');
+  const world = sceneWorld('evasion', 5);
+  const panels = world.obstacles.filter((box) => box.closer);
+  expect(panels).toHaveLength(2);
+  const entry = panels[0]!.closer!.triggerY;
+  const exit = Math.max(...panels.map((box) => box.y1));
+  expect(await state(page)).toMatchObject({ closing: false, triggered: [] });
+  const memory = newMemory();
+  let closingAt = -1;
+  let highest = 0;
+  for (let frame = 0; frame < 1500 && highest <= LOT5_HEIGHT; frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world });
+    expect(seen.screen).toBe('playing');
+    // Le couloir ne se referme qu'une fois le personnage entré : jamais avant la ligne qui le déclenche.
+    if (seen.closing && closingAt < 0) closingAt = seen.pos.y;
+    if (closingAt < 0) expect(seen.pos.y, 'le passage se referme avant l\'entrée').toBeLessThanOrEqual(entry + 1);
+    highest = Math.max(highest, seen.pos.y);
+  }
+  expect(closingAt, 'hauteur où le passage se referme').toBeGreaterThanOrEqual(entry);
+  expect(closingAt).toBeLessThan(exit);
+  expect((await state(page)).triggered, 'les deux panneaux sont déclenchés ensemble').toHaveLength(2);
+  expect(highest, 'hauteur atteinte').toBeGreaterThan(LOT5_HEIGHT);
+  for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
+  expect((await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
 test('progression : une partie rapporte de l\'expérience, le profil survit au rechargement, un talisman s\'équipe', async ({ page }) => {
   const errors = watchErrors(page);
   // Brume rapide : sans personne pour jouer, elle finit la partie en quelques secondes.
@@ -1010,28 +1220,40 @@ test('la bascule du niveau 5 se joue sans erreur de console : la gravité tourne
   expect(errors).toEqual([]);
 });
 
-test('liste des niveaux : deux pages de dix, « Niveaux 11 à 20 » puis « Niveaux 1 à 10 », et un niveau de la seconde page se lance', async ({ page }) => {
+test('liste des niveaux : trois pages (dix, dix, deux), « suite » et « precedents » les tournent, et un niveau de la dernière page se lance', async ({ page }) => {
   const errors = watchErrors(page);
   await open(page, '/');
   await page.evaluate(() => window.__grappin!.resetProfile());
   await page.evaluate(() => window.__grappin!.unlockAll());
+  expect(LEVELS).toHaveLength(22);
 
-  // Tous les niveaux sont ouverts : la liste s'ouvre sur la page du niveau à jouer, le dernier, donc la seconde.
+  /** Les lignes de niveau des niveaux `from` à `to`. */
+  const rows = (from: number, to: number): string[] => Array.from({ length: to - from + 1 }, (_, i) => `niveau-${from + i}`);
+  const first = rows(1, 10);
+  const second = rows(11, 20);
+  const third = rows(21, 22);
+  const shown = async (): Promise<string[]> => (await buttons(page)).map((button) => button.id);
+
+  // Tous les niveaux sont ouverts : la liste s'ouvre sur la page du niveau à jouer, le dernier, donc la troisième (« Niveaux 21 à 22 »).
   await tapButton(page, 'levels');
   await expect.poll(async () => (await state(page)).screen).toBe('levels');
-  const second = Array.from({ length: 10 }, (_, i) => `niveau-${i + 11}`);
-  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual([...second, 'back', 'precedents']);
+  await expect.poll(shown).toEqual([...third, 'back', 'precedents']);
 
-  // La page précédente, puis la suivante : les dix premiers niveaux, puis les dix derniers.
+  // « precedents » ramène à la page d'avant, deux fois ; la première n'a plus que « suite ».
   await tapButton(page, 'precedents');
-  const first = Array.from({ length: 10 }, (_, i) => `niveau-${i + 1}`);
-  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual([...first, 'back', 'suite']);
-  await tapButton(page, 'suite');
-  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual([...second, 'back', 'precedents']);
+  await expect.poll(shown).toEqual([...second, 'back', 'precedents', 'suite']);
+  await tapButton(page, 'precedents');
+  await expect.poll(shown).toEqual([...first, 'back', 'suite']);
 
-  await tapButton(page, 'niveau-14');
+  // « suite » avance, page par page, jusqu'à la dernière.
+  await tapButton(page, 'suite');
+  await expect.poll(shown).toEqual([...second, 'back', 'precedents', 'suite']);
+  await tapButton(page, 'suite');
+  await expect.poll(shown).toEqual([...third, 'back', 'precedents']);
+
+  await tapButton(page, 'niveau-21');
   await expect.poll(async () => (await state(page)).screen).toBe('playing');
-  expect(await state(page)).toMatchObject({ mode: 'level', levelId: 14, goal: goalOf(14) });
+  expect(await state(page)).toMatchObject({ mode: 'level', levelId: 21, goal: goalOf(21) });
   expect(errors).toEqual([]);
 });
 

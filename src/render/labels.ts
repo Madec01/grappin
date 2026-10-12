@@ -133,6 +133,9 @@ export interface Announcement {
   readonly detail: string | null;
 }
 
+/** L'annonce d'un passage qui se referme (O6), dite quand le personnage y entre : la sortie va se fermer. */
+export const ESCAPE_ANNOUNCEMENT: Announcement = { title: 'Le passage se referme !', detail: 'Monte avant qu\'il soit clos' };
+
 /** Annonce du début des événements, hors le vent, dont la phrase dépend du côté. */
 const STARTS: Record<Exclude<EventKind, 'vent'>, Announcement> = {
   bascule: { title: 'La bascule !', detail: 'Le niveau tourne' },

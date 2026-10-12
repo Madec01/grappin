@@ -5,24 +5,52 @@ import { SILENT_PULSE, type Pulse } from '../audio/rhythm';
 import type { Vec2 } from '../core/math/vec2';
 import type { LevelOutcome, Profile, RunOutcome } from '../meta/profile';
 import type { LevelResult } from '../meta/traversee';
+import { ELASTIC_MAX_STRETCH, MAGNET_CORE_RADIUS, SWITCH_HOLD_SECONDS, elasticStretch, railDirection, railParam } from '../sim/holds';
 import { PULL_MAX } from '../sim/launcher';
 import { obstacleAt, rotorEnds } from '../sim/moving';
 import { obstacleKind } from '../sim/obstacles';
 import { POCKET_RAMP, ZONE_RAMP, zoneAt } from '../sim/physics';
 import { RING_CENTRE_RATIO, WORLD_HALF_WIDTH, canSmash, multiplier } from '../sim/rules';
-import type { Anchor, AnchorKind, Obstacle, RuleEvent, SimState, Zone } from '../sim/state';
+import type { Anchor, AnchorKind, Obstacle, Rail, RuleEvent, SimState, Zone } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
 import { pauseRect, type ButtonId, type ButtonRect } from './buttons';
 import type { Camera, ViewBounds } from './camera';
 import { bandsInView, cityBand } from './city';
-import { electricState, type ElectricState } from '../sim/cycles';
+import { electricState, switchGauge, type ElectricState } from '../sim/cycles';
 import { fragileGauge, heldKind, inReleaseWindow, isDark, isOff, shadowPoints } from './cues';
 import { alertAlpha, bannerAlpha, boostStreaks, flashAlpha, flashRadius, flicker, floatAlpha, floatRise, pulse, sizzle, type Banner, type Effects, type Flash } from './effects';
 import { formatDecimal } from './format';
 import { neonCircle, neonDiscs, neonFill, neonLine, neonRects, neonStroke, type NeonStrokeStyle } from './neon';
 import { LAMP_COUNT, ambientHalo, cityLots, cityStroke, fogSheetAlpha, lampColor, lampOf, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow, type HaloBoost } from './pulse';
 import { Screens, type OverlayView } from './screens';
-import { SKIN, WHEEL_RIM_RADIUS, WHEEL_SPOKES, accordionBands, bandChevronCount, crackPattern, doorLook, ringPhase, rotorWidths, springTeeth, wheelChevrons, wheelSpokes, type Crack, type DoorLook } from './skins';
+import {
+  MAGNET_RING_COUNT,
+  RAIL_SEGMENTS,
+  SKIN,
+  WHEEL_RIM_RADIUS,
+  WHEEL_SPOKES,
+  accordionBands,
+  arrowWings,
+  bandChevronCount,
+  closerLook,
+  crackPattern,
+  doorLook,
+  elasticLook,
+  lockLook,
+  magnetPhase,
+  magnetRing,
+  railArc,
+  rectEdgePoint,
+  ringPhase,
+  rotorWidths,
+  springTeeth,
+  strandOffset,
+  strandPhase,
+  wheelChevrons,
+  wheelSpokes,
+  type Crack,
+  type DoorLook,
+} from './skins';
 import { bandWidth, cupRadius, cupTips, mixColor, pullRatio, traceCup } from './sling';
 import { COLOR, GlowText, PALETTES, makeText, readSafeInset, starPoints, type Palette } from './style';
 import {
@@ -115,6 +143,16 @@ import {
  * Les bandes de l'accordéon (0.14.0) ne sont pas des câbles : les prises d'une bande (`anchor.band`) n'ont pas de rail tireté, mais un panneau
  * translucide d'un bleu électrique derrière elles, qui glisse avec elles. Un liseré net sur son bord intérieur et des chevrons qui pointent dans
  * le sens où la bande va à ce pas disent le mouvement même sur une image fixe (voir `skins.ts`).
+ *
+ * Les prises du lot 5 (0.15.0), chacune à sa teinte et à son signe (voir `skins.ts` pour ce qui se calcule de l'état). L'aimant : un noyau violet cerné de
+ * l'anneau où le personnage restera suspendu, et son champ, des anneaux très pâles jusqu'au rayon d'action, qui convergent vers le noyau tant qu'il est tenu ;
+ * à la place de la corde, un trait tireté de champ file du personnage au noyau. L'interrupteur : une prise ambre au signe de la mise en marche, reliée par un
+ * pointillé à son verrou, une porte ambre dont la jauge se remplit pendant les quatre secondes qui suivent le lâcher (elle avertit à la fin) ; un anneau autour de la
+ * prise se vide en même temps. Le rail : l'arc en dôme, ses butées et son repère du milieu ; tenu, un anneau-curseur autour du personnage, posé sur l'arc là où
+ * le doigt l'a mis, et la courte flèche de la direction du lancer. Le lien élastique : un anneau à nœud ; tenu, un trait que l'étirement épaissit et éclaircit
+ * jusqu'au blanc, qui ondule quand il est mou, entre deux cercles tiretés (la longueur de repos et la butée). Le passage qui se referme : ses panneaux sont des
+ * solides qui glissent, avec un liseré d'avertissement (chevrons, bord qui pulse, jauge de fermeture) et, avant l'entrée, un pointillé sur la ligne qui le
+ * déclenche. Tout se lit du pas de simulation, sauf le défilement des anneaux du champ et des tirets, qui suit l'horloge des effets.
  *
  * Deux aides du tutoriel se dessinent ici, discrètement. La fenêtre de lâcher
  * (`inReleaseWindow`) : tant que lâcher serait parfait, la corde et le halo du
@@ -314,11 +352,26 @@ const DOOR_DASH_WIDTH = 2;
 /** Le contour tireté n'a pas de halo (celui de chaque tiret se confondrait en une herse de lueurs) ; le trait de front de la jauge, un peu. */
 const DOOR_OPEN_HALO = 0.3;
 const DOOR_FILL_ALPHA = 0.3;
+/** Le verrou d'un interrupteur, plus petit qu'une porte et ambre sur fond sombre : sa jauge se remplit un cran plus fort. */
+const LOCK_FILL_ALPHA = 0.5;
 const DOOR_FRONT_WIDTH = 2;
 const DOOR_GHOST_ALPHA = 0.15;
 /** Porte fermée : la jauge d'ouverture est une barre claire, en retrait de ce nombre de pixels du contour, et son opacité. */
 const DOOR_BAR_INSET = 3;
 const DOOR_BAR_ALPHA = 0.5;
+/** Porte tenue ouverte par sa prise : la lueur qui l'entoure (et son opacité), plutôt que le halo de chaque tiret de son contour. */
+const DOOR_HELD_HALO = 0.7;
+const DOOR_HELD_ALPHA = 0.6;
+/** Les teintes d'une porte : son contour, le pâle de son tireté et de sa jauge, et sa masse fermée. La porte à cycle est indigo, le verrou d'un interrupteur ambre. */
+interface DoorTint {
+  readonly color: number;
+  readonly pale: number;
+  readonly body: number;
+  /** Opacité de la part remplie de la jauge d'une porte ouverte. */
+  readonly fill: number;
+}
+const DOOR_TINT: DoorTint = { color: COLOR.door, pale: SKIN.doorPale, body: SKIN.doorBody, fill: DOOR_FILL_ALPHA };
+const LOCK_TINT: DoorTint = { color: COLOR.switch, pale: SKIN.lockPale, body: SKIN.lockBody, fill: LOCK_FILL_ALPHA };
 /** Porte qui avertit : le clignotement fait varier ces grandeurs (plancher et plafond) du contour, de son halo et de la masse. */
 const DOOR_WARN_ALPHA_MIN = 0.55;
 const DOOR_WARN_HALO_MIN = 0.5;
@@ -558,6 +611,130 @@ const WHEEL_CHEVRON_RATIO = 1 / 6;
 const WHEEL_RIM_FLOOR = 24;
 const WHEEL_HELD_GLOW = 1.35;
 
+/** Le disque d'une prise du lot 5 active : son halo s'élargit de cette part. */
+const HOLD_ON_SPREAD = 1.3;
+
+/**
+ * Les prises du lot 5 (0.15.0), en pixels CSS. Chacune a son habillage et un second, plus lumineux, pour l'état actif (`on` : tenue, ou pour
+ * l'interrupteur dont la porte est ouverte).
+ *
+ * Aimant : le noyau est un disque violet cerné d'un anneau à `MAGNET_CORE_RADIUS` (où le personnage restera suspendu), et le champ est fait
+ * d'anneaux concentriques très pâles jusqu'au rayon d'action (la portée du grappin), bordé d'un cercle tireté. Visé, les anneaux s'éclairent d'un
+ * cran ; tenu, ils convergent vers le noyau (horloge des effets), le noyau s'allume, et un trait tireté de champ file du personnage au noyau, à
+ * la place de la corde.
+ */
+const MAGNET_RING_WIDTH = 1.5;
+const MAGNET_RING_ALPHA = 0.16;
+const MAGNET_RING_AIMED_ALPHA = 0.32;
+const MAGNET_RING_HELD_ALPHA = 0.75;
+const MAGNET_RING_HELD_HALO = 0.5;
+const MAGNET_LIMIT_DASHES = 40;
+const MAGNET_LIMIT_FILL = 0.45;
+const MAGNET_LIMIT_ALPHA = 0.3;
+const MAGNET_LIMIT_AIMED_ALPHA = 0.55;
+const MAGNET_CORE_RING_WIDTH = 1.5;
+const MAGNET_CORE_RING_ON_WIDTH = 2;
+const MAGNET_CORE_RING_GAP = 3;
+const MAGNET_CORE_RING_ALPHA = 0.7;
+const MAGNET_HELD_GLOW = 1.8;
+const MAGNET_PULL_DASH = 7;
+const MAGNET_PULL_GAP = 6;
+const MAGNET_PULL_WIDTH = 2;
+const MAGNET_PULL_HALO = 0.8;
+/** Les tirets du trait de champ avancent vers le noyau à cette vitesse, en pixels par seconde de l'horloge des effets. */
+const MAGNET_PULL_SPEED = 90;
+
+/**
+ * Interrupteur : un disque ambre dans un anneau ouvert par le haut, traversé d'un trait (le symbole de la mise en marche). Actif (la porte est
+ * ouverte), il s'allume. Un fin pointillé ambre le relie au verrou qu'il commande, et à son bout un petit nœud touche le verrou ; ouvert, le
+ * pointillé s'anime de la prise vers le verrou. Pendant le délai qui suit le lâcher, un anneau autour de la prise se vide comme le verrou se remplit.
+ */
+const SWITCH_GAP_HALF_ANGLE = 0.5;
+const SWITCH_MARK_WIDTH = 2;
+const SWITCH_MARK_ON_WIDTH = 2.5;
+const SWITCH_TICK_OUT = 3;
+const SWITCH_TICK_IN = 0.45;
+const SWITCH_ON_GLOW = 1.6;
+const SWITCH_LINK_WIDTH = 1.5;
+const SWITCH_LINK_ON_WIDTH = 2;
+const SWITCH_LINK_DASH = 5;
+const SWITCH_LINK_GAP = 5;
+const SWITCH_LINK_ALPHA = 0.4;
+const SWITCH_LINK_NODE_ALPHA = 0.6;
+const SWITCH_LINK_ON_ALPHA = 0.95;
+const SWITCH_LINK_ON_HALO = 0.6;
+const SWITCH_LINK_GAP_FROM_ANCHOR = 3;
+const SWITCH_LINK_SPEED = 60;
+const SWITCH_NODE_RADIUS = 3;
+const SWITCH_TIMER_GAP = 5;
+const SWITCH_TIMER_WIDTH = 3;
+const SWITCH_TIMER_TRACK_ALPHA = 0.25;
+
+/**
+ * Rail : l'arc en dôme (`RAIL_SEGMENTS` segments) posé sur sa prise, tenu par un pied et buté à ses deux bouts, un repère en son milieu. Tenu,
+ * le curseur est un anneau autour du personnage (posé sur l'arc à la position du doigt) d'où part une courte flèche, la direction du lancer.
+ */
+const RAIL_WIDTH = 3;
+const RAIL_ALPHA = 0.9;
+const RAIL_HELD_GLOW = 1.4;
+const RAIL_STEM_WIDTH = 1.5;
+const RAIL_STEM_ALPHA = 0.5;
+const RAIL_STOP_HALF = 6;
+const RAIL_STOP_WIDTH = 2;
+const RAIL_MID_HALF = 5;
+const RAIL_MID_WIDTH = 1.5;
+const RAIL_CURSOR_GAP = 5;
+const RAIL_CURSOR_WIDTH = 2;
+const RAIL_ARROW_GAP = 4;
+const RAIL_ARROW_LENGTH = 34;
+const RAIL_ARROW_HEAD = 9;
+const RAIL_ARROW_WIDTH = 2.5;
+
+/**
+ * Lien élastique : un disque vert tendre dans un anneau, avec un nœud sur l'anneau, en haut. Tenu, le lien est un trait dont l'épaisseur, la clarté
+ * et la lumière croissent avec l'étirement (voir `elasticLook`), jusqu'au blanc à l'étirement maximal ; deux cercles tiretés autour de la prise disent
+ * la longueur de repos et la butée, le second s'éclaire à mesure que le lien s'en approche.
+ */
+const ELASTIC_BEAD_RADIUS = 2.6;
+const ELASTIC_RING_WIDTH = 2;
+const ELASTIC_RING_ON_WIDTH = 2.5;
+const ELASTIC_HELD_GLOW = 1.5;
+const ELASTIC_STRAND_SEGMENTS = 14;
+const ELASTIC_LIMIT_WIDTH = 1.25;
+const ELASTIC_REST_DASHES = 36;
+const ELASTIC_REST_FILL = 0.3;
+const ELASTIC_REST_ALPHA = 0.14;
+const ELASTIC_MAX_DASHES = 48;
+const ELASTIC_MAX_FILL = 0.55;
+const ELASTIC_MAX_ALPHA_MIN = 0.16;
+const ELASTIC_MAX_ALPHA_MAX = 0.8;
+
+/**
+ * Passage qui se referme : ses panneaux sont des solides comme les autres, qui glissent (`obstacleAt`). Un liseré d'avertissement dit où en est la
+ * séquence. Armé : des chevrons pâles qui pointent le sens de la fermeture, un trait au bord qui avance, et sur la ligne qui déclenche, un pointillé
+ * en travers du couloir. Il se ferme : le liseré et les chevrons pulsent et une jauge se remplit dans le panneau. Fermé : la masse, plus chaude,
+ * et le bord franc. Il rouvre : la jauge se vide, les chevrons repartent en sens inverse.
+ */
+const CLOSER_EDGE_WIDTH = 3;
+const CLOSER_EDGE_OVERSHOOT = 3;
+const CLOSER_EDGE_ARMED_ALPHA = 0.5;
+const CLOSER_EDGE_HALO = 1.2;
+const CLOSER_CHEVRON_SPACING = 30;
+const CLOSER_CHEVRON_WIDTH = 2;
+const CLOSER_CHEVRON_DEPTH = 4;
+const CLOSER_CHEVRON_ARMED_ALPHA = 0.45;
+const CLOSER_CHEVRON_PULSE_MIN = 0.4;
+const CLOSER_CHEVRON_REOPEN_ALPHA = 0.8;
+const CLOSER_CHEVRON_MIN_HALF = 2;
+const CLOSER_CHEVRON_HALF_RATIO = 0.3;
+const CLOSER_GAUGE_INSET = 3;
+const CLOSER_GAUGE_ALPHA = 0.55;
+const CLOSER_BODY_ALPHA = 1;
+const CLOSER_GATE_DASH = 6;
+const CLOSER_GATE_GAP = 6;
+const CLOSER_GATE_WIDTH = 1.5;
+const CLOSER_GATE_ALPHA = 0.4;
+
 const DEATH_MESSAGES: Record<DeathCause, string> = {
   fog: "La brume t'a rattrapé",
   fall: 'Tombé dans le vide',
@@ -581,13 +758,17 @@ const SPECIES_TUBE: Record<Exclude<AnchorKind, 'normal'>, Tube> = {
   eclipse: { color: COLOR.eclipse, halo: COLOR.eclipse },
   lanceur: { color: COLOR.launcher, halo: COLOR.launcher },
   roue: { color: COLOR.wheel, halo: COLOR.wheel },
+  aimant: { color: COLOR.magnet, halo: COLOR.magnet },
+  interrupteur: { color: COLOR.switch, halo: COLOR.switch },
+  rail: { color: COLOR.rail, halo: COLOR.rail },
+  elastique: { color: COLOR.elastic, halo: COLOR.elastic },
 };
 const CHARGED_TUBE: Tube = { color: COLOR.electricCharged, halo: COLOR.electricCharged };
 /** Corde et halo du personnage dans la fenêtre de lâcher : la même teinte chaude sur toutes les ambiances. */
 const READY_TUBE: Tube = { color: COLOR.release, halo: COLOR.releaseHalo };
 /** Dans quel groupe tombe une prise électrique selon son cycle. */
 const ELECTRIC_GROUP: Record<ElectricState, 'calm' | 'warning' | 'charged'> = { calme: 'calm', avertit: 'warning', chargee: 'charged' };
-const KINDS: readonly AnchorKind[] = ['normal', 'fragile', 'booster', 'electrique', 'eclipse', 'lanceur', 'roue'];
+const KINDS: readonly AnchorKind[] = ['normal', 'fragile', 'booster', 'electrique', 'eclipse', 'lanceur', 'roue', 'aimant', 'interrupteur', 'rail', 'elastique'];
 
 /** Un point à l'écran, avec le numéro de l'accroche : le grésillement le décale d'une prise à l'autre. */
 interface Spot {
@@ -618,6 +799,8 @@ interface ObstacleLots {
   readonly smash: ScreenBox[];
   readonly door: ScreenBox[];
   readonly rotor: ScreenBox[];
+  /** Les panneaux de passage qui se referme : déjà rangés parmi les solides, ils reçoivent en plus leur liseré d'avertissement. */
+  readonly closer: ScreenBox[];
 }
 
 /** Un anneau de précision visible : son centre et son rayon, en pixels. */
@@ -638,6 +821,22 @@ interface LitGroups {
   readonly eclipse: Spot[];
   readonly lanceur: Spot[];
   readonly roue: WheelSpot[];
+  /** Les prises du lot 5, chacune au repos ou active. */
+  readonly holds: Record<HoldKind, HoldLot>;
+}
+
+/** Les prises du lot 5 : aimant, interrupteur, rail, lien élastique. */
+type HoldKind = 'aimant' | 'interrupteur' | 'rail' | 'elastique';
+const HOLD_KINDS: readonly HoldKind[] = ['aimant', 'interrupteur', 'rail', 'elastique'];
+
+function isHoldKind(kind: AnchorKind): kind is HoldKind {
+  return (HOLD_KINDS as readonly AnchorKind[]).includes(kind);
+}
+
+/** Les prises d'une espèce du lot 5 qui sont à l'image : au repos, et actives (`on` : tenue ; pour l'interrupteur, sa porte est ouverte). */
+interface HoldLot {
+  readonly idle: Spot[];
+  readonly on: Spot[];
 }
 
 /** Ce que le dessin des accroches a besoin de savoir de l'image : tailles en pixels et horloge des effets. */
@@ -716,15 +915,28 @@ function inView(view: ViewBounds, p: Vec2, margin: number): boolean {
   return p.x >= view.left - margin && p.x <= view.right + margin && p.y >= view.top - margin && p.y <= view.bottom + margin;
 }
 
-/** Ajoute au tracé une ligne pointillée de `from` à `to`, en tirets de `dash` pixels séparés de `gap`. */
-function dashedLine(g: Graphics, from: Vec2, to: Vec2, dash: number, gap: number): void {
+/**
+ * Ajoute au tracé une ligne pointillée de `from` à `to`, en tirets de `dash` pixels séparés de `gap`. Les tirets sont décalés de `shift` pixels
+ * vers `to` : un décalage qui croît fait défiler le pointillé dans ce sens.
+ */
+function dashedLine(g: Graphics, from: Vec2, to: Vec2, dash: number, gap: number, shift = 0): void {
   const length = Math.hypot(to.x - from.x, to.y - from.y);
   if (length === 0) return;
   const ux = (to.x - from.x) / length;
   const uy = (to.y - from.y) / length;
-  for (let start = 0; start < length; start += dash + gap) {
+  const period = dash + gap;
+  for (let start = (shift % period) - period; start < length; start += period) {
+    const begin = Math.max(0, start);
     const end = Math.min(start + dash, length);
-    g.moveTo(from.x + ux * start, from.y + uy * start).lineTo(from.x + ux * end, from.y + uy * end);
+    if (end > begin) g.moveTo(from.x + ux * begin, from.y + uy * begin).lineTo(from.x + ux * end, from.y + uy * end);
+  }
+}
+
+/** Ajoute au tracé un cercle de rayon `radius` autour de (`x`, `y`) fait de `dashes` tirets, chacun couvrant la part `fill` de son arc. */
+function dashedCircle(g: Graphics, x: number, y: number, radius: number, dashes: number, fill: number): void {
+  for (let dash = 0; dash < dashes; dash += 1) {
+    const start = (dash / dashes) * TAU;
+    g.moveTo(x + radius * Math.cos(start), y + radius * Math.sin(start)).arc(x, y, radius, start, start + (fill / dashes) * TAU);
   }
 }
 
@@ -748,6 +960,8 @@ export class Renderer {
   private readonly roof = new Graphics();
   private readonly bands = new Graphics();
   private readonly cables = new Graphics();
+  /** Sous les prises : le champ des aimants, le lien des interrupteurs à leur verrou, l'arc des rails. */
+  private readonly holds = new Graphics();
   private readonly anchors = new Graphics();
   private readonly targetRing = new Graphics();
   private readonly rope = new Graphics();
@@ -816,7 +1030,14 @@ export class Renderer {
 
   /** Réservoirs des obstacles et des anneaux visibles, vidés et remplis à chaque image : pas d'allocation par image une fois chauffés. */
   private readonly boxPool: ScreenBox[] = [];
-  private readonly obstacleLots: ObstacleLots = { solid: [], bounce: [], smash: [], door: [], rotor: [] };
+  private readonly obstacleLots: ObstacleLots = { solid: [], bounce: [], smash: [], door: [], rotor: [], closer: [] };
+  /** Les prises du lot 5 de l'image, vidées et remplies à chaque image. */
+  private readonly holdLots: Record<HoldKind, HoldLot> = {
+    aimant: { idle: [], on: [] },
+    interrupteur: { idle: [], on: [] },
+    rail: { idle: [], on: [] },
+    elastique: { idle: [], on: [] },
+  };
   private readonly ringPool: RingSpot[] = [];
   private readonly ringLots: Record<'libre' | 'traverse' | 'centre' | 'prise', RingSpot[]> = { libre: [], traverse: [], centre: [], prise: [] };
   /** Motif de fissures de chaque paroi cassable rencontrée, par numéro d'obstacle. */
@@ -881,6 +1102,7 @@ export class Renderer {
       this.roof,
       this.bands,
       this.cables,
+      this.holds,
       this.anchors,
       this.targetRing,
       this.rope,
@@ -968,6 +1190,7 @@ export class Renderer {
     this.drawRoof(state, camera);
     this.drawBands(state, camera, view, tuning);
     this.drawCables(state, camera);
+    this.drawHolds(state, camera, view, tuning, effects);
     this.drawAnchors(state, camera, view, tuning, effects);
     this.drawTargetRing(state, camera, tuning, effects);
     // La fenêtre de lâcher ne se montre que pendant la partie (et sous le voile de la pause, qui fige l'image) : jamais sur un écran de fin.
@@ -1558,6 +1781,7 @@ export class Renderer {
     lots.smash.length = 0;
     lots.door.length = 0;
     lots.rotor.length = 0;
+    lots.closer.length = 0;
     let slot = 0;
     for (const box of state.obstacles) {
       if (box.broken) continue;
@@ -1572,6 +1796,7 @@ export class Renderer {
       slot += 1;
       const kind = obstacleKind(box);
       (kind === 'rebond' ? lots.bounce : kind === 'cassable' ? lots.smash : kind === 'porte' ? lots.door : kind === 'tournant' ? lots.rotor : lots.solid).push(item);
+      if (box.closer) lots.closer.push(item);
     }
     if (slot === 0) return;
     this.paintSolids(g, lots.solid);
@@ -1579,6 +1804,7 @@ export class Renderer {
     this.paintSmashables(g, lots.smash, canSmash(state, tuning));
     this.paintDoors(g, lots.door, state, tuning);
     this.paintRotors(g, lots.rotor, camera, state, tuning);
+    this.paintClosers(g, lots.closer, camera, state, tuning);
   }
 
   /** Le `slot`-ième obstacle visible de l'image, tiré du réservoir (il grandit seulement si plus d'obstacles sont à l'écran en même temps). */
@@ -1716,10 +1942,18 @@ export class Renderer {
    * le personnage qu'elle a surpris dedans : masse fantôme, il en sort. Tout se lit du pas de simulation.
    */
   private paintDoors(g: Graphics, boxes: readonly ScreenBox[], state: SimState, tuning: Tuning): void {
-    for (const box of boxes) this.paintDoor(g, box, doorLook(box.source, state, tuning));
+    for (const box of boxes) {
+      // Le verrou d'une prise interrupteur se dessine comme une porte, mais ambrée, et lit son délai plutôt qu'un cycle.
+      if (box.source.switchedBy === undefined) this.paintDoor(g, box, doorLook(box.source, state, tuning), DOOR_TINT, false);
+      else {
+        const look = lockLook(box.source, state, tuning);
+        this.paintDoor(g, box, look, LOCK_TINT, look.held);
+      }
+    }
   }
 
-  private paintDoor(g: Graphics, box: ScreenBox, look: DoorLook): void {
+  /** `held` : la porte est franchement ouverte, tenue par sa prise ; un voile fantôme la remplit au lieu de la jauge du délai. */
+  private paintDoor(g: Graphics, box: ScreenBox, look: DoorLook, tint: DoorTint, held: boolean): void {
     const { x, y, width, height } = box;
     const horizontal = width >= height;
     // La part remplie d'une jauge de 0 à 1 : depuis la gauche d'une porte couchée, depuis le bas d'une porte debout.
@@ -1727,15 +1961,19 @@ export class Renderer {
       horizontal
         ? { x: x + inset, y: y + inset, width: (width - 2 * inset) * look.gauge, height: height - 2 * inset }
         : { x: x + inset, y: y + inset + (height - 2 * inset) * (1 - look.gauge), width: width - 2 * inset, height: (height - 2 * inset) * look.gauge };
-    const edge = { color: COLOR.door, halo: COLOR.door, width: OBSTACLE_EDGE_WIDTH };
+    const edge = { color: tint.color, halo: tint.color, width: OBSTACLE_EDGE_WIDTH };
     const alone = [box];
     switch (look.phase) {
       case 'ouverte': {
         const part = fill(0);
-        g.rect(part.x, part.y, part.width, part.height).fill({ color: COLOR.door, alpha: DOOR_FILL_ALPHA });
-        // Le trait de front de la jauge : la limite de la part remplie.
+        g.rect(part.x, part.y, part.width, part.height).fill({ color: tint.color, alpha: tint.fill });
+        // Le trait de front de la jauge : la limite de la part remplie. Tenue ouverte, rien ne s'écoule : un voile pâle à la place, et une lueur autour de la porte entière.
+        if (held) {
+          neonRects(g, alone, { ...edge, alpha: DOOR_HELD_ALPHA, strength: DOOR_HELD_HALO * this.rim, pass: 'halo' });
+          g.rect(x, y, width, height).fill({ color: tint.color, alpha: DOOR_GHOST_ALPHA });
+        }
         const front = horizontal ? { from: { x: part.x + part.width, y }, to: { x: part.x + part.width, y: y + height } } : { from: { x, y: part.y }, to: { x: x + width, y: part.y } };
-        neonLine(g, front.from, front.to, { ...edge, width: DOOR_FRONT_WIDTH, strength: DOOR_OPEN_HALO * this.rim });
+        if (!held) neonLine(g, front.from, front.to, { ...edge, width: DOOR_FRONT_WIDTH, strength: DOOR_OPEN_HALO * this.rim });
         neonStroke(
           g,
           (target) => {
@@ -1744,7 +1982,7 @@ export class Renderer {
             dashedLine(target, { x: x + width, y: y + height }, { x, y: y + height }, DOOR_DASH, DOOR_GAP);
             dashedLine(target, { x, y: y + height }, { x, y }, DOOR_DASH, DOOR_GAP);
           },
-          { ...edge, color: SKIN.doorPale, alpha: DOOR_OPEN_ALPHA, strength: 0, width: DOOR_DASH_WIDTH },
+          { ...edge, color: tint.pale, alpha: held ? 1 : DOOR_OPEN_ALPHA, strength: 0, width: DOOR_DASH_WIDTH },
         );
         break;
       }
@@ -1754,22 +1992,22 @@ export class Renderer {
         const tube = { ...edge, alpha: DOOR_WARN_ALPHA_MIN + (1 - DOOR_WARN_ALPHA_MIN) * look.beat, strength };
         neonRects(g, alone, { ...tube, pass: 'halo' });
         const part = fill(0);
-        g.rect(part.x, part.y, part.width, part.height).fill({ color: COLOR.door, alpha: DOOR_WARN_FILL_MIN + (DOOR_WARN_FILL_MAX - DOOR_WARN_FILL_MIN) * look.beat });
+        g.rect(part.x, part.y, part.width, part.height).fill({ color: tint.color, alpha: DOOR_WARN_FILL_MIN + (DOOR_WARN_FILL_MAX - DOOR_WARN_FILL_MIN) * look.beat });
         neonRects(g, alone, { ...tube, pass: 'core' });
         break;
       }
       case 'fermee': {
         const tube = { ...edge, strength: this.rim };
         neonRects(g, alone, { ...tube, pass: 'halo' });
-        g.rect(x, y, width, height).fill(SKIN.doorBody);
+        g.rect(x, y, width, height).fill(tint.body);
         // La barre claire qui se remplit jusqu'à l'ouverture, en retrait du contour.
         const bar = fill(DOOR_BAR_INSET);
-        if (bar.width > 0 && bar.height > 0 && Math.min(width, height) > 2 * DOOR_BAR_INSET) g.rect(bar.x, bar.y, bar.width, bar.height).fill({ color: SKIN.doorPale, alpha: DOOR_BAR_ALPHA });
+        if (bar.width > 0 && bar.height > 0 && Math.min(width, height) > 2 * DOOR_BAR_INSET) g.rect(bar.x, bar.y, bar.width, bar.height).fill({ color: tint.pale, alpha: DOOR_BAR_ALPHA });
         neonRects(g, alone, { ...tube, pass: 'core' });
         break;
       }
       case 'passage': {
-        g.rect(x, y, width, height).fill({ color: COLOR.door, alpha: DOOR_GHOST_ALPHA });
+        g.rect(x, y, width, height).fill({ color: tint.color, alpha: DOOR_GHOST_ALPHA });
         neonRects(g, alone, { ...edge, alpha: DOOR_OPEN_ALPHA, strength: DOOR_OPEN_HALO * this.rim });
         break;
       }
@@ -1803,6 +2041,65 @@ export class Renderer {
       g.stroke({ width: widths.body, color: SKIN.rotorBody, cap: 'round', join: 'round' });
     }
     neonDiscs(g, bars.map((bar) => bar.pivot), widths.pivot, { color: COLOR.obstacleEdge, halo: COLOR.obstacleEdge, strength: 0, pass: 'core' });
+  }
+
+  /**
+   * Le liseré d'avertissement des panneaux d'un passage qui se referme, par-dessus leur masse de solide. Le bord qui avance (celui qui regarde le
+   * milieu du couloir) est un trait net ; des chevrons le long du panneau pointent le sens de la fermeture, ou de la réouverture. Armé, tout est
+   * pâle et fixe, et un pointillé barre le couloir à la ligne qui déclenche la fermeture. Il se ferme : le liseré et les chevrons pulsent, une jauge
+   * se remplit dans le panneau depuis la paroi, et la masse se réchauffe. Fermé : la masse pleine et le bord franc. Il rouvre : la jauge se vide.
+   * Tout se lit du pas de simulation (`closerLook`).
+   */
+  private paintClosers(g: Graphics, boxes: readonly ScreenBox[], camera: Camera, state: SimState, tuning: Tuning): void {
+    if (boxes.length === 0) return;
+    const tube = { color: SKIN.closerPale, halo: COLOR.obstacleEdge, cap: 'round' as const, join: 'round' as const };
+    for (const box of boxes) {
+      const closer = box.source.closer;
+      if (!closer) continue;
+      const look = closerLook(box.source, state.step, tuning);
+      const { x, y, width, height } = box;
+      const armed = look.phase === 'arme';
+      // Le bord qui avance, et le sens où les chevrons pointent : celui de la fermeture, inversé quand le panneau rouvre.
+      const edgeX = closer.side > 0 ? x + width : x;
+      const heading = look.phase === 'rouvre' ? -closer.side : closer.side;
+      if (look.phase !== 'arme' && look.phase !== 'ferme') {
+        // La masse se réchauffe et la jauge se remplit depuis la paroi, vers le bord qui avance.
+        g.rect(x, y, width, height).fill({ color: SKIN.closerBody, alpha: CLOSER_BODY_ALPHA });
+        const room = width - 2 * CLOSER_GAUGE_INSET;
+        const filled = room * look.gauge;
+        if (room > 0 && height > 2 * CLOSER_GAUGE_INSET && filled > 0) {
+          const from = closer.side > 0 ? x + CLOSER_GAUGE_INSET : x + width - CLOSER_GAUGE_INSET - filled;
+          g.rect(from, y + CLOSER_GAUGE_INSET, filled, height - 2 * CLOSER_GAUGE_INSET).fill({ color: SKIN.closerPale, alpha: CLOSER_GAUGE_ALPHA });
+        }
+      } else if (look.phase === 'ferme') {
+        g.rect(x, y, width, height).fill({ color: SKIN.closerBody, alpha: CLOSER_BODY_ALPHA });
+      }
+      const strength = this.rim * CLOSER_EDGE_HALO * (armed ? 0 : look.phase === 'se ferme' ? look.beat : 1);
+      const alpha = armed ? CLOSER_EDGE_ARMED_ALPHA : look.phase === 'se ferme' ? DOOR_WARN_ALPHA_MIN + (1 - DOOR_WARN_ALPHA_MIN) * look.beat : 1;
+      neonLine(g, { x: edgeX, y: y - CLOSER_EDGE_OVERSHOOT }, { x: edgeX, y: y + height + CLOSER_EDGE_OVERSHOOT }, { ...tube, width: CLOSER_EDGE_WIDTH, alpha, strength });
+      if (look.phase !== 'ferme') {
+        const chevronAlpha = armed ? CLOSER_CHEVRON_ARMED_ALPHA : look.phase === 'se ferme' ? CLOSER_CHEVRON_PULSE_MIN + (1 - CLOSER_CHEVRON_PULSE_MIN) * look.beat : CLOSER_CHEVRON_REOPEN_ALPHA;
+        const count = Math.max(1, Math.round(width / CLOSER_CHEVRON_SPACING));
+        const half = Math.max(CLOSER_CHEVRON_MIN_HALF, height * CLOSER_CHEVRON_HALF_RATIO);
+        neonStroke(
+          g,
+          (target) => {
+            for (let k = 0; k < count; k += 1) {
+              const cx = x + ((k + 0.5) * width) / count;
+              target.moveTo(cx - heading * CLOSER_CHEVRON_DEPTH, y + height / 2 - half).lineTo(cx + heading * CLOSER_CHEVRON_DEPTH, y + height / 2).lineTo(cx - heading * CLOSER_CHEVRON_DEPTH, y + height / 2 + half);
+            }
+          },
+          { ...tube, width: CLOSER_CHEVRON_WIDTH, alpha: chevronAlpha, strength: 0 },
+        );
+      }
+      // La ligne qui déclenche la fermeture, annoncée avant l'entrée : un pointillé en travers du couloir, d'une paroi à l'autre (le panneau de gauche parle pour les deux).
+      if (armed && closer.side > 0) {
+        const gate = camera.worldToScreen({ x: 0, y: closer.triggerY }).y;
+        const right = edgeX + 2 * closer.travel * camera.scale;
+        dashedLine(g, { x: edgeX, y: gate }, { x: right, y: gate }, CLOSER_GATE_DASH, CLOSER_GATE_GAP);
+        g.stroke({ width: CLOSER_GATE_WIDTH, color: SKIN.closerPale, alpha: CLOSER_GATE_ALPHA });
+      }
+    }
   }
 
   /**
@@ -2019,7 +2316,11 @@ export class Renderer {
     const radius = ANCHOR_RADIUS * camera.scale;
     const paint: AnchorPaint = { scale: camera.scale, radius, ring: radius + KIND_RING_GAP, clock: effects.clock };
     const off: Anchor[] = [];
-    const groups: LitGroups = { normal: [], fragile: [], booster: [], calm: [], warning: [], charged: [], eclipse: [], lanceur: [], roue: [] };
+    const groups: LitGroups = { normal: [], fragile: [], booster: [], calm: [], warning: [], charged: [], eclipse: [], lanceur: [], roue: [], holds: this.holdLots };
+    for (const kind of HOLD_KINDS) {
+      this.holdLots[kind].idle.length = 0;
+      this.holdLots[kind].on.length = 0;
+    }
     for (const anchor of state.anchors) {
       if (anchor.broken) continue;
       const p = camera.worldToScreen(anchor.pos);
@@ -2032,6 +2333,7 @@ export class Renderer {
       const spot = { id: anchor.id, x: p.x, y: p.y };
       if (anchor.kind === 'electrique') groups[ELECTRIC_GROUP[electricState(anchor.id, state.step, tuning)]].push(spot);
       else if (anchor.kind === 'roue') groups.roue.push({ ...spot, spin: anchor.motor?.spin ?? 1, held: anchor.id === state.rope?.anchorId });
+      else if (isHoldKind(anchor.kind)) this.holdLots[anchor.kind][this.holdIsOn(state, anchor) ? 'on' : 'idle'].push(spot);
       else groups[anchor.kind].push(spot);
     }
     this.paintOff(g, camera, off, paint);
@@ -2040,7 +2342,8 @@ export class Renderer {
     this.paintLit(g, groups, paint, 'core');
 
     const held = state.rope ? state.anchors.find((anchor) => anchor.id === state.rope?.anchorId) : undefined;
-    if (held && held.kind !== 'fragile' && !held.broken && !isOff(state, held, tuning)) {
+    // L'aimant (le champ qui converge) et le rail (le curseur) ont leur propre pulsation : un anneau de plus les brouillerait.
+    if (held && held.kind !== 'fragile' && held.kind !== 'aimant' && held.kind !== 'rail' && !held.broken && !isOff(state, held, tuning)) {
       // Le point tenu pulse : un anneau de plus, qui respire.
       const p = camera.worldToScreen(held.pos);
       const beat = pulse(paint.clock, HELD_PULSE_HZ, 0.3);
@@ -2063,6 +2366,173 @@ export class Renderer {
         neonStroke(g, (target) => target.moveTo(p.x, p.y - wearRing).arc(p.x, p.y, wearRing, -Math.PI / 2, -Math.PI / 2 + remaining * TAU), { color: COLOR.wear, halo: COLOR.fragile, width: WEAR_RING_WIDTH });
       }
     }
+  }
+
+  /**
+   * Sous les points, ce qui prolonge les prises du lot 5. L'aimant : son champ, des anneaux très pâles concentriques jusqu'au rayon d'action (la
+   * portée du grappin), bordé d'un cercle tireté ; visé, ils s'éclairent ; tenu, ils convergent vers le noyau. L'interrupteur : un pointillé
+   * ambre jusqu'à son verrou, qui défile de la prise vers lui tant que le verrou est ouvert, et l'anneau du délai qui se vide après le lâcher.
+   * Le rail : son arc en dôme, son pied, ses butées et son repère du milieu. Un point éteint par la panne n'a plus de champ ni de lien ; son arc n'est
+   * plus que la trace d'un néon coupé.
+   */
+  private drawHolds(state: SimState, camera: Camera, view: ViewBounds, tuning: Tuning, effects: Effects): void {
+    const g = this.holds.clear();
+    for (const anchor of state.anchors) {
+      if (anchor.broken || !isHoldKind(anchor.kind)) continue;
+      const off = isOff(state, anchor, tuning);
+      const p = camera.worldToScreen(anchor.pos);
+      if (anchor.kind === 'aimant' && !off) this.paintMagnetField(g, p, anchor, state, camera, view, tuning, effects.clock);
+      else if (anchor.kind === 'interrupteur' && !off) this.paintSwitchLink(g, p, anchor, state, camera, view, tuning, effects.clock);
+      else if (anchor.kind === 'rail' && anchor.rail) this.paintRail(g, p, anchor.rail, camera, view, anchor.id === state.rope?.anchorId, off);
+    }
+  }
+
+  /** Le champ d'un aimant autour de son noyau en `p` : au repos des anneaux fixes très pâles, visé un cran plus clairs, tenu convergents vers le noyau ; et le cercle tireté du rayon d'action. */
+  private paintMagnetField(g: Graphics, p: Vec2, anchor: Anchor, state: SimState, camera: Camera, view: ViewBounds, tuning: Tuning, clock: number): void {
+    const reach = tuning.ropeMax * camera.scale;
+    if (!inView(view, p, reach + CULL_MARGIN)) return;
+    const held = state.rope?.anchorId === anchor.id;
+    const aimed = state.targetId === anchor.id;
+    const tube = { color: COLOR.magnet, halo: COLOR.magnet, width: MAGNET_RING_WIDTH };
+    if (held) {
+      const phase = magnetPhase(clock);
+      for (let k = 0; k < MAGNET_RING_COUNT; k += 1) {
+        const ring = magnetRing(k, MAGNET_RING_COUNT, phase, true);
+        if (ring.alpha > 0) neonCircle(g, p.x, p.y, ring.ratio * reach, { ...tube, alpha: MAGNET_RING_HELD_ALPHA * ring.alpha, strength: MAGNET_RING_HELD_HALO * this.species, spread: MARK_SPREAD });
+      }
+    } else {
+      for (let k = 0; k < MAGNET_RING_COUNT; k += 1) g.circle(p.x, p.y, magnetRing(k, MAGNET_RING_COUNT, 0, false).ratio * reach);
+      g.stroke({ width: MAGNET_RING_WIDTH, color: COLOR.magnet, alpha: aimed ? MAGNET_RING_AIMED_ALPHA : MAGNET_RING_ALPHA });
+    }
+    dashedCircle(g, p.x, p.y, reach, MAGNET_LIMIT_DASHES, MAGNET_LIMIT_FILL);
+    g.stroke({ width: MAGNET_RING_WIDTH, color: COLOR.magnet, alpha: aimed || held ? MAGNET_LIMIT_AIMED_ALPHA : MAGNET_LIMIT_ALPHA });
+  }
+
+  /**
+   * Le lien d'une prise interrupteur en `p` à chacun des verrous qu'elle commande : un pointillé ambre fin, de la prise au bord du verrou, avec un
+   * petit nœud là où il le touche. Le verrou ouvert, le pointillé est vif et défile de la prise vers lui ; fermé, il est pâle et fixe. Pendant le
+   * délai qui suit le lâcher, un anneau autour de la prise se vide à mesure que le verrou se remplit.
+   */
+  private paintSwitchLink(g: Graphics, p: Vec2, anchor: Anchor, state: SimState, camera: Camera, view: ViewBounds, tuning: Tuning, clock: number): void {
+    const scale = camera.scale;
+    const held = state.rope?.anchorId === anchor.id;
+    const ring = ANCHOR_RADIUS * scale + KIND_RING_GAP;
+    let timer = false;
+    for (const box of state.obstacles) {
+      if (box.switchedBy !== anchor.id || box.broken) continue;
+      const centre = camera.worldToScreen({ x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 });
+      if (!inView(view, p, CULL_MARGIN) && !inView(view, centre, CULL_MARGIN)) continue;
+      const open = box.openUntilStep !== undefined && state.step < box.openUntilStep;
+      const end = rectEdgePoint(centre.x, centre.y, ((box.x1 - box.x0) * scale) / 2, ((box.y1 - box.y0) * scale) / 2, p.x, p.y);
+      // Le pointillé part du bord de l'anneau de la prise, pas de son centre.
+      const length = Math.hypot(end.x - p.x, end.y - p.y);
+      if (length > ring + SWITCH_LINK_GAP_FROM_ANCHOR) {
+        const k = (ring + SWITCH_LINK_GAP_FROM_ANCHOR) / length;
+        const start = { x: p.x + (end.x - p.x) * k, y: p.y + (end.y - p.y) * k };
+        if (open) {
+          // La lueur suit le lien d'un seul trait, sous les tirets : le halo de chaque tiret en ferait un collier de perles.
+          const tube = { color: SKIN.switchHot, halo: COLOR.switch, width: SWITCH_LINK_ON_WIDTH, alpha: SWITCH_LINK_ON_ALPHA, cap: 'round' as const };
+          neonLine(g, start, end, { ...tube, strength: SWITCH_LINK_ON_HALO * this.species, pass: 'halo' });
+          neonStroke(g, (target) => dashedLine(target, start, end, SWITCH_LINK_DASH, SWITCH_LINK_GAP, clock * SWITCH_LINK_SPEED), { ...tube, strength: 0 });
+        } else {
+          dashedLine(g, start, end, SWITCH_LINK_DASH, SWITCH_LINK_GAP);
+          g.stroke({ width: SWITCH_LINK_WIDTH, color: COLOR.switch, alpha: SWITCH_LINK_ALPHA });
+        }
+      }
+      neonFill(g, (target, grow) => target.circle(end.x, end.y, SWITCH_NODE_RADIUS + grow), { color: open ? SKIN.switchHot : COLOR.switch, halo: COLOR.switch, alpha: open ? 1 : SWITCH_LINK_NODE_ALPHA, strength: open ? SWITCH_LINK_ON_HALO * this.species : 0 });
+      if (open && !held && !timer) {
+        timer = true;
+        const remaining = 1 - switchGauge(box, state.step, tuning, SWITCH_HOLD_SECONDS);
+        const radius = ring + SWITCH_TIMER_GAP;
+        g.circle(p.x, p.y, radius).stroke({ width: SWITCH_TIMER_WIDTH, color: COLOR.switch, alpha: SWITCH_TIMER_TRACK_ALPHA });
+        if (remaining > 0) neonStroke(g, (target) => target.moveTo(p.x, p.y - radius).arc(p.x, p.y, radius, -Math.PI / 2, -Math.PI / 2 + remaining * TAU), { color: COLOR.switch, halo: COLOR.switch, width: SWITCH_TIMER_WIDTH });
+      }
+    }
+  }
+
+  /** L'arc d'un rail posé sur sa prise en `p` : la polyligne de ses positions, ses deux butées, son repère du milieu et le pied qui le tient. `held` : le personnage y est posé, l'arc s'allume ; `off` : la panne l'a éteint. */
+  private paintRail(g: Graphics, p: Vec2, rail: Rail, camera: Camera, view: ViewBounds, held: boolean, off: boolean): void {
+    const scale = camera.scale;
+    if (!inView(view, p, rail.halfWidth * scale + RAIL_STOP_HALF + CULL_MARGIN)) return;
+    const arc = railArc(rail);
+    const tube = off
+      ? { color: COLOR.rail, halo: COLOR.rail, alpha: DARK_ALPHA, strength: 0 }
+      : { color: held ? SKIN.railCore : COLOR.rail, halo: COLOR.rail, alpha: RAIL_ALPHA, strength: this.species * (held ? RAIL_HELD_GLOW : 1) };
+    neonStroke(
+      g,
+      (target) => {
+        for (let i = 0; i <= RAIL_SEGMENTS; i += 1) {
+          const x = p.x + arc[2 * i]! * scale;
+          const y = p.y - arc[2 * i + 1]! * scale;
+          if (i === 0) target.moveTo(x, y);
+          else target.lineTo(x, y);
+        }
+      },
+      { ...tube, width: RAIL_WIDTH, cap: 'round', join: 'round' },
+    );
+    const apex = p.y - rail.rise * scale;
+    const left = p.x + arc[0]! * scale;
+    const right = p.x + arc[2 * RAIL_SEGMENTS]! * scale;
+    // Les butées aux deux bouts, le repère du milieu en travers de l'arc, et le pied qui le tient à la prise.
+    g.moveTo(left, p.y - RAIL_STOP_HALF).lineTo(left, p.y + RAIL_STOP_HALF).moveTo(right, p.y - RAIL_STOP_HALF).lineTo(right, p.y + RAIL_STOP_HALF);
+    g.stroke({ width: RAIL_STOP_WIDTH, color: COLOR.rail, alpha: off ? DARK_ALPHA : RAIL_ALPHA, cap: 'round' });
+    g.moveTo(p.x, apex - RAIL_MID_HALF).lineTo(p.x, apex + RAIL_MID_HALF);
+    g.stroke({ width: RAIL_MID_WIDTH, color: SKIN.railCore, alpha: off ? DARK_ALPHA : RAIL_ALPHA, cap: 'round' });
+    g.moveTo(p.x, p.y - ANCHOR_RADIUS * scale).lineTo(p.x, apex + RAIL_MID_HALF);
+    g.stroke({ width: RAIL_STEM_WIDTH, color: COLOR.rail, alpha: off ? DARK_ALPHA : RAIL_STEM_ALPHA });
+  }
+
+  /** La prise du lot 5 est-elle active ? Tenue ; et pour l'interrupteur, aussi tant que son verrou est ouvert (le délai qui suit le lâcher). */
+  private holdIsOn(state: SimState, anchor: Anchor): boolean {
+    if (state.rope?.anchorId === anchor.id) return true;
+    return anchor.kind === 'interrupteur' && state.obstacles.some((box) => box.switchedBy === anchor.id && box.openUntilStep !== undefined && state.step < box.openUntilStep);
+  }
+
+  /**
+   * Les prises du lot 5, une passe (`pass`). Chacune est un disque de sa teinte, plus son signe. Aimant : l'anneau à `MAGNET_CORE_RADIUS`, où le
+   * personnage restera suspendu. Interrupteur : un anneau ouvert par le haut, traversé d'un trait. Rail : le disque seul, l'arc est dessiné dessous
+   * (`paintRail`). Lien élastique : un anneau avec un nœud sur le haut. Active (`on`), la prise vire au clair et son halo se renforce.
+   */
+  private paintHolds(g: Graphics, lots: Record<HoldKind, HoldLot>, paint: AnchorPaint, pass: 'halo' | 'core'): void {
+    const { radius, ring, scale } = paint;
+    const glow = this.species;
+    const base = { spread: MARK_SPREAD, pass };
+
+    const magnets = lots.aimant;
+    const capture = Math.max(MAGNET_CORE_RADIUS * scale, radius + MAGNET_CORE_RING_GAP);
+    neonDiscs(g, magnets.idle, radius, { ...SPECIES_TUBE.aimant, strength: glow, pass });
+    neonDiscs(g, magnets.on, radius, { color: SKIN.magnetHot, halo: COLOR.magnet, strength: glow * MAGNET_HELD_GLOW, spread: HOLD_ON_SPREAD, pass });
+    neonRings(g, magnets.idle, () => capture, { ...SPECIES_TUBE.aimant, ...base, width: MAGNET_CORE_RING_WIDTH, alpha: MAGNET_CORE_RING_ALPHA, strength: glow });
+    neonRings(g, magnets.on, () => capture, { color: SKIN.magnetHot, halo: COLOR.magnet, ...base, width: MAGNET_CORE_RING_ON_WIDTH, strength: glow * MAGNET_HELD_GLOW });
+
+    const switches = lots.interrupteur;
+    neonDiscs(g, switches.idle, radius, { ...SPECIES_TUBE.interrupteur, strength: glow, pass });
+    neonDiscs(g, switches.on, radius, { color: SKIN.switchHot, halo: COLOR.switch, strength: glow * SWITCH_ON_GLOW, spread: HOLD_ON_SPREAD, pass });
+    const power = (spots: readonly Spot[]) => (target: Graphics) => {
+      for (const spot of spots) {
+        const from = -Math.PI / 2 + SWITCH_GAP_HALF_ANGLE;
+        target.moveTo(spot.x + ring * Math.cos(from), spot.y + ring * Math.sin(from)).arc(spot.x, spot.y, ring, from, from + TAU - 2 * SWITCH_GAP_HALF_ANGLE);
+        target.moveTo(spot.x, spot.y - ring - SWITCH_TICK_OUT).lineTo(spot.x, spot.y - ring * SWITCH_TICK_IN);
+      }
+    };
+    if (switches.idle.length > 0) neonStroke(g, power(switches.idle), { ...SPECIES_TUBE.interrupteur, ...base, width: SWITCH_MARK_WIDTH, strength: glow, cap: 'round', join: 'round' });
+    if (switches.on.length > 0) neonStroke(g, power(switches.on), { color: SKIN.switchHot, halo: COLOR.switch, ...base, width: SWITCH_MARK_ON_WIDTH, strength: glow * SWITCH_ON_GLOW, cap: 'round', join: 'round' });
+
+    const rails = lots.rail;
+    neonDiscs(g, rails.idle, radius, { ...SPECIES_TUBE.rail, strength: glow, pass });
+    neonDiscs(g, rails.on, radius, { color: SKIN.railCore, halo: COLOR.rail, strength: glow * RAIL_HELD_GLOW, spread: HOLD_ON_SPREAD, pass });
+
+    const links = lots.elastique;
+    neonDiscs(g, links.idle, radius, { ...SPECIES_TUBE.elastique, strength: glow, pass });
+    neonDiscs(g, links.on, radius, { color: SKIN.elasticHot, halo: COLOR.elastic, strength: glow * ELASTIC_HELD_GLOW, spread: HOLD_ON_SPREAD, pass });
+    neonRings(g, links.idle, () => ring, { ...SPECIES_TUBE.elastique, ...base, width: ELASTIC_RING_WIDTH, strength: glow });
+    neonRings(g, links.on, () => ring, { color: SKIN.elasticHot, halo: COLOR.elastic, ...base, width: ELASTIC_RING_ON_WIDTH, strength: glow * ELASTIC_HELD_GLOW });
+    // Le nœud : une perle sur le haut de l'anneau.
+    const bead = (spots: readonly Spot[], tube: Tube): void => {
+      if (spots.length > 0) neonFill(g, (target, grow) => spots.forEach((spot) => target.circle(spot.x, spot.y - ring, ELASTIC_BEAD_RADIUS + grow)), { ...tube, strength: glow, spread: MARK_SPREAD, pass });
+    };
+    bead(links.idle, SPECIES_TUBE.elastique);
+    bead(links.on, { color: SKIN.elasticHot, halo: COLOR.elastic });
   }
 
   /** Les traces sombres : un tube éteint n'a plus de halo, il ne reste que son dessin à très faible opacité. */
@@ -2143,6 +2613,7 @@ export class Renderer {
     // Lanceur : un disque vert d'eau au creux d'une coupe en « Y » ouverte vers le haut, sur un court pied : une fronde. Rien d'un propulseur, qui est un anneau fermé à chevrons.
     // Roue motorisée : un moyeu sarcelle, une jante, des rayons qui tournent dans le sens du moteur, et des chevrons sur la jante qui disent ce sens.
     if (groups.roue.length > 0) this.paintWheels(g, groups.roue, paint, pass);
+    this.paintHolds(g, groups.holds, paint, pass);
 
     if (groups.lanceur.length > 0) {
       const cup = cupRadius(radius);
@@ -2279,6 +2750,19 @@ export class Renderer {
       this.drawSling(g, state, camera, tuning, anchor, effects.clock);
       return;
     }
+    // Ni l'aimant ni le rail n'ont de corde : le champ attire, l'arc porte. Le lien élastique a la sienne, qui s'étire.
+    if (anchor.kind === 'aimant') {
+      this.drawMagnetPull(g, state, camera, anchor, effects.clock);
+      return;
+    }
+    if (anchor.kind === 'rail' && anchor.rail) {
+      this.drawRailCursor(g, state, camera, tuning, anchor.rail);
+      return;
+    }
+    if (anchor.kind === 'elastique') {
+      this.drawElastic(g, state, camera, tuning, anchor, effects.ropeDrawn);
+      return;
+    }
     const from = camera.worldToScreen(state.hero.pos);
     const to = camera.worldToScreen(anchor.pos);
     const drawn = effects.ropeDrawn;
@@ -2290,6 +2774,83 @@ export class Renderer {
     const tube = ready ? READY_TUBE : this.normalTube;
     const glow = ready ? READY_STRENGTH : 1;
     neonLine(g, from, tip, { ...tube, width: ROPE_WIDTH + ROPE_HEAT_WIDTH * heat, strength: (1 + ROPE_HEAT_GLOW * heat) * this.halo.strength * glow, spread: (1 + ROPE_HEAT_SPREAD * heat) * this.halo.spread, cap: 'round' });
+  }
+
+  /** Le champ de l'aimant tenu, à la place de la corde : un trait tireté du personnage au noyau, dont les tirets avancent vers lui. */
+  private drawMagnetPull(g: Graphics, state: SimState, camera: Camera, anchor: Anchor, clock: number): void {
+    const from = camera.worldToScreen(state.hero.pos);
+    const to = camera.worldToScreen(anchor.pos);
+    // La lueur suit le trait d'un seul tenant, sous les tirets : le halo de chaque tiret en ferait un collier de perles.
+    const tube = { color: SKIN.magnetHot, halo: COLOR.magnet, width: MAGNET_PULL_WIDTH, cap: 'round' as const };
+    neonLine(g, from, to, { ...tube, strength: MAGNET_PULL_HALO * this.halo.strength, pass: 'halo' });
+    neonStroke(g, (target) => dashedLine(target, from, to, MAGNET_PULL_DASH, MAGNET_PULL_GAP, clock * MAGNET_PULL_SPEED), { ...tube, strength: 0 });
+  }
+
+  /**
+   * Le curseur du rail tenu : un anneau autour du personnage, posé sur l'arc à la position que le doigt a choisie, et la courte flèche qui en part
+   * dans la direction du lancer (la normale de l'arc à cet endroit, `railDirection`). La trajectoire que cette direction donne est celle de l'ombre
+   * prédictive, plus longue et plus nette qu'à l'ordinaire.
+   */
+  private drawRailCursor(g: Graphics, state: SimState, camera: Camera, tuning: Tuning, rail: Rail): void {
+    const hero = camera.worldToScreen(state.hero.pos);
+    const direction = railDirection(rail, railParam(state.pull));
+    // Le monde a l'axe y vers le haut, l'écran vers le bas.
+    const dx = direction.x;
+    const dy = -direction.y;
+    const ring = tuning.heroRadius * camera.scale + RAIL_CURSOR_GAP;
+    const tube = { color: SKIN.railCore, halo: COLOR.rail, strength: this.species * RAIL_HELD_GLOW, cap: 'round' as const, join: 'round' as const };
+    neonCircle(g, hero.x, hero.y, ring, { ...tube, width: RAIL_CURSOR_WIDTH });
+    const start = { x: hero.x + dx * (ring + RAIL_ARROW_GAP), y: hero.y + dy * (ring + RAIL_ARROW_GAP) };
+    const tip = { x: start.x + dx * RAIL_ARROW_LENGTH, y: start.y + dy * RAIL_ARROW_LENGTH };
+    const [ax, ay, bx, by] = arrowWings(dx, dy, RAIL_ARROW_HEAD);
+    neonStroke(
+      g,
+      (target) => {
+        target.moveTo(start.x, start.y).lineTo(tip.x, tip.y);
+        target.moveTo(tip.x + ax, tip.y + ay).lineTo(tip.x, tip.y).lineTo(tip.x + bx, tip.y + by);
+      },
+      { ...tube, width: RAIL_ARROW_WIDTH },
+    );
+  }
+
+  /**
+   * Le lien élastique tenu : de la prise au personnage, un trait dont l'épaisseur, la clarté et le halo suivent l'étirement (`elasticLook`), blanc à
+   * la butée ; mou, un trait fin qui ondule. Autour de la prise, deux cercles tiretés : la longueur de repos, et la butée (`ELASTIC_MAX_STRETCH`
+   * au-delà), qui s'éclaire à mesure que le lien s'en approche.
+   */
+  private drawElastic(g: Graphics, state: SimState, camera: Camera, tuning: Tuning, anchor: Anchor, drawn: number): void {
+    if (!state.rope) return;
+    const scale = camera.scale;
+    const rest = state.rope.length;
+    const hero = camera.worldToScreen(state.hero.pos);
+    const base = camera.worldToScreen(anchor.pos);
+    const stretch = elasticStretch(state.hero.pos, anchor.pos, rest);
+    const slack = Math.max(0, rest - Math.hypot(state.hero.pos.x - anchor.pos.x, state.hero.pos.y - anchor.pos.y));
+    const look = elasticLook(stretch, slack, scale);
+    dashedCircle(g, base.x, base.y, rest * scale, ELASTIC_REST_DASHES, ELASTIC_REST_FILL);
+    g.stroke({ width: ELASTIC_LIMIT_WIDTH, color: COLOR.elastic, alpha: ELASTIC_REST_ALPHA });
+    dashedCircle(g, base.x, base.y, (rest + ELASTIC_MAX_STRETCH) * scale, ELASTIC_MAX_DASHES, ELASTIC_MAX_FILL);
+    g.stroke({ width: ELASTIC_LIMIT_WIDTH, color: look.ratio >= 1 ? COLOR.white : COLOR.elastic, alpha: ELASTIC_MAX_ALPHA_MIN + (ELASTIC_MAX_ALPHA_MAX - ELASTIC_MAX_ALPHA_MIN) * look.ratio });
+    // Le trait se dessine du personnage vers la prise pendant les premiers centièmes de seconde, comme une corde.
+    const length = Math.hypot(base.x - hero.x, base.y - hero.y);
+    if (length < 1e-6) return;
+    const nx = -(base.y - hero.y) / length;
+    const ny = (base.x - hero.x) / length;
+    const phase = strandPhase(state.step, tuning.stepSeconds);
+    neonStroke(
+      g,
+      (target) => {
+        for (let i = 0; i <= ELASTIC_STRAND_SEGMENTS; i += 1) {
+          const u = (i / ELASTIC_STRAND_SEGMENTS) * drawn;
+          const off = strandOffset(u, look.wiggle, phase);
+          const x = hero.x + (base.x - hero.x) * u + nx * off;
+          const y = hero.y + (base.y - hero.y) * u + ny * off;
+          if (i === 0) target.moveTo(x, y);
+          else target.lineTo(x, y);
+        }
+      },
+      { color: look.color, halo: COLOR.elastic, width: look.width, strength: look.glow * this.halo.strength, spread: 1 + look.ratio * ROPE_HEAT_SPREAD, cap: 'round', join: 'round' },
+    );
   }
 
   /**
@@ -2309,11 +2870,7 @@ export class Renderer {
     const beat = full ? pulse(clock, FULL_PULL_HZ, 0.6) : 1;
 
     // La limite de traction : un cercle de tirets pâles, de plus en plus net à mesure qu'on s'en approche.
-    const limit = PULL_MAX * scale;
-    for (let dash = 0; dash < LIMIT_DASHES; dash += 1) {
-      const start = (dash / LIMIT_DASHES) * TAU;
-      g.moveTo(center.x + limit * Math.cos(start), center.y + limit * Math.sin(start)).arc(center.x, center.y, limit, start, start + (LIMIT_DASH_FILL / LIMIT_DASHES) * TAU);
-    }
+    dashedCircle(g, center.x, center.y, PULL_MAX * scale, LIMIT_DASHES, LIMIT_DASH_FILL);
     g.stroke({ width: LIMIT_WIDTH, color: COLOR.launcher, alpha: LIMIT_ALPHA_MIN + (LIMIT_ALPHA_MAX - LIMIT_ALPHA_MIN) * ratio * ratio });
 
     // L'élastique : des pointes de la coupe au personnage, plus gras, plus blanc, plus lumineux avec la force.
@@ -2366,7 +2923,8 @@ export class Renderer {
    */
   private drawShadow(state: SimState, camera: Camera, tuning: Tuning, ready: boolean): void {
     const g = this.shadow.clear();
-    const aiming = heldKind(state) === 'lanceur';
+    const kind = heldKind(state);
+    const aiming = kind === 'lanceur' || kind === 'rail';
     for (const point of shadowPoints(state, tuning, aiming ? LAUNCH_SHADOW_SECONDS : tuning.shadowSeconds)) {
       const p = camera.worldToScreen(point);
       g.circle(p.x, p.y, aiming ? LAUNCH_SHADOW_DOT_RADIUS : SHADOW_DOT_RADIUS);

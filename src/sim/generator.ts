@@ -619,9 +619,17 @@ export function accordion(ids: IdCounters, from: Vec2, halfWidth: number): { anc
  */
 export const MAGNET_RISE = 10;
 const MAGNET_SIDE = 2;
-/** Le verrou d'un interrupteur : une porte de cette largeur, posée sur le vol entre la prise et la suivante, un peu au-dessus de la ligne droite. */
-export const LOCK_WIDTH = 2.4;
+/**
+ * Le verrou d'un interrupteur : une porte de cette largeur, posée sur le vol
+ * entre la prise et la suivante, un peu au-dessus de la ligne droite. La prise
+ * suivante est `SWITCH_NEXT_RISE` au-dessus de l'interrupteur, hors de portée du
+ * point d'avant : on passe par l'interrupteur, et par son verrou.
+ */
+export const LOCK_WIDTH = 3.2;
 const LOCK_ABOVE_LINE = 0.5;
+export const SWITCH_NEXT_RISE = 5.2;
+const SWITCH_NEXT_SIDE_MIN = 1.5;
+const SWITCH_NEXT_SIDE_MAX = 3;
 export const ELASTIC_SIDE = 3.2;
 export const ELASTIC_RISE = 10.5;
 const ELASTIC_LIFT = 0.4;
@@ -930,8 +938,10 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
       continue;
     }
     if (archetype === 'interrupteur' && !featureDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > 8) {
-      // Interrupteur : le dernier point commande un verrou posé sur le vol vers le point suivant ; on le tient ouvert, on lâche, on passe avant qu'il se referme.
-      const next = chainStep(rng, cur, spacing, shape.dy, shape.dx, profile.spread, halfWidth);
+      // Interrupteur : le dernier point commande un verrou posé sur le vol vers le point suivant, placé haut et de côté pour que seul
+      // l'interrupteur y mène ; on le tient ouvert, on lâche, on passe avant qu'il se referme.
+      const side = cur.x > 0 ? -1 : 1;
+      const next = { x: clampX(cur.x + side * (SWITCH_NEXT_SIDE_MIN + (SWITCH_NEXT_SIDE_MAX - SWITCH_NEXT_SIDE_MIN) * rng.next()), halfWidth), y: cur.y + SWITCH_NEXT_RISE };
       const { anchor, door } = switchLock(ids, cur, next);
       anchors[anchors.length - 1] = anchor;
       fixed.push(door);

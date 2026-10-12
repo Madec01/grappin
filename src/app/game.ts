@@ -22,7 +22,7 @@ import { levelOfButton, levelPageCount, pageOfLevel, type ButtonId } from '../re
 import { Camera } from '../render/camera';
 import { heldKind, windSide, inReleaseWindow } from '../render/cues';
 import { Effects } from '../render/effects';
-import { eventAnnouncement, levelTitle } from '../render/labels';
+import { ESCAPE_ANNOUNCEMENT, eventAnnouncement, levelTitle } from '../render/labels';
 import { mixPalette, paletteFor, type Palette } from '../render/palette';
 import type { DeathCause, GameScreen, Renderer } from '../render/renderer';
 import type { CoursePlan } from '../sim/course';
@@ -177,6 +177,8 @@ export interface DebugState {
   /** Lot 5 : une porte commandée par un interrupteur est ouverte en ce moment ; un passage qui se referme est déclenché (il se ferme ou est fermé). */
   readonly switchOpen: boolean;
   readonly closing: boolean;
+  /** Les passages qui se referment déclenchés : l'obstacle et le pas du déclenchement. Leur géométrie en dépend (`obstacleAt`), et un pilote qui rejoue le monde en Node ne le sait pas sans cela. */
+  readonly triggered: readonly { readonly obstacleId: number; readonly step: number }[];
   /** Le conseil du tutoriel affiché en ce moment, ou null. */
   readonly tip: string | null;
   /** Traction du doigt sur un lanceur tenu, en mètres de monde (y vers le haut), plafonnée ; nulle sinon. */
@@ -532,6 +534,7 @@ export class Game {
       const cue = cueFor(event);
       if (cue) this.sfx.play(cue);
       if (event.type === 'event') this.announce(event.kind, event.phase);
+      if (event.type === 'escape') effects.announce(ESCAPE_ANNOUNCEMENT.title, ESCAPE_ANNOUNCEMENT.detail);
       // Un niveau porte déjà son nom : pas de bannière de palier.
       if (event.type !== 'tier' || this.run.level === null) effects.handle(event, heroOnScreen);
     }
@@ -650,6 +653,7 @@ export class Game {
       releaseWindow: inReleaseWindow(state, this.run.tuning),
       switchOpen: state.obstacles.some((box) => box.switchedBy !== undefined && box.openUntilStep !== undefined && state.step < box.openUntilStep),
       closing: state.obstacles.some((box) => box.closer !== undefined && box.triggeredStep !== undefined && closerState(box, state.step, this.run.tuning) !== 'rouvre'),
+      triggered: state.obstacles.flatMap((box) => (box.closer !== undefined && box.triggeredStep !== undefined ? [{ obstacleId: box.id, step: box.triggeredStep }] : [])),
       tip: this.run.effects.banner?.tone === 'tip' ? this.run.effects.banner.text : null,
       pullX: state.pull.x,
       pullY: state.pull.y,

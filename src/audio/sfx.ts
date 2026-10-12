@@ -34,6 +34,9 @@ export interface SoundPlayer {
   setEnabled(enabled: boolean): void;
 }
 
+/** Le son du passage qui se referme est celui du rebond, environ neuf demi-tons plus bas : grave, il dure près d'une seconde. */
+export const ESCAPE_PITCH = 0.6;
+
 /** Jusqu'où la série monte le son du parfait : un demi-ton par parfait d'affilée, huit au plus. */
 export const PERFECT_PITCH_STEPS = 8;
 
@@ -82,6 +85,9 @@ export function cueFor(event: RuleEvent): Cue | null {
       return { id: 'finish', pitch: 1 };
     case 'tier':
       return { id: 'tier', pitch: 1 };
+    case 'escape':
+      // Le champ de force du rebond, grave et plus long : un passage dont la porte d'énergie se met en marche.
+      return { id: 'bounce', pitch: ESCAPE_PITCH };
     default:
       return null;
   }

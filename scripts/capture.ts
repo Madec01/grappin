@@ -44,7 +44,7 @@ const PORT = 4175;
 const VIEWPORT = { width: 390, height: 844 };
 const outDir = resolve(process.argv[2] ?? 'captures');
 const seed = Number(process.argv[3] ?? '1');
-/** `scenes` en troisième argument : seulement les prises des scènes des lots 2 et 3, pour les revoir sans rejouer tout le banc. */
+/** `scenes` en troisième argument : seulement les prises des scènes des lots 2, 3 et 5, pour les revoir sans rejouer tout le banc. */
 const onlyScenes = process.argv[4] === 'scenes';
 /** Après `scenes`, des noms de scènes (`courant derive`) pour ne rejouer que celles-là ; aucun nom, toutes les scènes. */
 const sceneFilter = onlyScenes ? process.argv.slice(5) : [];
@@ -194,7 +194,7 @@ function encodeGif(ffmpeg: string, webm: string, gif: string): void {
 }
 
 /**
- * Les scènes des lots 2 et 3 (`playScene(id)` : un premier segment construit à la main pour chaque mécanique). Chaque prise a son contexte neuf,
+ * Les scènes des lots 2, 3 et 5 (`playScene(id)` : un premier segment construit à la main pour chaque mécanique). Chaque prise a son contexte neuf,
  * l'horloge de la page figée avant la scène puis menée à la main, comme pour le pouls : l'image voulue est exacte, jamais à quelques images
  * près. La brume est lente, car on laisse le personnage s'attarder pour bien voir. Les pas par image sont ceux d'une image à 60 Hz.
  */
@@ -229,6 +229,24 @@ const ACCORDION_CLOSING_PHASE = 0.45;
 const ACCORDION_OPENING_PHASE = 0.95;
 /** La poche : le personnage est « bien dedans » à cette hauteur (la poche s'étend de 8,6 m à 20,6 m, ses rampes de 1,5 m aux deux bouts). */
 const POCKET_SHOT_Y = 14;
+
+/**
+ * Le lot 5 (0.15.0). L'aimant : l'image est prise en chemin, quand le personnage tenu n'est plus qu'à `MAGNET_SHOT_GAP` mètres du noyau, le champ actif (le « Parfait »
+ * flottant du lâcher d'avant a eu le temps de s'effacer). L'interrupteur : la prise est lâchée depuis `SWITCH_SHOT_SECONDS` secondes, le personnage pendu à la prise suivante
+ * (pour que le verrou reste dans l'image), le verrou ouvert, sa jauge à moitié pleine. Le rail : après `RAIL_SETTLE_SECONDS` secondes tenu, un doigt posé
+ * en bas de l'écran (`RAIL_FINGER`) glisse de `RAIL_SLIDE_METERS` de côté. Le lien élastique : tenu étiré d'au moins `ELASTIC_SHOT_STRETCH` mètres. Le
+ * passage qui se referme : `EVASION_SHOT_SECONDS` secondes après le déclenchement, la bannière encore pleine et les panneaux en route.
+ */
+const MAGNET_SHOT_GAP = 1.5;
+const SWITCH_SHOT_SECONDS = 2;
+const RAIL_FINGER = { x: 195, y: 650 };
+const RAIL_SLIDE_METERS = 0.9;
+const RAIL_SETTLE_SECONDS = 1;
+/** Pour étalonner le doigt du rail : un premier glissement de ce nombre de pixels dit combien de mètres de traction vaut un pixel. */
+const RAIL_CALIBRATION_PIXELS = 40;
+const RAIL_AFTER_FRAMES = 3;
+const ELASTIC_SHOT_STRETCH = 1.5;
+const EVASION_SHOT_SECONDS = 1.4;
 
 /** Mène l'horloge figée de la page jusqu'au pas de simulation `target` (à un pas ou deux près, par excès), par grands bonds puis image par image. */
 async function advanceToStep(page: Page, target: number): Promise<number> {
@@ -300,7 +318,13 @@ const ZONE_SHOTS: readonly { readonly id: string; readonly file: string; readonl
  *  - 39-scene-accordeon : les deux bandes presque jointes et encore en train de se rapprocher, le personnage accroché à l'une d'elles, le panneau
  *    de chaque bande, son liseré intérieur et ses chevrons qui pointent vers le milieu ; 39-scene-accordeon-ecarte : les mêmes bandes presque au
  *    plus écartées et en train de s'écarter, chevrons vers l'extérieur ;
- *  - 40-scene-poche : le personnage bien dans la poche de faible gravité (fond lavande, rampes douces en haut et en bas, particules qui flottent).
+ *  - 40-scene-poche : le personnage bien dans la poche de faible gravité (fond lavande, rampes douces en haut et en bas, particules qui flottent) ;
+ *  - 41-scene-aimant : l'aimant tenu, le personnage attiré à trois mètres du noyau : le noyau allumé, les anneaux du champ qui convergent, le trait tireté de champ à la
+ *    place de la corde ; 42-scene-interrupteur : la prise lâchée depuis deux secondes, son verrou ouvert, sa jauge à moitié pleine, le pointillé qui l'y relie et l'anneau
+ *    du délai autour de la prise ;
+ *  - 43-scene-rail : le rail tenu, un doigt glissé de côté : le curseur au bout de l'arc, la flèche de la direction du lancer, l'ombre qui la prolonge ;
+ *    44-scene-elastique : le lien tenu et bien étiré (1,5 m au moins sur 2), le trait épais et clair entre ses deux cercles tiretés ;
+ *  - 45-scene-evasion : le couloir qui se referme, 1,4 s après l'entrée : les panneaux de sortie en route, leur liseré et leur jauge, la bannière « Le passage se referme ! ».
  * Une prise que le parcours ne permet plus (réglages changés) est omise avec un avertissement, sans bloquer le banc.
  */
 async function captureScenes(browser: Browser): Promise<void> {
@@ -645,6 +669,119 @@ async function captureScenes(browser: Browser): Promise<void> {
       const s = await page.evaluate(() => window.__grappin!.state());
       await page.screenshot({ path: join(outDir, `${shot.file}.png`) });
       console.log(`${shot.file} : zone ${s.zone}, pas ${s.step}, hauteur ${s.pos.y.toFixed(1)} m, vitesse (${s.vel.x.toFixed(1)}, ${s.vel.y.toFixed(1)}) m/s, ${s.zones} zone(s) chargée(s)`);
+    }
+    await close();
+  }
+
+  // L'aimant : le pilote tient l'aimant ; le champ le rapproche du noyau, l'image est prise en chemin. `keep` retient le pilote : sans lui, il lâcherait dès que le vol attrape plus haut.
+  if (wanted('aimant')) {
+    const world = sceneWorld('aimant', seed);
+    const core = world.anchors.find((a) => a.kind === 'aimant');
+    if (!core) console.warn('41-scene-aimant : pas d\'aimant dans la scène, prise omise');
+    else {
+      const { page, close } = await openScene(browser, 'aimant');
+      await page.clock.runFor(PULSE_INTRO_MS);
+      const gap = (s: Seen): number => Math.hypot(s.pos.x - core.pos.x, s.pos.y - core.pos.y);
+      const pulled = await climbUntil(page, (s) => s.heldKind === 'aimant' && gap(s) <= MAGNET_SHOT_GAP, { world, keep: (s) => s.heldKind === 'aimant' });
+      if (!pulled) console.warn('41-scene-aimant : le personnage n\'est jamais attiré à moins de trois mètres du noyau, prise omise');
+      else {
+        const s = await page.evaluate(() => window.__grappin!.state());
+        await page.screenshot({ path: join(outDir, '41-scene-aimant.png') });
+        console.log(`41-scene-aimant : attiré, à ${gap(s).toFixed(1)} m du noyau, vitesse ${Math.hypot(s.vel.x, s.vel.y).toFixed(1)} m/s, pas ${s.step}`);
+      }
+      await close();
+    }
+  }
+
+  // L'interrupteur : le pilote veut cette prise (le robot l'ignorerait), la tient, la lâche ; l'image est prise deux secondes plus tard, le verrou encore ouvert.
+  if (wanted('interrupteur')) {
+    const world = sceneWorld('interrupteur', seed);
+    const lever = world.anchors.find((a) => a.kind === 'interrupteur');
+    if (!lever) console.warn('42-scene-interrupteur : pas d\'interrupteur dans la scène, prise omise');
+    else {
+      const { page, close } = await openScene(browser, 'interrupteur');
+      await page.clock.runFor(PULSE_INTRO_MS);
+      let held = false;
+      let releasedStep = -1;
+      const sinceRelease = (s: Seen): number => (releasedStep < 0 ? 0 : (s.step - releasedStep) * DEFAULT_TUNING.stepSeconds);
+      const open = await climbUntil(
+        page,
+        (s) => {
+          if (s.heldKind === 'interrupteur') held = true;
+          else if (held && releasedStep < 0) releasedStep = s.step;
+          return releasedStep >= 0 && s.switchOpen && sinceRelease(s) >= SWITCH_SHOT_SECONDS;
+        },
+        // Le pilote grimpe vite : sans `keep`, il serait à dix-sept mètres du verrou deux secondes après le lâcher. Pendu à la prise suivante, il y reste jusque-là.
+        { world, hold: lever.id, keep: (s) => releasedStep >= 0 && sinceRelease(s) < SWITCH_SHOT_SECONDS },
+      );
+      if (!open) console.warn('42-scene-interrupteur : le pilote ne tient pas la prise, ou le verrou se referme avant l\'image, prise omise');
+      else {
+        const s = await page.evaluate(() => window.__grappin!.state());
+        await page.screenshot({ path: join(outDir, '42-scene-interrupteur.png') });
+        console.log(`42-scene-interrupteur : lâchée depuis ${((s.step - releasedStep) * DEFAULT_TUNING.stepSeconds).toFixed(1)} s, verrou ouvert, personnage en (${s.pos.x.toFixed(1)}, ${s.pos.y.toFixed(1)}) m, pas ${s.step}`);
+      }
+      await close();
+    }
+  }
+
+  // Le rail : le pilote tient le rail sans tirer ; un vrai doigt (la souris) se pose en bas de l'écran et glisse de côté. L'étalonnage dit combien de mètres vaut un pixel, pour glisser de la distance voulue.
+  if (wanted('rail')) {
+    const world = sceneWorld('rail', seed);
+    const { page, close } = await openScene(browser, 'rail');
+    await page.clock.runFor(PULSE_INTRO_MS);
+    const held = await climbUntil(page, (s) => s.heldKind === 'rail', { world, launchNotBefore: Infinity });
+    if (!held) console.warn('43-scene-rail : le pilote n\'atteint pas le rail, prise omise');
+    else {
+      // Le « Parfait » flottant du lâcher d'avant s'efface pendant que le pilote, qui ne tire pas, tient le rail.
+      await page.clock.runFor(RAIL_SETTLE_SECONDS * 1000);
+      const slide = async (pixels: number): Promise<number> => {
+        await page.mouse.move(RAIL_FINGER.x + pixels, RAIL_FINGER.y, { steps: 4 });
+        for (let frame = 0; frame < RAIL_AFTER_FRAMES; frame += 1) await page.clock.runFor(FRAME_MS);
+        return (await page.evaluate(() => window.__grappin!.state())).pullX;
+      };
+      await page.mouse.move(RAIL_FINGER.x, RAIL_FINGER.y);
+      await page.mouse.down();
+      const perPixel = (await slide(RAIL_CALIBRATION_PIXELS)) / RAIL_CALIBRATION_PIXELS;
+      await slide(RAIL_SLIDE_METERS / perPixel);
+      const s = await page.evaluate(() => window.__grappin!.state());
+      await page.screenshot({ path: join(outDir, '43-scene-rail.png') });
+      console.log(`43-scene-rail : doigt glissé de ${s.pullX.toFixed(2)} m, personnage en (${s.pos.x.toFixed(1)}, ${s.pos.y.toFixed(1)}) m, pas ${s.step}`);
+      await page.mouse.up();
+    }
+    await close();
+  }
+
+  // Le lien élastique : le pilote tient le lien ; l'image est prise quand l'étirement dépasse `ELASTIC_SHOT_STRETCH`, au bas d'un rebond.
+  if (wanted('elastique')) {
+    const world = sceneWorld('elastique', seed);
+    const link = world.anchors.find((a) => a.kind === 'elastique');
+    if (!link) console.warn('44-scene-elastique : pas de lien élastique dans la scène, prise omise');
+    else {
+      const { page, close } = await openScene(browser, 'elastique');
+      await page.clock.runFor(PULSE_INTRO_MS);
+      const stretch = (s: Seen): number => Math.max(0, Math.hypot(s.pos.x - link.pos.x, s.pos.y - link.pos.y) - (s.ropeLength ?? 0));
+      const taut = await climbUntil(page, (s) => s.heldKind === 'elastique' && stretch(s) >= ELASTIC_SHOT_STRETCH, { world, keep: (s) => s.heldKind === 'elastique' });
+      if (!taut) console.warn('44-scene-elastique : le lien n\'est jamais étiré autant, prise omise');
+      else {
+        const s = await page.evaluate(() => window.__grappin!.state());
+        await page.screenshot({ path: join(outDir, '44-scene-elastique.png') });
+        console.log(`44-scene-elastique : étirement ${stretch(s).toFixed(2)} m, personnage en (${s.pos.x.toFixed(1)}, ${s.pos.y.toFixed(1)}) m, pas ${s.step}`);
+      }
+      await close();
+    }
+  }
+
+  // Le passage qui se referme : le pilote entre dans le couloir ; l'image est prise `EVASION_SHOT_SECONDS` secondes après le déclenchement, les panneaux en route et la bannière pleine.
+  if (wanted('evasion')) {
+    const world = sceneWorld('evasion', seed);
+    const { page, close } = await openScene(browser, 'evasion');
+    await page.clock.runFor(PULSE_INTRO_MS);
+    const closing = await climbUntil(page, (s) => s.triggered.length > 0 && (s.step - s.triggered[0]!.step) * DEFAULT_TUNING.stepSeconds >= EVASION_SHOT_SECONDS, { world });
+    if (!closing) console.warn('45-scene-evasion : le passage ne se déclenche pas, prise omise');
+    else {
+      const s = await page.evaluate(() => window.__grappin!.state());
+      await page.screenshot({ path: join(outDir, '45-scene-evasion.png') });
+      console.log(`45-scene-evasion : déclenché depuis ${((s.step - s.triggered[0]!.step) * DEFAULT_TUNING.stepSeconds).toFixed(1)} s, personnage en (${s.pos.x.toFixed(1)}, ${s.pos.y.toFixed(1)}) m, pas ${s.step}`);
     }
     await close();
   }

@@ -5,34 +5,55 @@ import {
   BAND_MIN_WIDTH,
   BAND_PAD_X,
   BAND_PAD_Y,
+  CLOSER_BLINK_HZ,
   DOOR_BLINK_HZ,
   CRACK_SPACING,
+  ELASTIC_GLOW_MAX,
+  ELASTIC_GLOW_MIN,
+  ELASTIC_WIDTH_MAX,
+  ELASTIC_WIDTH_MIN,
+  ELASTIC_WIGGLE_MAX,
+  MAGNET_RINGS_PER_SECOND,
+  MAGNET_RING_COUNT,
+  RAIL_SEGMENTS,
   ROTOR_PIVOT_RADIUS,
   SKIN,
+  SWITCH_WARNING_SECONDS,
   WHEEL_RIM_RADIUS,
   WHEEL_SPOKES,
   WHEEL_TURNS_PER_SECOND,
   accordionBands,
+  arrowWings,
   bandChevronCount,
+  closerLook,
   crackPattern,
   doorLook,
+  elasticLook,
+  lockLook,
+  magnetPhase,
+  magnetRing,
+  railArc,
+  rectEdgePoint,
   ringPhase,
   rotorWidths,
   springTeeth,
   stepWave,
+  strandOffset,
+  strandPhase,
   wheelAngle,
   wheelChevrons,
   wheelDirection,
   wheelSpokes,
 } from '../src/render/skins';
 import { COLOR } from '../src/render/style';
-import { DOOR_OPEN_SECONDS, DOOR_PERIOD_SECONDS, DOOR_WARNING_SECONDS, doorGauge, doorState } from '../src/sim/cycles';
+import { DOOR_OPEN_SECONDS, DOOR_PERIOD_SECONDS, DOOR_WARNING_SECONDS, doorGauge, doorState, switchGauge } from '../src/sim/cycles';
 import { cablePosition } from '../src/sim/events';
 import { RING_RADIUS } from '../src/sim/generator';
-import { ROTOR_THICKNESS } from '../src/sim/moving';
+import { DEFAULT_RAIL, ELASTIC_MAX_STRETCH, RAIL_HALF_WIDTH, RAIL_RISE, SWITCH_HOLD_SECONDS, railPoint } from '../src/sim/holds';
+import { ROTOR_THICKNESS, closerState } from '../src/sim/moving';
 import { motorStep } from '../src/sim/physics';
 import { RING_CENTRE_RATIO } from '../src/sim/rules';
-import type { Anchor } from '../src/sim/state';
+import type { Anchor, Obstacle } from '../src/sim/state';
 import { DEFAULT_TUNING as T } from '../src/sim/tuning';
 
 const SECOND = Math.round(1 / T.stepSeconds);
@@ -447,5 +468,277 @@ describe('les bandes de l\'accordéon : un panneau derrière les prises de chaqu
     expect(bandChevronCount(band!)).toBe(Math.round((6 + 2 * BAND_PAD_Y) / BAND_CHEVRON_SPACING));
     const [tiny] = accordionBands([slider(1, 1, 2, 10)], 0, T);
     expect(bandChevronCount(tiny!)).toBe(1);
+  });
+});
+
+describe('l\'aimant : les anneaux de son champ', () => {
+  it('au repos, des anneaux fixes également répartis entre le noyau et le bord, tous visibles, sans jamais toucher ni l\'un ni l\'autre', () => {
+    const rings = Array.from({ length: MAGNET_RING_COUNT }, (_, k) => magnetRing(k, MAGNET_RING_COUNT, 0, false));
+    for (const ring of rings) {
+      expect(ring.ratio).toBeGreaterThan(0);
+      expect(ring.ratio).toBeLessThan(1);
+      expect(ring.alpha).toBe(1);
+    }
+    const gaps = rings.map((ring, k) => ring.ratio - (rings[k - 1]?.ratio ?? 0));
+    for (const gap of gaps) expect(gap).toBeCloseTo(gaps[0]!, 9);
+    // La phase n'y change rien : au repos, rien ne bouge.
+    expect(magnetRing(1, MAGNET_RING_COUNT, 0.7, false)).toEqual(magnetRing(1, MAGNET_RING_COUNT, 0, false));
+  });
+
+  it('tenu, les anneaux convergent vers le noyau : leur rayon décroît quand la phase avance, et ils naissent et s\'éteignent invisibles', () => {
+    for (let k = 0; k < MAGNET_RING_COUNT; k += 1) {
+      let previous = Infinity;
+      for (let phase = 0; phase < 1; phase += 0.05) {
+        const ring = magnetRing(k, MAGNET_RING_COUNT, phase, true);
+        expect(ring.ratio).toBeLessThan(previous);
+        expect(ring.ratio).toBeGreaterThan(0);
+        expect(ring.ratio).toBeLessThanOrEqual(1);
+        expect(ring.alpha).toBeGreaterThanOrEqual(0);
+        expect(ring.alpha).toBeLessThanOrEqual(1);
+        previous = ring.ratio;
+      }
+    }
+    // Au bord (rayon 1) l'anneau n'est pas là ; au noyau non plus : il passe de l'un à l'autre en s'éclairant à mi-chemin.
+    expect(magnetRing(0, MAGNET_RING_COUNT, 0, true)).toEqual({ ratio: 1, alpha: 0 });
+    const last = magnetRing(MAGNET_RING_COUNT - 1, MAGNET_RING_COUNT, 0.999999, true);
+    expect(last.ratio).toBeCloseTo(0, 5);
+    expect(last.alpha).toBeCloseTo(0, 5);
+    expect(magnetRing(1, MAGNET_RING_COUNT, 0.5, true).alpha).toBeGreaterThan(0.9);
+  });
+
+  it('la phase revient à 0 à chaque période de l\'horloge des effets, sans jamais atteindre 1', () => {
+    const period = 1 / MAGNET_RINGS_PER_SECOND;
+    expect(magnetPhase(0)).toBe(0);
+    expect(magnetPhase(period / 2)).toBeCloseTo(0.5, 9);
+    expect(magnetPhase(3 * period)).toBeCloseTo(0, 9);
+    for (let clock = 0; clock < 10; clock += 0.0731) {
+      expect(magnetPhase(clock)).toBeGreaterThanOrEqual(0);
+      expect(magnetPhase(clock)).toBeLessThan(1);
+    }
+  });
+});
+
+describe('lockLook : ce que le rendu dessine du verrou d\'une prise interrupteur', () => {
+  const LOCK_ID = 5;
+  const LEVER_ID = 3;
+  const OPEN_STEPS = Math.round(SWITCH_HOLD_SECONDS * SECOND);
+  /** Un verrou ouvert jusqu'au pas `until` (ou jamais ouvert), et la prise tenue ou non. */
+  const lock = (openUntilStep?: number): Pick<Obstacle, 'id' | 'switchedBy' | 'openUntilStep'> => ({ id: LOCK_ID, switchedBy: LEVER_ID, ...(openUntilStep === undefined ? {} : { openUntilStep }) });
+  const at = (step: number, holding: boolean, inside: number[] = []) => ({ step, doorsInside: inside, rope: holding ? { anchorId: LEVER_ID, length: 3 } : null });
+
+  it('fermé tant que la prise n\'a pas été tenue : masse pleine, jauge vide ; fermé de nouveau une fois le délai écoulé', () => {
+    expect(lockLook(lock(), at(10, false), T)).toEqual({ phase: 'fermee', gauge: 0, beat: 1, held: false });
+    expect(lockLook(lock(100), at(100, false), T).phase).toBe('fermee');
+    expect(lockLook(lock(100), at(500, false), T).phase).toBe('fermee');
+  });
+
+  it('tenu, il est franchement ouvert : jauge à 0, rien ne s\'écoule, et il est dit tenu', () => {
+    const look = lockLook(lock(50 + OPEN_STEPS), at(50, true), T);
+    expect(look).toEqual({ phase: 'ouverte', gauge: 0, beat: 1, held: true });
+  });
+
+  it('après le lâcher, la jauge se remplit de 0 à 1 comme `switchGauge`, il avertit pendant la dernière seconde, puis se ferme', () => {
+    const release = 1000;
+    const until = release + OPEN_STEPS;
+    let warned = 0;
+    let previous = -1;
+    for (let step = release; step < until; step += 1) {
+      const look = lockLook(lock(until), at(step, false), T);
+      expect(look.held).toBe(false);
+      expect(look.gauge).toBe(switchGauge({ openUntilStep: until }, step, T, SWITCH_HOLD_SECONDS));
+      expect(look.gauge).toBeGreaterThanOrEqual(previous);
+      previous = look.gauge;
+      expect(look.phase).toBe(step >= until - Math.round(SWITCH_WARNING_SECONDS * SECOND) ? 'avertit' : 'ouverte');
+      if (look.phase === 'avertit') warned += 1;
+    }
+    expect(warned).toBe(Math.round(SWITCH_WARNING_SECONDS * SECOND));
+    expect(lockLook(lock(until), at(until, false), T).phase).toBe('fermee');
+  });
+
+  it('l\'avertissement clignote entre 0 et 1, et vraiment ; ailleurs le contour est franc', () => {
+    const until = 600;
+    const beats = Array.from({ length: Math.round(SWITCH_WARNING_SECONDS * SECOND) }, (_, k) => lockLook(lock(until), at(until - 1 - k, false), T).beat);
+    expect(Math.min(...beats)).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...beats)).toBeLessThanOrEqual(1);
+    expect(Math.max(...beats) - Math.min(...beats)).toBeGreaterThan(0.5);
+    expect(lockLook(lock(until), at(until - 2 * SECOND, false), T).beat).toBe(1);
+  });
+
+  it('refermé sur le personnage qu\'il a surpris dedans, il le laisse passer ; ouvert, rien ne change qu\'il y soit ou non', () => {
+    expect(lockLook(lock(100), at(200, false, [LOCK_ID]), T).phase).toBe('passage');
+    expect(lockLook(lock(100), at(200, false, [LOCK_ID + 1]), T).phase).toBe('fermee');
+    expect(lockLook(lock(200 + OPEN_STEPS), at(200, false, [LOCK_ID]), T).phase).toBe('ouverte');
+  });
+});
+
+describe('rectEdgePoint : où le lien d\'un interrupteur touche son verrou', () => {
+  it('sort du rectangle par le côté que le segment rencontre, sur le segment', () => {
+    // Un verrou large et bas, centré en (0, 0) : vu de loin à droite, il est touché par son côté droit ; vu de loin en haut, par son côté haut.
+    expect(rectEdgePoint(0, 0, 2, 0.5, 10, 0)).toEqual({ x: 2, y: 0 });
+    expect(rectEdgePoint(0, 0, 2, 0.5, 0, -10)).toEqual({ x: 0, y: -0.5 });
+    const oblique = rectEdgePoint(0, 0, 2, 0.5, 4, 4);
+    expect(oblique.x).toBeCloseTo(0.5, 9);
+    expect(oblique.y).toBeCloseTo(0.5, 9);
+  });
+
+  it('une cible dans le rectangle, ou au centre, reste elle-même', () => {
+    expect(rectEdgePoint(1, 1, 2, 2, 1.5, 1.2)).toEqual({ x: 1.5, y: 1.2 });
+    expect(rectEdgePoint(1, 1, 2, 2, 1, 1)).toEqual({ x: 1, y: 1 });
+  });
+});
+
+describe('railArc : l\'arc du rail', () => {
+  it('suit la simulation : les positions de `railPoint`, de bout en bout, relatives à la prise', () => {
+    const arc = railArc(DEFAULT_RAIL);
+    expect(arc).toHaveLength(2 * (RAIL_SEGMENTS + 1));
+    for (let i = 0; i <= RAIL_SEGMENTS; i += 1) {
+      const point = railPoint({ x: 0, y: 0 }, DEFAULT_RAIL, i / RAIL_SEGMENTS);
+      expect(arc[2 * i]).toBeCloseTo(point.x, 12);
+      expect(arc[2 * i + 1]).toBeCloseTo(point.y, 12);
+    }
+    // Les bouts sont à la hauteur de la prise, de part et d\'autre ; le sommet est la flèche de l\'arc, au milieu.
+    expect(arc[0]).toBeCloseTo(-RAIL_HALF_WIDTH, 12);
+    expect(arc[1]).toBeCloseTo(0, 12);
+    expect(arc[2 * RAIL_SEGMENTS]).toBeCloseTo(RAIL_HALF_WIDTH, 12);
+    expect(arc[2 * RAIL_SEGMENTS + 1]).toBeCloseTo(0, 12);
+    expect(arc[RAIL_SEGMENTS]).toBeCloseTo(0, 12);
+    expect(arc[RAIL_SEGMENTS + 1]).toBeCloseTo(RAIL_RISE, 12);
+  });
+
+  it('une quinzaine de positions, calculées une fois par rail : le même tableau à chaque appel', () => {
+    expect(RAIL_SEGMENTS + 1).toBeGreaterThanOrEqual(15);
+    expect(railArc(DEFAULT_RAIL)).toBe(railArc(DEFAULT_RAIL));
+    // Un autre rail a son propre arc.
+    const wide = { halfWidth: 2, rise: 1 };
+    expect(railArc(wide)).not.toBe(railArc(DEFAULT_RAIL));
+    expect(railArc(wide)[2 * RAIL_SEGMENTS]).toBeCloseTo(2, 12);
+  });
+});
+
+describe('arrowWings : la pointe d\'une flèche', () => {
+  it('deux ailes en arrière de la pointe, de part et d\'autre de la direction, de même longueur', () => {
+    const [ax, ay, bx, by] = arrowWings(0, -1, 10);
+    // Une flèche qui monte (y vers le bas à l\'écran) : ses ailes sont plus bas que la pointe, et symétriques.
+    expect(ay).toBeGreaterThan(0);
+    expect(by).toBeGreaterThan(0);
+    expect(ax).toBeCloseTo(-bx, 9);
+    expect(ay).toBeCloseTo(by, 9);
+    expect(Math.hypot(ax, ay)).toBeCloseTo(Math.hypot(bx, by), 9);
+  });
+
+  it('ne dépend que de la direction, pas de la longueur du vecteur, et se tourne avec elle', () => {
+    expect(arrowWings(0, -5, 10)).toEqual(arrowWings(0, -1, 10));
+    const [ax, ay] = arrowWings(1, 0, 10);
+    const [rx, ry] = arrowWings(0, 1, 10);
+    // Tournée d\'un quart de tour, l\'aile garde sa longueur.
+    expect(Math.hypot(ax, ay)).toBeCloseTo(Math.hypot(rx, ry), 9);
+    expect(arrowWings(0, 0, 10)).toEqual([0, 0, 0, 0]);
+  });
+});
+
+describe('elasticLook : ce que le rendu dessine du lien élastique tenu', () => {
+  const SCALE = 39;
+
+  it('tendu à peine, un trait fin, vert tendre ; à l\'étirement maximal, le plus épais et le plus lumineux, blanc', () => {
+    const taut = elasticLook(0, 0, SCALE);
+    const full = elasticLook(ELASTIC_MAX_STRETCH, 0, SCALE);
+    expect(taut).toMatchObject({ ratio: 0, width: ELASTIC_WIDTH_MIN, color: COLOR.elastic, wiggle: 0 });
+    expect(taut.glow).toBeCloseTo(ELASTIC_GLOW_MIN, 9);
+    expect(full).toMatchObject({ ratio: 1, width: ELASTIC_WIDTH_MAX, color: COLOR.white, wiggle: 0 });
+    expect(full.glow).toBeCloseTo(ELASTIC_GLOW_MAX, 9);
+    // Au-delà de la butée (le rendu ne le voit jamais), rien de plus.
+    expect(elasticLook(5 * ELASTIC_MAX_STRETCH, 0, SCALE)).toEqual(full);
+  });
+
+  it('l\'épaisseur, la lumière et la clarté croissent avec l\'étirement, sans jamais décroître', () => {
+    let previous = elasticLook(0, 0, SCALE);
+    const brightness = (color: number): number => ((color >> 16) & 0xff) + ((color >> 8) & 0xff) + (color & 0xff);
+    for (let stretch = 0.1; stretch <= ELASTIC_MAX_STRETCH + 1e-9; stretch += 0.1) {
+      const look = elasticLook(stretch, 0, SCALE);
+      expect(look.width).toBeGreaterThan(previous.width);
+      expect(look.glow).toBeGreaterThan(previous.glow);
+      expect(brightness(look.color)).toBeGreaterThanOrEqual(brightness(previous.color));
+      previous = look;
+    }
+  });
+
+  it('mou, un trait fin qui ondule d\'autant plus qu\'il pend, jusqu\'à un plafond ; tendu, il ne bouge plus', () => {
+    const slack = (meters: number) => elasticLook(0, meters, SCALE);
+    expect(slack(0.1).width).toBe(ELASTIC_WIDTH_MIN);
+    expect(slack(0.1).wiggle).toBeGreaterThan(0);
+    expect(slack(0.2).wiggle).toBeGreaterThan(slack(0.1).wiggle);
+    expect(slack(0.2).wiggle).toBeLessThan(ELASTIC_WIGGLE_MAX);
+    expect(slack(100).wiggle).toBe(ELASTIC_WIGGLE_MAX);
+    expect(elasticLook(1, 0, SCALE).wiggle).toBe(0);
+  });
+
+  it('l\'ondulation est nulle aux deux bouts du lien, bornée par son amplitude, et avance avec le pas de simulation', () => {
+    for (const phase of [0, 1, 2.5]) {
+      expect(strandOffset(0, 8, phase)).toBeCloseTo(0, 9);
+      expect(strandOffset(1, 8, phase)).toBeCloseTo(0, 9);
+      for (let u = 0; u <= 1; u += 0.05) expect(Math.abs(strandOffset(u, 8, phase))).toBeLessThanOrEqual(8 + 1e-9);
+    }
+    expect(strandOffset(0.3, 8, 0)).not.toBeCloseTo(strandOffset(0.3, 8, 1), 3);
+    expect(strandPhase(0, T.stepSeconds)).toBe(0);
+    expect(strandPhase(2 * SECOND, T.stepSeconds)).toBeGreaterThan(strandPhase(SECOND, T.stepSeconds));
+    expect(strandOffset(0.4, 0, 1.7)).toBe(0);
+  });
+});
+
+describe('closerLook : ce que le rendu dessine d\'un panneau de passage qui se referme', () => {
+  const CLOSE = 8;
+  const SHUT = 4;
+  const panel = (triggeredStep?: number): Obstacle => ({
+    id: 3,
+    x0: -7.2,
+    y0: 19.1,
+    x1: -3.6,
+    y1: 19.5,
+    closer: { triggerY: 10.1, travel: 3.6, side: 1, closeSeconds: CLOSE, shutSeconds: SHUT },
+    ...(triggeredStep === undefined ? {} : { triggeredStep }),
+  });
+  const after = (seconds: number): number => 500 + Math.round(seconds * SECOND);
+
+  it('armé tant qu\'il n\'est pas déclenché : discret, jauge vide, liseré franc', () => {
+    expect(closerLook(panel(), 0, T)).toEqual({ phase: 'arme', gauge: 0, beat: 1 });
+    expect(closerLook(panel(), 100_000, T).phase).toBe('arme');
+  });
+
+  it('suit la séquence de la simulation, sans en inventer une autre : se ferme, fermé, rouvre', () => {
+    const box = panel(500);
+    for (let step = 500; step < after(2 * CLOSE + SHUT) + 5; step += 7) expect(closerLook(box, step, T).phase).toBe(closerState(box, step, T));
+    expect(closerLook(box, after(1), T).phase).toBe('se ferme');
+    expect(closerLook(box, after(CLOSE + 1), T).phase).toBe('ferme');
+    expect(closerLook(box, after(CLOSE + SHUT + 1), T).phase).toBe('rouvre');
+    // La simulation réarme le panneau en retirant son pas de déclenchement : il redevient discret.
+    expect(closerLook(panel(), after(2 * CLOSE + SHUT + 1), T).phase).toBe('arme');
+  });
+
+  it('la jauge se remplit pendant la fermeture, reste pleine fermé, se vide en rouvrant', () => {
+    const box = panel(500);
+    expect(closerLook(box, after(0), T).gauge).toBeCloseTo(0, 9);
+    expect(closerLook(box, after(CLOSE / 2), T).gauge).toBeCloseTo(0.5, 2);
+    expect(closerLook(box, after(CLOSE - 0.01), T).gauge).toBeGreaterThan(0.99);
+    expect(closerLook(box, after(CLOSE + SHUT / 2), T).gauge).toBe(1);
+    expect(closerLook(box, after(CLOSE + SHUT + CLOSE / 2), T).gauge).toBeCloseTo(0.5, 2);
+    expect(closerLook(box, after(CLOSE + SHUT + CLOSE - 0.01), T).gauge).toBeLessThan(0.01);
+    let previous = -1;
+    for (let step = after(0); step < after(CLOSE); step += 5) {
+      const { gauge } = closerLook(box, step, T);
+      expect(gauge).toBeGreaterThanOrEqual(previous);
+      previous = gauge;
+    }
+  });
+
+  it('le liseré ne clignote que pendant la fermeture, entre 0 et 1 et vraiment ; franc ailleurs', () => {
+    const box = panel(500);
+    const beats = Array.from({ length: SECOND }, (_, k) => closerLook(box, after(1) + k, T).beat);
+    expect(Math.min(...beats)).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...beats)).toBeLessThanOrEqual(1);
+    expect(Math.max(...beats) - Math.min(...beats)).toBeGreaterThan(0.5);
+    expect(CLOSER_BLINK_HZ).toBeGreaterThan(1);
+    expect(closerLook(box, after(CLOSE + 1), T).beat).toBe(1);
+    expect(closerLook(box, after(CLOSE + SHUT + 1), T).beat).toBe(1);
+    expect(closerLook(panel(), 12, T).beat).toBe(1);
   });
 });

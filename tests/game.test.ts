@@ -4,13 +4,14 @@ import { DEFAULT_PULSE_BPM, Game, PALETTE_FADE_SECONDS, readSettings, visibleExt
 import { Music, type AudioPlayer } from '../src/audio/music';
 import { BEAT_DECAY, SILENT_PULSE, pulseAt, syntheticRhythm, type Pulse } from '../src/audio/rhythm';
 import { fixedRhythms, type RhythmSource } from '../src/audio/rhythms';
-import type { Cue, SoundPlayer } from '../src/audio/sfx';
+import { ESCAPE_PITCH, type Cue, type SoundPlayer } from '../src/audio/sfx';
 import { loadProfile as loadSavedProfile } from '../src/meta/profile';
 import { LEVELS, levelById } from '../src/data/levels';
 import { createProfile, loadProfile, memoryStorage, saveProfile, type LevelOutcome, type Profile, type ProfileStorage, type RunOutcome } from '../src/meta/profile';
 import type { TalismanId } from '../src/meta/talismans';
 import { FIRST_CLEAR_XP, STAR_XP, freeRunStartY, unlockedLevel, type LevelResult } from '../src/meta/traversee';
 import type { ButtonId } from '../src/render/buttons';
+import { ESCAPE_ANNOUNCEMENT } from '../src/render/labels';
 import type { Camera } from '../src/render/camera';
 import { PALETTES, mixPalette, type Palette } from '../src/render/palette';
 import type { DeathCause, GameFrame, GameScreen } from '../src/render/renderer';
@@ -350,6 +351,7 @@ describe('jeu', () => {
         'releaseWindow',
         'switchOpen',
         'closing',
+        'triggered',
         'rings',
         'ropeLength',
         'runs',
@@ -2260,5 +2262,35 @@ describe('anchors() : de quelle bande d\'accordéon est chaque prise', () => {
   it('hors de la scène, aucune prise n\'est d\'une bande', () => {
     const { game } = makeFreeGame('?scene=rebond&graine=5');
     expect(game.anchors().every((anchor) => anchor.band === null)).toBe(true);
+  });
+});
+
+describe('le passage qui se referme : ce que le jeu en dit', () => {
+  it('quand le personnage entre dans le couloir : une bannière, un son grave, et state() le dit (closing, triggered) ; avant, rien', () => {
+    const played: Cue[] = [];
+    const sfx: SoundPlayer = { unlock: () => undefined, play: (cue) => void played.push(cue), setEnabled: () => undefined };
+    const { game, seen } = makeGame('?scene=evasion&graine=5&fogBaseSpeed=0', undefined, undefined, undefined, sfx);
+    game.playFree();
+    game.frame(0.016);
+    expect(game.debugState()).toMatchObject({ closing: false, triggered: [] });
+    expect(seen.banners.has(ESCAPE_ANNOUNCEMENT.title)).toBe(false);
+    expect(played.some((cue) => cue.pitch === ESCAPE_PITCH)).toBe(false);
+
+    // Le personnage est posé dans le couloir, au-dessus de sa ligne d'entrée : la fermeture se déclenche, une fois.
+    const state = seen.state!;
+    state.hero = { pos: { x: 0, y: 13 }, vel: { x: 0, y: 0 }, grounded: false };
+    hover(game, seen, 0.2);
+    expect(seen.lastBanner).toBe(ESCAPE_ANNOUNCEMENT.title);
+    expect(seen.lastBannerDetail).toBe(ESCAPE_ANNOUNCEMENT.detail);
+    expect(played.filter((cue) => cue.pitch === ESCAPE_PITCH)).toEqual([{ id: 'bounce', pitch: ESCAPE_PITCH }]);
+    const debug = game.debugState();
+    expect(debug.closing).toBe(true);
+    expect(debug.triggered).toHaveLength(2);
+    expect(debug.triggered.every((trigger) => trigger.step <= debug.step)).toBe(true);
+    expect(state.obstacles.filter((box) => box.closer).map((box) => box.id).sort()).toEqual(debug.triggered.map((trigger) => trigger.obstacleId).sort());
+
+    // Une seule annonce par passage, même si le personnage y reste.
+    hover(game, seen, 0.5);
+    expect(played.filter((cue) => cue.pitch === ESCAPE_PITCH)).toHaveLength(1);
   });
 });

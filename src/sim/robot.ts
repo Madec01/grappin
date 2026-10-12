@@ -56,11 +56,11 @@ export const LAUNCH_WAIT_MAX_SECONDS = 6;
 export const WHEEL_READY_RATIO = 0.95;
 const WHEEL_UP_RATIO = 0.5;
 const WHEEL_HOLD_MAX_SECONDS = 8;
-/** Sur un aimant, le robot lâche dès que le vol attrape une prise au-dessus de lui, et jamais plus de ce temps attiré. Sur un lien élastique, dès qu'il remonte et que le vol attrape. */
-const MAGNET_HOLD_MAX_SECONDS = 4;
-const ELASTIC_HOLD_MAX_SECONDS = 7;
+/** Sur un aimant, le robot lâche dès que le vol attrape une prise au-dessus de lui, et jamais plus de ce temps attiré. Sur un lien élastique, dès qu'il remonte et que le vol attrape. Partagés avec le pilote des scènes. */
+export const MAGNET_HOLD_MAX_SECONDS = 4;
+export const ELASTIC_HOLD_MAX_SECONDS = 7;
 /** Un lien élastique ne vaut que pris en passant vite (sa puissance vient du mouvement d'arrivée) : sous cette vitesse, le robot le laisse, s'il a autre chose à portée. */
-const ELASTIC_CATCH_SPEED = 6;
+export const ELASTIC_CATCH_SPEED = 6;
 
 /** Vrai si le vol `body` ne heurte, pendant `seconds`, aucun obstacle qui bouge (tournant, panneau qui glisse), regardé là où il sera à chaque pas. */
 function clearOfMoving(state: SimState, body: Body, seconds: number, tuning: Tuning): boolean {

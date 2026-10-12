@@ -1,6 +1,6 @@
 import type { Vec2 } from '../core/math/vec2';
 import type { ScheduledEvent } from '../sim/events';
-import { FIRST_ANCHOR_OFFSET, HALF_WIDTH, RICOCHET_WALL_RISE, RING_RADIUS, ROTOR_TURN_SECONDS, WHEEL_RISE, accordion, drift, elasticHold, escapeCorridor, hoop, magnetHold, pocket, railHold, ricochet, rocket, rotorBar, slidingWall, smashWall, switchLock, updraft, wheel, type IdCounters, type Segment } from '../sim/generator';
+import { FIRST_ANCHOR_OFFSET, HALF_WIDTH, RICOCHET_WALL_RISE, RING_RADIUS, ROTOR_TURN_SECONDS, SWITCH_NEXT_RISE, WHEEL_RISE, accordion, drift, elasticHold, escapeCorridor, hoop, magnetHold, pocket, railHold, ricochet, rocket, rotorBar, slidingWall, smashWall, switchLock, updraft, wheel, type IdCounters, type Segment } from '../sim/generator';
 import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from '../sim/state';
 
 /**
@@ -265,13 +265,14 @@ export function buildScene(id: SceneId, ids: IdCounters, origin: Vec2): Segment 
       anchor(b, { x: 0, y: 0 });
       anchor(b, CHAIN[0]!);
       const at = { x: b.origin.x + FIRST_ANCHOR_OFFSET.x + 0.8, y: b.origin.y + FIRST_ANCHOR_OFFSET.y + 7.2 };
-      const next = { x: b.origin.x + FIRST_ANCHOR_OFFSET.x - 2.6, y: b.origin.y + FIRST_ANCHOR_OFFSET.y + 11 };
+      const next = { x: at.x - 2.6, y: at.y + SWITCH_NEXT_RISE };
       const { anchor: lever, door } = switchLock(b.ids, at, next);
       b.anchors.push(lever);
       b.obstacles.push(door);
       b.anchors.push({ id: b.ids.anchor, pos: next, kind: 'normal', broken: false });
       b.ids.anchor += 1;
-      for (const p of CHAIN.slice(3)) anchor(b, p);
+      anchor(b, { x: 1.4, y: 7.2 + SWITCH_NEXT_RISE + 3.6 });
+      anchor(b, { x: -1.8, y: 7.2 + SWITCH_NEXT_RISE + 7.2 });
       break;
     }
     case 'rail': {
