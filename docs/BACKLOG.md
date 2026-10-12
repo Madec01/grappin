@@ -55,8 +55,9 @@ Le brief complet du propriétaire (synthèse des échanges du 11 octobre 2026) e
 | H1 Puits de chute, H2 tunnel descendant, règles de la brume en descente | 10 | à faire (lot 5) |
 | D1 Duo alterné, D2 bille écho | 11 | prototype (lot 6) |
 | T1 Serpentin, T3 accordéon, T6 faible gravité | 12 | fait (0.14.0 : serpentin en trois stades sur 45 m, accordéon de deux bandes prouvé dans ses trois états, poche à 30 % de gravité ; à revoir sur ressenti : la lenteur de la rotation, l'amplitude et la période des bandes, la part de gravité de la poche) |
-| T2 Plafond, T4 faille, T5 carrousel | 12 | à faire (lot 5) |
-| T8 Structure dépliante, T9 convoyeur, T7 descente contrôlée | 12 | à faire (lot 5) |
+| T2 Plafond, T4 faille, T5 carrousel | 12 | fait (0.16.0 : le plafond inverse la gravité par l'apesanteur, caméra fixe, plafonds à trou et crochets ; la faille s'ouvre en six secondes, prouvée dans ses trois états ; le carrousel, trois prises en couronne dans une coque fixe ouverte en haut et en bas) ; à revoir sur ressenti : la durée de l'inversion, la vitesse d'ouverture de la faille, la période du carrousel ; l'atelier de la faille perd le robot raisonnable trois fois sur huit, tard (après 150 m) |
+| T8 Structure dépliante, T9 convoyeur | 12 | fait (0.16.0 : le panneau à charnière d'un interrupteur, déplié par le haut à l'opposé de la prise suivante ; trois plateformes à contresens et un lanceur mobile sous un trou fixe) ; la prise portée par le panneau, essayée, a été retirée (un piège) ; à revoir sur ressenti : l'amplitude et la période du convoyeur |
+| T7 Descente contrôlée | 12 | à faire (lot 5, troisième partie, avec H1 et H2) |
 | Combinaisons du catalogue (section 13) | 13 | à faire après apprentissage de chaque élément |
 | Enchaînement difficulté / risque / récompense / respiration, secteurs abstraits, fourches enrichies | 14 | à faire (lot 4) |
 | Départ avancé facultatif | 14 | fait (0.9.0, « Départ : avancé / du sol ») |
