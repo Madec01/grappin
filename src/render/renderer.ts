@@ -8,7 +8,7 @@ import type { LevelResult } from '../meta/traversee';
 import { PULL_MAX } from '../sim/launcher';
 import { obstacleAt, rotorEnds } from '../sim/moving';
 import { obstacleKind } from '../sim/obstacles';
-import { ZONE_RAMP, zoneAt } from '../sim/physics';
+import { POCKET_RAMP, ZONE_RAMP, zoneAt } from '../sim/physics';
 import { RING_CENTRE_RATIO, WORLD_HALF_WIDTH, canSmash, multiplier } from '../sim/rules';
 import type { Anchor, AnchorKind, Obstacle, RuleEvent, SimState, Zone } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
@@ -22,11 +22,12 @@ import { formatDecimal } from './format';
 import { neonCircle, neonDiscs, neonFill, neonLine, neonRects, neonStroke, type NeonStrokeStyle } from './neon';
 import { LAMP_COUNT, ambientHalo, cityLots, cityStroke, fogSheetAlpha, lampColor, lampOf, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow, type HaloBoost } from './pulse';
 import { Screens, type OverlayView } from './screens';
-import { SKIN, WHEEL_RIM_RADIUS, WHEEL_SPOKES, crackPattern, doorLook, ringPhase, rotorWidths, springTeeth, wheelChevrons, wheelSpokes, type Crack, type DoorLook } from './skins';
+import { SKIN, WHEEL_RIM_RADIUS, WHEEL_SPOKES, accordionBands, bandChevronCount, crackPattern, doorLook, ringPhase, rotorWidths, springTeeth, wheelChevrons, wheelSpokes, type Crack, type DoorLook } from './skins';
 import { bandWidth, cupRadius, cupTips, mixColor, pullRatio, traceCup } from './sling';
 import { COLOR, GlowText, PALETTES, makeText, readSafeInset, starPoints, type Palette } from './style';
 import {
   CHEVRON_FADE,
+  FLOATER_RADII,
   STREAK_TIERS,
   ZONE_CORE,
   ZONE_INSIDE_BOOST,
@@ -39,6 +40,7 @@ import {
   chevronShape,
   clipBox,
   edgeFade,
+  floaterAt,
   frameBox,
   frameBreadth,
   frameLength,
@@ -50,6 +52,7 @@ import {
   waveLight,
   type BrakeLine,
   type Box,
+  type FloaterSpot,
   type Point,
   type Span,
   type StreakKind,
@@ -104,8 +107,14 @@ import {
  * à trois vitesses et des flèches sur ses bords. La dérive : des traînées horizontales qui filent dans le sens de la poussée, seulement dans sa
  * bande, et un liseré net en haut et en bas (c'est lui qui la distingue du vent, dont les traînées couvrent tout l'écran). Le couloir
  * d'accélération : des chevrons serrés qui défilent vite, un contour net, une sortie barrée d'un trait lumineux et de chevrons qui s'ouvrent.
- * Le freinage : de fines bandes pâles, lentes, qui se resserrent vers le haut, rien qui pousse. Le défilement lit l'horloge des effets
+ * Le freinage : de fines bandes pâles, lentes, qui se resserrent vers le haut, rien qui pousse. La poche de faible gravité (0.14.0) : un
+ * fond lavande très pâle qui s'épaissit sur la rampe où la gravité descend, un liseré diffus à son bord haut et à son bord bas, et de
+ * petites particules qui flottent sur place, jamais dans une direction (ce n'est pas un courant). Le défilement lit l'horloge des effets
  * (temps réel), comme les traînées du vent : purement visuel. Dans une zone, le personnage allume ses traits d'un cran.
+ *
+ * Les bandes de l'accordéon (0.14.0) ne sont pas des câbles : les prises d'une bande (`anchor.band`) n'ont pas de rail tireté, mais un panneau
+ * translucide d'un bleu électrique derrière elles, qui glisse avec elles. Un liseré net sur son bord intérieur et des chevrons qui pointent dans
+ * le sens où la bande va à ce pas disent le mouvement même sur une image fixe (voir `skins.ts`).
  *
  * Deux aides du tutoriel se dessinent ici, discrètement. La fenêtre de lâcher
  * (`inReleaseWindow`) : tant que lâcher serait parfait, la corde et le halo du
@@ -398,6 +407,37 @@ const BRAKE_GAP = 5;
 const BRAKE_LINE_ALPHAS: readonly number[] = [0.18, 0.38, 0.62];
 const BRAKE_LINE_WIDTH = 1;
 const BRAKE_LINE_INSET = 4;
+/**
+ * Poche de faible gravité : un fond lavande très pâle, qui s'épaissit en `POCKET_RAMP_STEPS` marches sur la rampe de `POCKET_RAMP` mètres où
+ * la gravité descend (et remonte à la sortie), un liseré diffus à chaque bord, et de petites particules qui flottent : opacité par niveau
+ * d'éclat (du plus éteint au plus vif), le halo n'étant posé que sur les plus grosses, au plus vif.
+ */
+const POCKET_FILL = 0.1;
+const POCKET_RAMP_STEPS = 6;
+const POCKET_EDGE_WIDTH = 1.5;
+const POCKET_EDGE_ALPHA = 0.45;
+const POCKET_EDGE_HALO = 0.8;
+const POCKET_FLOATER_ALPHAS: readonly number[] = [0.22, 0.45, 0.75];
+const POCKET_FLOATER_HALO = 0.35;
+
+/**
+ * Bandes de l'accordéon : un panneau translucide derrière les prises de chaque bande, un liseré net sur son bord intérieur (celui qui regarde le
+ * milieu du monde), un trait fin sur l'autre bord, et des chevrons qui pointent dans le sens où la bande glisse à cet instant : vers le milieu
+ * quand les bandes se resserrent, vers l'extérieur quand elles s'écartent. Coins arrondis en mètres, demi-hauteur et profondeur d'un chevron
+ * en mètres (au moins `BAND_CHEVRON_MIN_HALF` pixels de demi-hauteur quand on dézoome).
+ */
+const BAND_FILL_ALPHA = 0.1;
+const BAND_CORNER = 0.2;
+const BAND_INNER_WIDTH = 2;
+const BAND_INNER_ALPHA = 0.9;
+const BAND_INNER_HALO = 0.7;
+const BAND_OUTER_WIDTH = 1;
+const BAND_OUTER_ALPHA = 0.35;
+const BAND_CHEVRON_WIDTH = 1.75;
+const BAND_CHEVRON_ALPHA = 0.7;
+const BAND_CHEVRON_HALF = 0.17;
+const BAND_CHEVRON_DEPTH = 0.13;
+const BAND_CHEVRON_MIN_HALF = 3.5;
 
 /**
  * Éclats (rebond, fracas, anneau) : cercle qui s'élargit en s'effaçant à l'endroit du personnage. Épaisseur du trait, halo, et pour un fracas
@@ -626,6 +666,26 @@ interface ZonePaint {
   kit: ZoneKit;
 }
 
+/** Une particule de poche à l'écran : sa position et son rayon en pixels, et son niveau d'éclat. Réutilisée d'une image à l'autre. */
+interface FloaterDot {
+  x: number;
+  y: number;
+  radius: number;
+  level: number;
+  tier: number;
+}
+
+/** Un panneau de bande à l'écran, en pixels : son rectangle, son côté (le bord intérieur est celui qui regarde le milieu du monde), le sens où la bande glisse et son nombre de chevrons. Réutilisé d'une image à l'autre. */
+interface BandRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  side: -1 | 1;
+  heading: -1 | 0 | 1;
+  chevrons: number;
+}
+
 /** Hauteur à afficher : depuis le toit de départ dans un niveau, absolue en course libre. */
 function shownHeight(state: SimState): number {
   return state.finishY === null ? state.height : Math.max(0, state.height - state.groundY);
@@ -686,6 +746,7 @@ export class Renderer {
   private readonly obstacles = new Graphics();
   private readonly pickups = new Graphics();
   private readonly roof = new Graphics();
+  private readonly bands = new Graphics();
   private readonly cables = new Graphics();
   private readonly anchors = new Graphics();
   private readonly targetRing = new Graphics();
@@ -784,6 +845,10 @@ export class Renderer {
     { x: 0, y: 0 },
     { x: 0, y: 0 },
   ];
+  private readonly zoneFloater: FloaterSpot = { along: 0, across: 0, glow: 0 };
+  /** Réservoirs des particules de poche et des panneaux de bande visibles : remplis à chaque image, ils ne grandissent que si l'écran en montre plus. */
+  private readonly floaterDots: FloaterDot[] = [];
+  private readonly bandRects: BandRect[] = [];
 
   private constructor(app: Application) {
     this.app = app;
@@ -814,6 +879,7 @@ export class Renderer {
       this.obstacles,
       this.pickups,
       this.roof,
+      this.bands,
       this.cables,
       this.anchors,
       this.targetRing,
@@ -900,6 +966,7 @@ export class Renderer {
     this.drawObstacles(state, camera, view, tuning);
     this.drawPickups(state, camera, view, tuning, effects);
     this.drawRoof(state, camera);
+    this.drawBands(state, camera, view, tuning);
     this.drawCables(state, camera);
     this.drawAnchors(state, camera, view, tuning, effects);
     this.drawTargetRing(state, camera, tuning, effects);
@@ -1157,6 +1224,9 @@ export class Renderer {
         case 'freinage':
           this.paintBrake(g, p);
           break;
+        case 'poche':
+          this.paintPocket(g, p);
+          break;
       }
     }
   }
@@ -1385,6 +1455,78 @@ export class Renderer {
         { color: level === levels - 1 ? p.core : p.tone, halo: p.tone, width: BRAKE_LINE_WIDTH, alpha: Math.min(1, alpha * p.vivid), strength: 0 },
       );
     });
+  }
+
+  /**
+   * Poche de faible gravité : une matière légère. Un fond lavande très pâle, dont l'épaisseur monte en marches sur la rampe de `POCKET_RAMP`
+   * mètres depuis chaque bord (la gravité y descend, puis remonte à la sortie : le bord ne tranche pas), un liseré diffus au bord haut et au
+   * bord bas, et de petites particules qui flottent sur place. Rien n'y pousse, rien n'y file.
+   */
+  private paintPocket(g: Graphics, p: ZonePaint): void {
+    const { length, breadth } = p;
+    const ramp = Math.min(POCKET_RAMP * p.scale, length / 2);
+    for (let step = 0; step < POCKET_RAMP_STEPS; step += 1) {
+      const alpha = (POCKET_FILL * (step + 0.5)) / POCKET_RAMP_STEPS;
+      const from = (ramp * step) / POCKET_RAMP_STEPS;
+      const to = (ramp * (step + 1)) / POCKET_RAMP_STEPS;
+      this.fillBand(g, p, from, to, 0, breadth, alpha);
+      this.fillBand(g, p, length - to, length - from, 0, breadth, alpha);
+    }
+    this.fillBand(g, p, ramp, length - ramp, 0, breadth, POCKET_FILL);
+    neonStroke(
+      g,
+      (target) => {
+        this.traceCross(target, p, 0);
+        this.traceCross(target, p, length);
+      },
+      { color: p.tone, halo: p.tone, width: POCKET_EDGE_WIDTH, alpha: Math.min(1, POCKET_EDGE_ALPHA * p.vivid), strength: POCKET_EDGE_HALO * this.species, cap: 'round' },
+    );
+    this.paintFloaters(g, p);
+  }
+
+  /**
+   * Les particules de la poche, qui flottent autour de leur point de repos (voir `floaterAt`) : trois niveaux d'éclat, un tracé chacun ; le halo
+   * n'est posé que sur les plus grosses, au plus vif. Les particules hors de la vue ne se dessinent pas.
+   */
+  private paintFloaters(g: Graphics, p: ZonePaint): void {
+    const spot = this.zoneFloater;
+    const levels = POCKET_FLOATER_ALPHAS.length;
+    let used = 0;
+    for (const floater of p.kit.floaters) {
+      floaterAt(floater, p.clock, spot);
+      const at = framePoint(p.frame, spot.along * p.scale, spot.across * p.scale, this.zoneFrom);
+      if (!inView(p.view, at, CULL_MARGIN)) continue;
+      const dot = (this.floaterDots[used] ??= { x: 0, y: 0, radius: 0, level: 0, tier: 0 });
+      dot.x = at.x;
+      dot.y = at.y;
+      dot.radius = FLOATER_RADII[floater.tier] ?? 1;
+      dot.level = levelOf(spot.glow, levels);
+      dot.tier = floater.tier;
+      used += 1;
+    }
+    if (used === 0) return;
+    const brightest = levels - 1;
+    POCKET_FLOATER_ALPHAS.forEach((alpha, level) => {
+      let drawn = false;
+      for (let k = 0; k < used; k += 1) {
+        const dot = this.floaterDots[k]!;
+        if (dot.level !== level) continue;
+        g.circle(dot.x, dot.y, dot.radius);
+        drawn = true;
+      }
+      if (drawn) g.fill({ color: level === brightest ? p.core : p.tone, alpha: Math.min(1, alpha * p.vivid) });
+    });
+    const biggest = FLOATER_RADII.length - 1;
+    neonFill(
+      g,
+      (target, grow) => {
+        for (let k = 0; k < used; k += 1) {
+          const dot = this.floaterDots[k]!;
+          if (dot.level === brightest && dot.tier === biggest) target.circle(dot.x, dot.y, dot.radius + grow);
+        }
+      },
+      { color: p.core, halo: p.tone, alpha: Math.min(1, POCKET_FLOATER_ALPHAS[brightest]! * p.vivid), strength: POCKET_FLOATER_HALO * this.species, pass: 'halo' },
+    );
   }
 
   /** Étiquette numéro `slot` du réservoir ; le réservoir grandit seulement si l'écran montre plus de lignes. */
@@ -1781,13 +1923,79 @@ export class Renderer {
   }
 
   /**
+   * Les bandes de l'accordéon : pour chaque bande, un panneau translucide derrière ses prises, du bas de la plus basse au haut de la plus haute
+   * (voir `accordionBands`), qui glisse avec elles. Son bord intérieur, celui qui regarde le milieu du monde, est un liseré net ; l'autre bord, un
+   * trait fin. Au milieu du panneau, des chevrons pointent dans le sens où la bande va à ce pas : vers le milieu quand les bandes se resserrent,
+   * vers l'extérieur quand elles s'écartent. Tout se lit de l'état de la simulation, rien de l'horloge de l'écran.
+   */
+  private drawBands(state: SimState, camera: Camera, view: ViewBounds, tuning: Tuning): void {
+    const g = this.bands.clear();
+    const rects = this.bandRects;
+    let used = 0;
+    for (const band of accordionBands(state.anchors, state.step, tuning)) {
+      const topLeft = camera.worldToScreen({ x: band.left, y: band.top });
+      const bottomRight = camera.worldToScreen({ x: band.right, y: band.bottom });
+      const width = bottomRight.x - topLeft.x;
+      const height = bottomRight.y - topLeft.y;
+      if (topLeft.x + width < view.left - CULL_MARGIN || topLeft.x > view.right + CULL_MARGIN || topLeft.y + height < view.top - CULL_MARGIN || topLeft.y > view.bottom + CULL_MARGIN) continue;
+      const rect = (rects[used] ??= { x: 0, y: 0, width: 0, height: 0, side: -1, heading: 0, chevrons: 0 });
+      rect.x = topLeft.x;
+      rect.y = topLeft.y;
+      rect.width = width;
+      rect.height = height;
+      rect.side = band.side;
+      rect.heading = band.heading;
+      rect.chevrons = bandChevronCount(band);
+      used += 1;
+    }
+    if (used === 0) return;
+    const corner = BAND_CORNER * camera.scale;
+    for (let k = 0; k < used; k += 1) {
+      const rect = rects[k]!;
+      g.roundRect(rect.x, rect.y, rect.width, rect.height, corner);
+    }
+    g.fill({ color: COLOR.accordion, alpha: BAND_FILL_ALPHA });
+    // Le bord intérieur : la bande de gauche regarde le milieu par son bord droit, celle de droite par son bord gauche.
+    const edgeX = (rect: BandRect, inner: boolean): number => {
+      const facesRight = rect.side < 0;
+      return inner === facesRight ? rect.x + rect.width : rect.x;
+    };
+    const edge = (inner: boolean) => (target: Graphics): void => {
+      for (let k = 0; k < used; k += 1) {
+        const rect = rects[k]!;
+        target.moveTo(edgeX(rect, inner), rect.y).lineTo(edgeX(rect, inner), rect.y + rect.height);
+      }
+    };
+    neonStroke(g, edge(false), { color: COLOR.accordion, halo: COLOR.accordion, width: BAND_OUTER_WIDTH, alpha: BAND_OUTER_ALPHA, strength: 0 });
+    neonStroke(g, edge(true), { color: SKIN.bandCore, halo: COLOR.accordion, width: BAND_INNER_WIDTH, alpha: BAND_INNER_ALPHA, strength: BAND_INNER_HALO * this.species, cap: 'round' });
+    const half = Math.max(BAND_CHEVRON_MIN_HALF, BAND_CHEVRON_HALF * camera.scale);
+    const depth = BAND_CHEVRON_DEPTH * camera.scale;
+    neonStroke(
+      g,
+      (target) => {
+        for (let k = 0; k < used; k += 1) {
+          const rect = rects[k]!;
+          if (rect.heading === 0) continue;
+          const x = rect.x + rect.width / 2;
+          for (let row = 0; row < rect.chevrons; row += 1) {
+            const y = rect.y + ((row + 0.5) * rect.height) / rect.chevrons;
+            target.moveTo(x - rect.heading * depth, y - half).lineTo(x + rect.heading * depth, y).lineTo(x - rect.heading * depth, y + half);
+          }
+        }
+      },
+      { color: SKIN.bandCore, halo: COLOR.accordion, width: BAND_CHEVRON_WIDTH, alpha: BAND_CHEVRON_ALPHA, strength: 0, cap: 'round', join: 'round' },
+    );
+  }
+
+  /**
    * Câbles : un rail tireté discret, au halo de la palette, sous chaque point qui glisse, de l'un
    * à l'autre de ses bouts, sur une lueur continue très pâle. Le point, lui, se
    * dessine à sa position du moment.
    */
   private drawCables(state: SimState, camera: Camera): void {
     const g = this.cables.clear();
-    const ends = state.anchors.flatMap((anchor) => (anchor.cable && !anchor.broken ? [{ from: camera.worldToScreen(anchor.cable.from), to: camera.worldToScreen(anchor.cable.to) }] : []));
+    // Une prise de bande d'accordéon glisse aussi, mais son rail est le panneau de sa bande (voir `drawBands`) : pas de câble.
+    const ends = state.anchors.flatMap((anchor) => (anchor.cable && anchor.band === undefined && !anchor.broken ? [{ from: camera.worldToScreen(anchor.cable.from), to: camera.worldToScreen(anchor.cable.to) }] : []));
     if (ends.length === 0) return;
     for (const rail of ends) g.moveTo(rail.from.x, rail.from.y).lineTo(rail.to.x, rail.to.y);
     g.stroke({ width: CABLE_GLOW_WIDTH * this.halo.spread, color: this.palette.halo, alpha: CABLE_GLOW_ALPHA * this.halo.strength });

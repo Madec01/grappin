@@ -1,12 +1,16 @@
 import type { Page } from '@playwright/test';
+import type { DebugAnchor } from '../src/app/game';
 import type { Vec2 } from '../src/core/math/vec2';
 import type { SceneId } from '../src/data/scenes';
+import { upOf, type Environment } from '../src/sim/environment';
 import { flightStep, startFlight } from '../src/sim/flight';
 import { launchSet, launchVelocity, pulledPosition } from '../src/sim/launcher';
+import { isMoving, obstacleGap } from '../src/sim/moving';
 import { provableObstacles } from '../src/sim/obstacles';
-import { LAUNCH_AIM_SECONDS, LAUNCH_WAIT_MAX_SECONDS, WHEEL_READY_RATIO, launchIsClear } from '../src/sim/robot';
+import { EDGE_AHEAD_SECONDS, EDGE_MARGIN, EDGE_SOON_SECONDS, LAUNCH_AIM_SECONDS, LAUNCH_WAIT_MAX_SECONDS, LOOK_AHEAD_SECONDS, RELEASE_EVERY, WHEEL_READY_RATIO, launchIsClear } from '../src/sim/robot';
+import { WORLD_HALF_WIDTH, releaseVelocity } from '../src/sim/rules';
 import { Simulation } from '../src/sim/simulation';
-import type { SimState } from '../src/sim/state';
+import type { Anchor, Obstacle, SimState } from '../src/sim/state';
 import { DEFAULT_TUNING } from '../src/sim/tuning';
 import { flightCatches, swingIsClear } from '../src/sim/verifier';
 
@@ -17,26 +21,39 @@ import { flightCatches, swingIsClear } from '../src/sim/verifier';
  * décide côté Node, une image après l'autre. Il applique les règles du robot
  * (`src/sim/robot.ts`), pour ne pas jouer plus bêtement que lui :
  *  - il accroche dès qu'un point est visé, mais pas un point sous lui quand il
- *    monte vite (un courant, une fusée, un lancer), et pas un point que le
- *    lanceur vient de laisser sous lui ;
+ *    monte vite (un courant, une fusée, un lancer) ; après un lancer (lanceur,
+ *    roue) il ne rattrape rien sous le point lâché pendant une seconde et demie,
+ *    et après un lâcher ordinaire rien sous le point lâché tant qu'il monte
+ *    encore (sauf s'il file vers le bord du monde) : sans cela, il fait du
+ *    surplace entre des prises voisines au lieu de viser plus haut. « Plus
+ *    haut » et « monter » s'entendent à l'opposé de la gravité du moment, que
+ *    le serpentin et la bascule inclinent ;
  *  - il n'attrape pas un point si le balancement qui suivrait heurte un mur
- *    (`swingIsClear`, sur le monde de la scène rejoué en Node) ;
+ *    (`swingIsClear`, sur le monde de la scène rejoué en Node, ses prises remises
+ *    là où la page les a : un câble, une bande d'accordéon glisse) ;
  *  - sur un lanceur, il laisse le temps de bander la fronde (0,35 s), puis tire
  *    la traction que le vérificateur a prouvée (`launchAim`) ; sous un mur dont
  *    le trou va et vient (`glissiere`), il attend, une image après l'autre, que
  *    le tir passe sans heurter ce qui bouge (`launchIsClear`, regardé au pas de
  *    la page), jusqu'à six secondes ;
- *  - il lâche dans la fenêtre du lâcher parfait, ou dès qu'il va assez vite en
- *    montant à 30° à 60°, jamais plus de 2,5 s tenu ; sur une roue motorisée, il
- *    attend aussi que le moteur ait pris 95 % de sa vitesse (le tour fait, c'est là
- *    que la roue porte), et il la tient aussi longtemps qu'il le faut pour cela.
+ *  - il veut lâcher dans la fenêtre du lâcher parfait, ou dès qu'il va assez vite
+ *    en montant à 30° à 60°, ou après 2,5 s tenu ; mais il ne lâche que si le vol
+ *    qui suivrait ne heurte rien en une demi-seconde, ne sort pas du monde en
+ *    une seconde et demie, et attrape une prise plus haute (`flightCatches`,
+ *    comme le vérificateur), regardé un pas sur quatre ; pendu depuis plus de
+ *    cinq secondes, il lâche quoi qu'il arrive. Sur une roue motorisée, il
+ *    attend aussi que le moteur ait pris 95 % de sa vitesse (le tour fait, c'est
+ *    là que la roue porte), et il la tient aussi longtemps qu'il le faut pour
+ *    cela.
  */
 
 /** L'état que le jeu rend à `state()`. */
 export type Seen = ReturnType<NonNullable<Window['__grappin']>['state']>;
 
-/** Après un lancer, le robot ne rattrape rien sous le lanceur pendant ce temps (ms), sauf un point plus d'un mètre au-dessus de lui. */
+/** Après un lâcher, le robot ne rattrape rien sous le point lâché pendant ce temps (ms), sauf un point plus d'un mètre au-dessus de lui. */
 const LAUNCH_WAIT_MS = 1500;
+/** « Plus haut que le point lâché » : de plus de cette distance (m), mesurée à l'opposé de la gravité. */
+const ABOVE_RELEASE = 1;
 const LAUNCH_AIM_MS = LAUNCH_AIM_SECONDS * 1000;
 /** Le pilote qui monte à plus de cette vitesse (m/s) ignore un point visé plus bas que lui de cette distance (m) : il attend la suite, comme le robot. */
 const RISING_SPEED = 1;
@@ -44,6 +61,8 @@ const RISING_BELOW = 0.5;
 /** Jamais plus longtemps pendu, en millisecondes ; à une roue, le moteur a besoin de son tour pour prendre sa vitesse (voir `WHEEL_MAX_HOLD_MS`). */
 const MAX_HOLD_MS = 2500;
 const WHEEL_MAX_HOLD_MS = 6000;
+/** Pendu depuis plus de deux fois la tenue maximale, il lâche sans regarder où mène le vol. */
+const OVERHELD_MS = 2 * MAX_HOLD_MS;
 /** Sous un mur à ouverture mobile, jamais plus longtemps à attendre que le trou passe, en millisecondes : la borne du robot. */
 const LAUNCH_WAIT_MAX_MS = LAUNCH_WAIT_MAX_SECONDS * 1000;
 /** La traction du tir quand le vérificateur n'en prouve aucune. */
@@ -53,15 +72,22 @@ const SHOT_SECONDS = 3.5;
 /** La traction du tir mou, en mètres de monde : un peu plus de la moitié de la traction maximale (2,5), soit 12,1 m/s au départ. */
 const SOFT_PULL: Vec2 = { x: 0, y: -1.7 };
 
-/** Ce que le pilote retient d'une image à l'autre. `holdSince` : l'instant (ms simulées) de la dernière accroche ; `launchedAt` et `launchedY` : l'instant et la hauteur du lanceur du dernier tir. */
+/**
+ * Ce que le pilote retient d'une image à l'autre. `holdSince` : l'instant (ms simulées) de la dernière accroche, et `heldId` le point visé à
+ * ce moment-là (celui qu'il tient). `launchedAt` : l'instant du dernier tir d'un lanceur (0 ou moins, avant le premier). `releasedAt`,
+ * `releasedPos` et `launched` : l'instant et le point du dernier lâcher, quel qu'il soit, et s'il s'agissait d'un lancer (lanceur ou roue).
+ */
 export interface PilotMemory {
   holdSince: number;
+  heldId: number | null;
   launchedAt: number;
-  launchedY: number;
+  releasedAt: number;
+  releasedPos: Vec2 | null;
+  launched: boolean;
 }
 
 export function newMemory(): PilotMemory {
-  return { holdSince: 0, launchedAt: -1e9, launchedY: -Infinity };
+  return { holdSince: 0, heldId: null, launchedAt: -1e9, releasedAt: -1e9, releasedPos: null, launched: false };
 }
 
 export interface PilotOptions {
@@ -119,14 +145,57 @@ function heldWorld(world: SimState, step: number, launcherId: number): SimState 
   return { ...world, step, rope: { anchorId: launcherId, length: 0 } };
 }
 
+/** Les prises telles que la page les a en ce moment : celles du monde rejoué (leurs câbles, leur moteur), remises là où la page les montre (un câble, une bande d'accordéon glisse), et celles que le monde rejoué ne connaît pas encore. */
+function liveAnchors(world: SimState, live: readonly DebugAnchor[]): Anchor[] {
+  return live.map((spot) => {
+    const pos = { x: spot.x, y: spot.y };
+    const known = world.anchors.find((a) => a.id === spot.id);
+    return known ? { ...known, pos } : { id: spot.id, pos, kind: spot.kind, broken: false };
+  });
+}
+
+/** Les conditions physiques du moment, telles que la page les dit : la gravité (que le serpentin et la bascule inclinent) et le vent. */
+function liveEnv(s: Seen): Environment {
+  return { gravityDir: { x: s.gravityX, y: s.gravityY }, wind: { x: s.windX, y: 0 } };
+}
+
+/** Les obstacles du monde rejoué qui tiennent encore : les parois déjà cassées dans la page ne le sont pas dans le monde rejoué, une paroi cassable cassée ne gêne plus. */
+function standingObstacles(world: SimState, s: Seen): Obstacle[] {
+  return world.obstacles.filter((box) => !(s.smashed > 0 && box.kind === 'cassable'));
+}
+
 /** Vrai si s'accrocher à `targetId` d'ici ne mène pas dans un mur (le balancement qui suit, joué comme le robot le regarde). Sans monde rejoué, on ne regarde pas. */
-function swingIsSafe(world: SimState | undefined, s: Seen, targetId: number): boolean {
+function swingIsSafe(world: SimState | undefined, s: Seen, live: readonly DebugAnchor[], targetId: number): boolean {
   if (!world) return true;
-  const anchor = world.anchors.find((a) => a.id === targetId);
+  const anchors = liveAnchors(world, live);
+  const anchor = anchors.find((a) => a.id === targetId);
   if (!anchor) return true;
-  // Les parois déjà cassées dans la page ne le sont pas dans le monde rejoué : une paroi cassable cassée ne gêne plus.
-  const standing = world.obstacles.filter((box) => !(s.smashed > 0 && box.kind === 'cassable'));
-  return swingIsClear(anchor, { pos: s.pos, vel: s.vel }, world.anchors, provableObstacles(standing), DEFAULT_TUNING, world.env, world.zones);
+  return swingIsClear(anchor, { pos: s.pos, vel: s.vel }, anchors, provableObstacles(standingObstacles(world, s)), DEFAULT_TUNING, liveEnv(s), world.zones);
+}
+
+/**
+ * Vrai si lâcher maintenant est un bon lâcher, comme le robot l'entend : le vol qui suivrait ne heurte rien pendant `LOOK_AHEAD_SECONDS`
+ * (rebonds, fracas et anneaux joués ; ce qui bouge regardé là où il sera), ne sort pas du monde pendant `EDGE_AHEAD_SECONDS`, et attrape une
+ * prise plus haute que celle qu'on lâche (`flightCatches`, ce que le vérificateur regarde). Une roue n'a pas ce dernier contrôle : sa
+ * sortie est prouvée à part.
+ */
+function releaseIsGood(world: SimState, s: Seen, live: readonly DebugAnchor[], heldId: number | null): boolean {
+  const tuning = DEFAULT_TUNING;
+  const env = liveEnv(s);
+  const anchors = liveAnchors(world, live);
+  const held = anchors.find((a) => a.id === heldId);
+  const vel = releaseVelocity({ hero: { pos: s.pos, vel: s.vel, grounded: false }, rope: held ? { anchorId: held.id, length: s.ropeLength ?? 0 } : null, anchors }, tuning);
+  const standing = standingObstacles(world, s);
+  const obstacles = provableObstacles(standing);
+  const moving = standing.filter((box) => !box.broken && isMoving(box));
+  const flight = startFlight({ pos: s.pos, vel });
+  for (let k = 0, steps = Math.round(LOOK_AHEAD_SECONDS / tuning.stepSeconds); k < steps; k += 1) {
+    flightStep(flight, obstacles, world.rings, world.zones, tuning, env);
+    if (flight.ended || moving.some((box) => obstacleGap(flight.body.pos, tuning.heroRadius, box, s.step + k + 1, tuning) <= 0)) return false;
+  }
+  // Un vol qui file vers le bord du monde : on garde la corde.
+  if (!(Math.abs(s.pos.x + vel.x * EDGE_AHEAD_SECONDS) < WORLD_HALF_WIDTH - EDGE_MARGIN)) return false;
+  return s.heldKind === 'roue' || held === undefined || flightCatches(held, { pos: s.pos, vel }, anchors, standing, tuning, env, world.zones, world.rings).length > 0;
 }
 
 /**
@@ -136,14 +205,23 @@ function swingIsSafe(world: SimState | undefined, s: Seen, targetId: number): bo
 export async function pilotFrame(page: Page, memory: PilotMemory, nowMs: number, options: PilotOptions = {}): Promise<Seen> {
   const s = await page.evaluate(() => window.__grappin!.state());
   if (!s.attached && s.targetId !== null) {
-    const target = (await page.evaluate(() => window.__grappin!.anchors())).find((a) => a.id === s.targetId);
-    // Après un lancer, on ne rattrape rien sous le lanceur pendant un moment : on monte.
-    const climbing = nowMs - memory.launchedAt > LAUNCH_WAIT_MS || (target !== undefined && target.y > memory.launchedY + 1);
+    const live = await page.evaluate(() => window.__grappin!.anchors());
+    const target = live.find((a) => a.id === s.targetId);
+    // Après un lancer (lanceur, roue) on ne rattrape rien sous le point lâché pendant un moment, même en retombant : on monte. Après un lâcher
+    // ordinaire, rien sous le point lâché tant qu'on monte encore, sauf si l'on file vers le bord du monde : en retombant, on attrape ce qui vient.
+    const up = upOf(liveEnv(s));
+    const rise = (from: Vec2, to: Vec2): number => (to.x - from.x) * up.x + (to.y - from.y) * up.y;
+    const recently = nowMs - memory.releasedAt <= LAUNCH_WAIT_MS;
+    const aboveRelease = target !== undefined && memory.releasedPos !== null && rise(memory.releasedPos, { x: target.x, y: target.y }) > ABOVE_RELEASE;
+    const risingStill = rise({ x: 0, y: 0 }, s.vel) > 0;
+    const edgeSoon = Math.abs(s.pos.x + s.vel.x * EDGE_SOON_SECONDS) > WORLD_HALF_WIDTH - EDGE_MARGIN;
+    const climbing = memory.launched ? !recently || aboveRelease : !(recently && !aboveRelease && risingStill && !edgeSoon);
     // Porté vers le haut, on ne rattrape pas un point sous soi : on monte d'abord, comme un joueur.
     const rising = s.vel.y > RISING_SPEED && target !== undefined && target.y < s.pos.y - RISING_BELOW;
-    if (target && climbing && !rising && !options.wait?.(s, memory) && swingIsSafe(options.world, s, target.id)) {
+    if (target && climbing && !rising && !options.wait?.(s, memory) && swingIsSafe(options.world, s, live, target.id)) {
       await page.evaluate(() => window.__grappin!.press());
       memory.holdSince = nowMs;
+      memory.heldId = target.id;
     }
   } else if (s.attached && s.heldKind === 'lanceur') {
     if (nowMs - memory.holdSince > LAUNCH_AIM_MS && nowMs >= (options.launchNotBefore ?? 0)) {
@@ -156,7 +234,9 @@ export async function pilotFrame(page: Page, memory: PilotMemory, nowMs: number,
       if (options.world && launcher && nowMs - readyAt < LAUNCH_WAIT_MAX_MS && !launchIsClear(heldWorld(options.world, s.step, launcher.id), pull, DEFAULT_TUNING)) return s;
       await page.evaluate((p) => window.__grappin!.release(p.x, p.y), pull);
       memory.launchedAt = nowMs;
-      memory.launchedY = launcher?.y ?? s.pos.y;
+      memory.releasedAt = nowMs;
+      memory.releasedPos = launcher ? { x: launcher.x, y: launcher.y } : { ...s.pos };
+      memory.launched = true;
     }
   } else if (s.attached && nowMs - memory.holdSince > 80) {
     const speed = Math.hypot(s.vel.x, s.vel.y);
@@ -165,7 +245,19 @@ export async function pilotFrame(page: Page, memory: PilotMemory, nowMs: number,
     const ready = onWheel ? speed >= DEFAULT_TUNING.wheelSpeed * WHEEL_READY_RATIO : speed >= 8 || (s.ropeLength !== null && s.ropeLength <= 1.5 + 1e-9);
     const slope = s.vel.x !== 0 ? s.vel.y / Math.abs(s.vel.x) : Infinity;
     const lingered = nowMs - memory.holdSince > (onWheel ? WHEEL_MAX_HOLD_MS : MAX_HOLD_MS);
-    if ((!onWheel && s.releaseWindow) || (ready && s.vel.y > 1 && slope > 0.6 && slope < 1.8) || lingered) await page.evaluate(() => window.__grappin!.release());
+    if ((!onWheel && s.releaseWindow) || (ready && s.vel.y > 1 && slope > 0.6 && slope < 1.8) || lingered) {
+      const live = await page.evaluate(() => window.__grappin!.anchors());
+      // Le vol qui suivrait se regarde un pas sur quatre ; sans monde rejoué, on ne regarde pas. Pendu depuis trop longtemps, on lâche quoi qu'il arrive.
+      const good = !options.world || (s.step % RELEASE_EVERY === 0 && releaseIsGood(options.world, s, live, memory.heldId));
+      if (good || nowMs - memory.holdSince > OVERHELD_MS) {
+        await page.evaluate(() => window.__grappin!.release());
+        // Lancé par une roue, comme par un lanceur, ou simplement lâché : on ne rattrape rien sous le point pendant un moment, on monte.
+        const held = live.find((a) => a.id === memory.heldId);
+        memory.releasedAt = nowMs;
+        memory.releasedPos = held ? { x: held.x, y: held.y } : null;
+        memory.launched = onWheel;
+      }
+    }
   }
   return s;
 }

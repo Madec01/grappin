@@ -17,8 +17,9 @@ import { newMemory, pilotFrame, sceneWorld } from '../scripts/pilote';
  * réglages du titre (Sons, Départ) survivent au rechargement, la fenêtre de
  * lâcher s'ouvre puis se referme pendant un balancement, et le premier conseil
  * du tutoriel apparaît à la première accroche, les quatre scènes de démonstration du lot 2 (le ricochet, le mur à percer, la porte, le cerceau)
- * se jouent et se dessinent sans erreur et le pilote y prouve la mécanique exigée (rebond, fracas, anneau traversé), les trois scènes de zones (courant ascendant, dérive, fusée) chargent leurs zones et voient le
- * pilote y entrer, et les trois scènes de la fin du lot 2 (la roue motorisée, le tournant, la glissière) se jouent au pilote sans erreur. Tout passe par `window.__grappin`.
+ * se jouent et se dessinent sans erreur et le pilote y prouve la mécanique exigée (rebond, fracas, anneau traversé), les quatre scènes de zones (courant ascendant, dérive, fusée, poche de faible gravité) chargent leurs zones et voient le
+ * pilote y entrer, les trois scènes de la fin du lot 2 (la roue motorisée, le tournant, la glissière) et les deux scènes de transformations du lot 3
+ * (l'accordéon, le serpentin) se jouent au pilote sans erreur. Tout passe par `window.__grappin`.
  */
 
 const CENTER = { x: 195, y: 422 };
@@ -509,8 +510,8 @@ test('scène « anneau » : le tir passe par l\'anneau du mur, qui accélère le
 });
 
 /**
- * Zones qui modifient le mouvement (0.12.0), trois scènes de démonstration : le courant ascendant, la dérive, la fusée (couloir
- * d'accélération puis zone de freinage). Chacune se charge avec au moins une zone, et le pilote, mené image par image sur l'horloge figée
+ * Zones qui modifient le mouvement (0.12.0), quatre scènes de démonstration : le courant ascendant, la dérive, la fusée (couloir
+ * d'accélération puis zone de freinage), et la poche de faible gravité (0.14.0). Chacune se charge avec au moins une zone, et le pilote, mené image par image sur l'horloge figée
  * de la page (une image dure seize millisecondes : le test ne dépend pas de la vitesse du rendu logiciel), entre dans la zone : `state().zone`
  * dit l'espèce de celle où se trouve le personnage. Les zones se dessinent à chaque image, sans erreur de console.
  */
@@ -518,6 +519,7 @@ const ZONE_SCENES = [
   { scene: 'courant', zone: 'ascendant' },
   { scene: 'derive', zone: 'lateral' },
   { scene: 'fusee', zone: 'acceleration' },
+  { scene: 'poche', zone: 'poche' },
 ] as const;
 
 for (const { scene, zone } of ZONE_SCENES) {
@@ -658,6 +660,79 @@ test('scène « glissiere » : le pilote tient le lanceur et ne tire que quand l
   expect(bounced, 'images où le personnage redescend avant le mur (un choc)').toBe(0);
   expect(passed, 'le tir franchit le mur').toBe(true);
   expect(highest, 'hauteur atteinte').toBeGreaterThan(16);
+  for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
+  expect((await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
+/**
+ * Les transformations du terrain (0.14.0), deux scènes de plus jouées par le pilote des scènes sur l'horloge figée de la page, sans erreur de
+ * console (la poche est dans `ZONE_SCENES`) :
+ *  - l'accordéon (`accordeon`) : un lanceur puis deux bandes de prises, qui se rapprochent et s'écartent en miroir. `anchors()` dit de quelle
+ *    bande est chaque prise (`band` : -1 la gauche, 1 la droite, null les autres) ; les deux bandes sont là, leurs prises glissent bien, et le pilote
+ *    les franchit : il dépasse 26 m, la sortie de l'accordéon ;
+ *  - le serpentin (`serpentin`) : la chaîne droite, puis à 20 m le monde s'incline par stades, jusqu'à l'horizontale (le quart de tour) puis revient.
+ *    Pendant la partie, la gravité (`gravityX`) atteint au moins 0,6 en valeur absolue (l'oblique d'un huitième de tour est à 0,71, l'horizontale à 1), et
+ *    le pilote, qui lit « plus haut » à l'opposé de la gravité du moment, passe 40 m.
+ */
+test('scène « accordeon » : les deux bandes de prises glissent en miroir (anchors() les distingue par band), et le pilote les franchit au-delà de 26 m', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'accordeon');
+  const world = sceneWorld('accordeon', 5);
+  const bandIds = world.anchors.filter((a) => a.band !== undefined).map((a) => a.id);
+  expect(bandIds.length, 'prises de bande de la scène').toBeGreaterThanOrEqual(4);
+  const loaded = await page.evaluate(() => window.__grappin!.anchors());
+  expect(loaded.filter((a) => a.band === -1).length).toBeGreaterThanOrEqual(2);
+  expect(loaded.filter((a) => a.band === 1).length).toBeGreaterThanOrEqual(2);
+  // Les autres prises (le lanceur, la chaîne) ne sont d'aucune bande.
+  expect(loaded.filter((a) => a.band === null).length).toBeGreaterThan(0);
+  expect(loaded.filter((a) => a.band !== null).map((a) => a.id).sort()).toEqual([...bandIds].sort());
+  const watched = bandIds[0]!;
+  const reach = { min: Infinity, max: -Infinity };
+  const memory = newMemory();
+  let highest = 0;
+  for (let frame = 0; frame < 1500 && highest <= 26; frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world });
+    expect(seen.screen).toBe('playing');
+    highest = Math.max(highest, seen.pos.y);
+    // Une image sur dix suffit : la bande met trois secondes à aller d'un bout à l'autre.
+    if (frame % 10 === 0) {
+      const x = (await page.evaluate(() => window.__grappin!.anchors())).find((a) => a.id === watched)?.x;
+      if (x !== undefined) {
+        reach.min = Math.min(reach.min, x);
+        reach.max = Math.max(reach.max, x);
+      }
+    }
+  }
+  expect(highest, 'hauteur atteinte').toBeGreaterThan(26);
+  // La prise suivie a glissé de plus d'un mètre : la bande va et vient, ce n'est pas un décor immobile.
+  expect(reach.max - reach.min, 'course de la prise suivie').toBeGreaterThan(1);
+  // Les panneaux des bandes se dessinent encore quelques images, sans erreur.
+  for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
+  expect((await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
+test('scène « serpentin » : le monde s\'incline (|gravityX| ≥ 0,6 pendant la partie), et le pilote passe 40 m', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'serpentin');
+  const world = sceneWorld('serpentin', 5);
+  expect(world.schedule.map((event) => event.kind)).toEqual(['serpentin']);
+  expect(await state(page)).toMatchObject({ screen: 'playing', scene: 'serpentin' });
+  const memory = newMemory();
+  let tilt = 0;
+  let highest = 0;
+  for (let frame = 0; frame < 2500 && highest <= 40; frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world });
+    expect(seen.screen).toBe('playing');
+    tilt = Math.max(tilt, Math.abs(seen.gravityX));
+    highest = Math.max(highest, seen.pos.y);
+  }
+  expect(tilt, 'inclinaison la plus forte (|gravityX|)').toBeGreaterThanOrEqual(0.6);
+  expect(highest, 'hauteur atteinte').toBeGreaterThan(40);
+  // Le monde penché se dessine encore quelques images, sans erreur.
   for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
   expect((await state(page)).screen).toBe('playing');
   expect(errors).toEqual([]);

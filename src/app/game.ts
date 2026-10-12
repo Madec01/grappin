@@ -187,6 +187,8 @@ export interface DebugAnchor {
   /** Position en mètres de monde, y vers le haut. */
   readonly x: number;
   readonly y: number;
+  /** Bande d'accordéon dont la prise fait partie : la gauche (-1) ou la droite (1) ; null pour toute autre prise. */
+  readonly band: -1 | 1 | null;
 }
 
 /**
@@ -581,7 +583,7 @@ export class Game {
 
   /** Les points d'accroche encore là, pour un pilote de test qui doit viser (un lanceur, un trou dans un mur). */
   anchors(): DebugAnchor[] {
-    return this.run.sim.state.anchors.filter((anchor) => !anchor.broken).map((anchor) => ({ id: anchor.id, kind: anchor.kind, x: anchor.pos.x, y: anchor.pos.y }));
+    return this.run.sim.state.anchors.filter((anchor) => !anchor.broken).map((anchor) => ({ id: anchor.id, kind: anchor.kind, x: anchor.pos.x, y: anchor.pos.y, band: anchor.band ?? null }));
   }
 
   debugState(): DebugState {

@@ -43,7 +43,7 @@ declare global {
       playScene: (id: string) => boolean;
       /** Joue une partie d'atelier sur ces éléments (voir data/atelier.ts) ; sans liste, sur le choix du profil. */
       playAtelier: (ids?: readonly string[]) => void;
-      /** Les points d'accroche encore là, en mètres de monde : de quoi viser un trou dans un mur. Pour les tests de bout en bout et le banc de captures. */
+      /** Les points d'accroche encore là, en mètres de monde (et la bande d'accordéon de chacun, ou null) : de quoi viser un trou dans un mur. Pour les tests de bout en bout et le banc de captures. */
       anchors: () => DebugAnchor[];
       /** La traction prouvée depuis le lanceur tenu (voir `sim/pilot.ts`), ou null : pour les pilotes de test. */
       launchAim: () => { x: number; y: number } | null;

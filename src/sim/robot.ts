@@ -46,8 +46,8 @@ const RISING_SPEED = 1;
 const RISING_BELOW = 0.5;
 /** Une zone où le vol du robot arrive dans ce temps compte comme « devant lui » : il monte vers elle. */
 const ZONE_AHEAD_SECONDS = 0.4;
-/** Avant de lâcher, le robot regarde ce temps de vol devant lui : s'il heurte un obstacle solide, il garde la corde et attend la suite du balancement. */
-const LOOK_AHEAD_SECONDS = 0.5;
+/** Avant de lâcher, le robot regarde ce temps de vol devant lui : s'il heurte un obstacle solide, il garde la corde et attend la suite du balancement. Partagé avec le pilote des scènes. */
+export const LOOK_AHEAD_SECONDS = 0.5;
 
 /** Sous un mur à ouverture mobile, le robot attend que le trou passe, jamais plus longtemps que ceci (secondes) : la brume monte. */
 export const LAUNCH_WAIT_MAX_SECONDS = 6;
@@ -77,12 +77,13 @@ export function launchIsClear(state: SimState, pull: Vec2, tuning: Tuning): bool
 }
 
 /** Avant de lâcher, le robot regarde aussi si le vol sort du monde dans ce temps (secondes) : un lâcher vers le bord, c'est une chute. Le temps pendant lequel, après un lâcher, il ne rattrape rien plus bas. */
-const EDGE_AHEAD_SECONDS = 1.5;
+export const EDGE_AHEAD_SECONDS = 1.5;
 /** En vol, un robot qui file vers le bord du monde (là où il sera dans ce temps) attrape tout ce qui vient, même plus bas. */
-const EDGE_SOON_SECONDS = 0.5;
+export const EDGE_SOON_SECONDS = 0.5;
 /** Le robot n'examine le vol d'un lâcher (`flightCatches`) qu'un pas sur ce nombre. */
-const RELEASE_EVERY = 4;
-const EDGE_MARGIN = 1;
+export const RELEASE_EVERY = 4;
+/** Le bord du monde se tient à cette marge en deçà de sa demi-largeur. */
+export const EDGE_MARGIN = 1;
 
 /** Vrai si le vol qui suivrait un lâcher maintenant ne heurte rien pendant `LOOK_AHEAD_SECONDS` (rebonds, fracas et anneaux joués), ni ne sort du monde pendant `EDGE_AHEAD_SECONDS`. */
 function releaseIsClear(state: SimState, tuning: Tuning): boolean {

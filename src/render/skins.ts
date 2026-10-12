@@ -1,7 +1,8 @@
 import { doorGauge, doorState } from '../sim/cycles';
+import { cablePosition } from '../sim/events';
 import { ROTOR_THICKNESS } from '../sim/moving';
 import { RING_CENTRE_RATIO } from '../sim/rules';
-import type { Obstacle, Ring, SimState } from '../sim/state';
+import type { Anchor, Obstacle, Ring, SimState } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
 import { noise } from './effects';
 import { mixColor } from './sling';
@@ -9,8 +10,9 @@ import { COLOR } from './style';
 
 /**
  * Habillages des obstacles à comportement (surface de rebond, paroi cassable,
- * porte, barre tournante), des anneaux de précision et de la roue motorisée : ce
- * qui, dans leur dessin, se calcule de l'état sans PixiJS ni temps réel. Le
+ * porte, barre tournante), des anneaux de précision, de la roue motorisée et des
+ * bandes de l'accordéon : ce qui, dans leur dessin, se calcule de l'état sans
+ * PixiJS ni temps réel. Le
  * rendu (`renderer.ts`) pose les formes, ce fichier dit quoi poser et dans quel
  * état.
  *
@@ -45,6 +47,8 @@ export const SKIN = {
   ringHot: mixColor(COLOR.ring, COLOR.white, 0.55),
   /** Masse de la barre d'un tournant : sombre, avec un soupçon du rouge-magenta du danger, pour qu'une barre qui bouge ne se confonde pas avec un mur. */
   rotorBody: mixColor(COLOR.obstacle, COLOR.obstacleEdge, 0.16),
+  /** Le cœur des traits d'une bande d'accordéon (son bord intérieur, ses chevrons) : sa teinte éclaircie vers le blanc, comme le cœur presque blanc d'un tube de néon. */
+  bandCore: mixColor(COLOR.accordion, COLOR.white, 0.5),
 } as const;
 
 /** Le cycle d'une onde de pas : de 0 à 1, `hz` fois par seconde de simulation (jamais de temps réel). */
@@ -226,4 +230,79 @@ export function rotorWidths(scale: number, edge: number, minThickness = 2 * edge
   const thickness = Math.max(ROTOR_THICKNESS * scale, minThickness);
   const outer = thickness + edge;
   return { outer, body: Math.max(0, thickness - edge), pivot: Math.max(ROTOR_PIVOT_RADIUS * scale, outer / 2 + 1) };
+}
+
+/**
+ * Les bandes de l'accordéon (lot 3, version 0.14.0) : deux colonnes de prises, la gauche (`band` -1) et la droite (1), qui se rapprochent et
+ * s'écartent en miroir. Ce ne sont pas des câbles : chaque bande se dessine comme un panneau translucide posé derrière ses prises, du bas de la
+ * plus basse au haut de la plus haute, et il bouge avec elles (la simulation met à jour leur position à chaque pas). Deux prises du même côté
+ * à moins de `BAND_LINK` mètres l'une de l'autre sont de la même bande : le parcours engendre ses prises de bas en haut, une bande est donc une
+ * suite d'enjambées de moins de `BAND_LINK` mètres. Le panneau dépasse les prises de `BAND_PAD_Y` mètres en haut et en bas (le disque et le halo des
+ * prises y tiennent), de `BAND_PAD_X` mètres de chaque côté de leur zigzag, et fait au moins `BAND_MIN_WIDTH` mètres de large.
+ */
+export const BAND_LINK = 6;
+export const BAND_MIN_WIDTH = 1.2;
+export const BAND_PAD_X = 0.2;
+export const BAND_PAD_Y = 0.35;
+/** Les chevrons du panneau, qui disent le sens où la bande va, sont répartis à peu près tous les `BAND_CHEVRON_SPACING` mètres. */
+export const BAND_CHEVRON_SPACING = 0.9;
+
+/** Un panneau de bande, en mètres de monde (y vers le haut), et le sens où la bande glisse à ce pas : -1 vers la gauche, 1 vers la droite, 0 si aucune prise de la bande ne glisse. */
+export interface AccordionBand {
+  readonly side: -1 | 1;
+  readonly left: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly top: number;
+  readonly heading: -1 | 0 | 1;
+}
+
+/** Ce qu'on sait d'une bande tant qu'on y ajoute des prises : l'étendue des prises elles-mêmes, et son sens. */
+interface BandReach {
+  side: -1 | 1;
+  xMin: number;
+  xMax: number;
+  yMin: number;
+  yMax: number;
+  heading: -1 | 0 | 1;
+}
+
+/** Le sens où glisse la prise au pas `step` : -1 vers la gauche, 1 vers la droite, 0 si elle ne glisse pas. */
+function slideHeading(anchor: Anchor, step: number, tuning: Tuning): -1 | 0 | 1 {
+  if (!anchor.cable) return 0;
+  const dx = cablePosition(anchor, step + 1, tuning).x - cablePosition(anchor, step, tuning).x;
+  return dx > 0 ? 1 : dx < 0 ? -1 : 0;
+}
+
+/** Aucune bande : le cas ordinaire, partagé pour ne rien allouer. */
+const NO_BANDS: readonly AccordionBand[] = [];
+
+/** Les panneaux des bandes de l'accordéon pour les prises de ce pas, dans l'ordre où leurs premières prises sont rencontrées. Aucun sans prise de bande. */
+export function accordionBands(anchors: readonly Anchor[], step: number, tuning: Tuning): readonly AccordionBand[] {
+  const reaches: BandReach[] = [];
+  for (const anchor of anchors) {
+    if (anchor.band === undefined || anchor.broken) continue;
+    const { x, y } = anchor.pos;
+    const home = reaches.find((reach) => reach.side === anchor.band && y >= reach.yMin - BAND_LINK && y <= reach.yMax + BAND_LINK);
+    if (!home) {
+      reaches.push({ side: anchor.band, xMin: x, xMax: x, yMin: y, yMax: y, heading: slideHeading(anchor, step, tuning) });
+      continue;
+    }
+    home.xMin = Math.min(home.xMin, x);
+    home.xMax = Math.max(home.xMax, x);
+    home.yMin = Math.min(home.yMin, y);
+    home.yMax = Math.max(home.yMax, y);
+    if (home.heading === 0) home.heading = slideHeading(anchor, step, tuning);
+  }
+  if (reaches.length === 0) return NO_BANDS;
+  return reaches.map((reach) => {
+    const middle = (reach.xMin + reach.xMax) / 2;
+    const half = Math.max(BAND_MIN_WIDTH / 2, (reach.xMax - reach.xMin) / 2 + BAND_PAD_X);
+    return { side: reach.side, left: middle - half, right: middle + half, bottom: reach.yMin - BAND_PAD_Y, top: reach.yMax + BAND_PAD_Y, heading: reach.heading };
+  });
+}
+
+/** Combien de chevrons le panneau porte : un tous les `BAND_CHEVRON_SPACING` mètres, un au moins. Le chevron `k` est au milieu de la `k`-ième tranche. */
+export function bandChevronCount(band: AccordionBand): number {
+  return Math.max(1, Math.round((band.top - band.bottom) / BAND_CHEVRON_SPACING));
 }

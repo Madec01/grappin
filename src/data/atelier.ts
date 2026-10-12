@@ -61,7 +61,7 @@ export const ATELIER_ELEMENTS: readonly AtelierElement[] = [
   { id: 'fusee', label: 'Fusée', group: 'zones' },
   { id: 'serpentin', label: 'Serpentin', group: 'transformations' },
   { id: 'accordeon', label: 'Accordéon', group: 'transformations' },
-  { id: 'poche', label: 'Poche de faible gravité', group: 'transformations' },
+  { id: 'poche', label: 'Poche', group: 'transformations' },
   { id: 'bascule', label: 'Bascule', group: 'evenements' },
   { id: 'vent', label: 'Vent', group: 'evenements' },
   { id: 'panne', label: 'Panne', group: 'evenements' },

@@ -5,6 +5,7 @@ import { chromium, type Browser, type Page } from '@playwright/test';
 import gifenc from 'gifenc';
 import { PNG } from 'pngjs';
 import { doorGauge, doorState } from '../src/sim/cycles';
+import { ACCORDION_PERIOD } from '../src/sim/generator';
 import { rotorTurns, slideOffset } from '../src/sim/moving';
 import { Simulation } from '../src/sim/simulation';
 import type { ZoneKind } from '../src/sim/state';
@@ -43,7 +44,7 @@ const PORT = 4175;
 const VIEWPORT = { width: 390, height: 844 };
 const outDir = resolve(process.argv[2] ?? 'captures');
 const seed = Number(process.argv[3] ?? '1');
-/** `scenes` en troisième argument : seulement les prises des scènes du lot 2, pour les revoir sans rejouer tout le banc. */
+/** `scenes` en troisième argument : seulement les prises des scènes des lots 2 et 3, pour les revoir sans rejouer tout le banc. */
 const onlyScenes = process.argv[4] === 'scenes';
 /** Après `scenes`, des noms de scènes (`courant derive`) pour ne rejouer que celles-là ; aucun nom, toutes les scènes. */
 const sceneFilter = onlyScenes ? process.argv.slice(5) : [];
@@ -193,7 +194,7 @@ function encodeGif(ffmpeg: string, webm: string, gif: string): void {
 }
 
 /**
- * Les scènes du lot 2 (`playScene(id)` : un premier segment construit à la main pour chaque mécanique). Chaque prise a son contexte neuf,
+ * Les scènes des lots 2 et 3 (`playScene(id)` : un premier segment construit à la main pour chaque mécanique). Chaque prise a son contexte neuf,
  * l'horloge de la page figée avant la scène puis menée à la main, comme pour le pouls : l'image voulue est exacte, jamais à quelques images
  * près. La brume est lente, car on laisse le personnage s'attarder pour bien voir. Les pas par image sont ceux d'une image à 60 Hz.
  */
@@ -215,6 +216,19 @@ const ROTOR_APPROACH_Y = 10;
 const ROTOR_DIAGONAL: readonly [number, number] = [0.09, 0.16];
 /** La glissière : le trou, en déplacement, à cet écart (mètres) du lanceur, de ce côté et en revenant vers lui ; et un pas d'attente à la fois, d'au plus ce nombre de pas. */
 const SLIDE_SHOT_OFFSET: readonly [number, number] = [-2, -1.4];
+/** Le serpentin : le monde est « incliné » quand la gravité a pris cette part de l'horizontale (l'oblique d'un huitième de tour est à 0,71), « à l'horizontale » à cette autre ; le pilote a besoin de plus d'images pour y monter (le serpentin commence à 20 m, son deuxième stade à 35 m). */
+const SERPENTIN_OBLIQUE_TILT = 0.7;
+const SERPENTIN_HORIZONTAL_TILT = 0.99;
+const SERPENTIN_FRAMES = 1800;
+/**
+ * L'accordéon : le câble des bandes part de la position écartée (phase 0 de sa période), les resserre à mi-période et les écarte de nouveau à la
+ * période. Les prises se font un peu avant ces extrêmes, quand les bandes y vont encore (elles sont à neuf dixièmes resserrées, puis à neuf
+ * dixièmes écartées) : les chevrons y pointent vers le milieu, puis vers l'extérieur, alors qu'au point d'inversion même ils changeraient de sens.
+ */
+const ACCORDION_CLOSING_PHASE = 0.45;
+const ACCORDION_OPENING_PHASE = 0.95;
+/** La poche : le personnage est « bien dedans » à cette hauteur (la poche s'étend de 8,6 m à 20,6 m, ses rampes de 1,5 m aux deux bouts). */
+const POCKET_SHOT_Y = 14;
 
 /** Mène l'horloge figée de la page jusqu'au pas de simulation `target` (à un pas ou deux près, par excès), par grands bonds puis image par image. */
 async function advanceToStep(page: Page, target: number): Promise<number> {
@@ -241,12 +255,12 @@ async function openScene(browser: Browser, id: string): Promise<{ page: Page; cl
 
 /**
  * Le pilote des scènes (`scripts/pilote.ts`, les règles du robot) mène le personnage jusqu'à `until` (vrai sur l'état vu et la mémoire du
- * pilote), image par image ; `true` s'il y est arrivé avant `SCENE_FRAMES` images. Il rend la main à cet instant : le personnage reste là où il
+ * pilote), image par image ; `true` s'il y est arrivé avant `frames` images (`SCENE_FRAMES` d'ordinaire). Il rend la main à cet instant : le personnage reste là où il
  * est, corde tenue s'il en tenait une. Le temps est celui de la page depuis la scène, en millisecondes simulées.
  */
-async function climbUntil(page: Page, until: (s: Seen, memory: PilotMemory) => boolean, options: PilotOptions = {}): Promise<boolean> {
+async function climbUntil(page: Page, until: (s: Seen, memory: PilotMemory) => boolean, options: PilotOptions = {}, frames = SCENE_FRAMES): Promise<boolean> {
   const memory = newMemory();
-  for (let frame = 0; frame < SCENE_FRAMES; frame += 1) {
+  for (let frame = 0; frame < frames; frame += 1) {
     await page.clock.runFor(FRAME_MS);
     const s = await pilotFrame(page, memory, frame * FRAME_MS, options);
     if (s.screen !== 'playing') return false;
@@ -260,10 +274,11 @@ const ZONE_SHOTS: readonly { readonly id: string; readonly file: string; readonl
   { id: 'courant', file: '32-scene-courant', zone: 'ascendant', ready: (s) => s.zone === 'ascendant' && s.pos.y >= 11 },
   { id: 'derive', file: '33-scene-derive', zone: 'lateral', ready: (s) => s.zone === 'lateral' && s.pos.y >= 10 },
   { id: 'fusee', file: '34-scene-fusee', zone: 'acceleration', ready: (s) => s.zone === 'acceleration' && s.pos.y >= 11 },
+  { id: 'poche', file: '40-scene-poche', zone: 'poche', ready: (s) => s.zone === 'poche' && s.pos.y >= POCKET_SHOT_Y },
 ];
 
 /**
- * Les scènes du lot 2, une ou plusieurs prises chacune, en 390 × 844. Les trois scènes dont le jeu exige la mécanique (0.12.1) se jouent par
+ * Les scènes des lots 2 et 3, une ou plusieurs prises chacune, en 390 × 844. Les trois scènes dont le jeu exige la mécanique (0.12.1) se jouent par
  * le pilote des scènes (`scripts/pilote.ts`) : lanceur tenu en (0,4 ; 11), tir prouvé par le vérificateur (au cerceau, un tir qui traverse l'anneau), mur franchi par la mécanique.
  *  - 28-scene-rebond : le ricochet, lanceur tenu, bannière effacée : la chicane qui barre le tir direct, le mur de rebond à droite, le trou
  *    à gauche ; 28-scene-rebond-vol : quelques images après le rebond, le personnage en vol vers le trou ;
@@ -280,6 +295,12 @@ const ZONE_SHOTS: readonly { readonly id: string; readonly file: string; readonl
  *  - 36-scene-tournant : la barre en diagonale (à mi-chemin d'un quart de tour), le personnage en approche en dessous ;
  *  - 37-scene-glissiere : le lanceur tenu sous le mur, le trou en déplacement, décalé du lanceur et revenant vers lui ; 37-scene-glissiere-vol :
  *    le tir parti quand le trou est passé, le personnage dans le trou, entre les deux panneaux.
+ *  - 38-scene-serpentin : le monde incliné d'un huitième de tour (|gravityX| ≥ 0,7), le personnage en vol ou accroché sur la chaîne ;
+ *    38-scene-serpentin-horizontal : le stade suivant, le monde à l'horizontale (un quart de tour), les prises de la chaîne alignées en travers ;
+ *  - 39-scene-accordeon : les deux bandes presque jointes et encore en train de se rapprocher, le personnage accroché à l'une d'elles, le panneau
+ *    de chaque bande, son liseré intérieur et ses chevrons qui pointent vers le milieu ; 39-scene-accordeon-ecarte : les mêmes bandes presque au
+ *    plus écartées et en train de s'écarter, chevrons vers l'extérieur ;
+ *  - 40-scene-poche : le personnage bien dans la poche de faible gravité (fond lavande, rampes douces en haut et en bas, particules qui flottent).
  * Une prise que le parcours ne permet plus (réglages changés) est omise avec un avertissement, sans bloquer le banc.
  */
 async function captureScenes(browser: Browser): Promise<void> {
@@ -555,6 +576,60 @@ async function captureScenes(browser: Browser): Promise<void> {
         await close();
       }
     }
+  }
+
+  // Le serpentin : le pilote monte la chaîne droite ; à 20 m le monde s'incline par stades. Première prise : le stade oblique (un huitième de tour,
+  // la gravité à 0,71 de l'horizontale) ; seconde : le stade horizontal, que le pilote met plus de temps à atteindre.
+  if (wanted('serpentin')) {
+    const world = sceneWorld('serpentin', seed);
+    for (const [file, tilt, label] of [
+      ['38-scene-serpentin', SERPENTIN_OBLIQUE_TILT, 'oblique'],
+      ['38-scene-serpentin-horizontal', SERPENTIN_HORIZONTAL_TILT, 'horizontal'],
+    ] as const) {
+      const { page, close } = await openScene(browser, 'serpentin');
+      await page.clock.runFor(PULSE_INTRO_MS);
+      const tilted = await climbUntil(page, (s) => Math.abs(s.gravityX) >= tilt, { world }, SERPENTIN_FRAMES);
+      if (!tilted) console.warn(`${file} : le monde n'est jamais incliné au stade ${label}, prise omise`);
+      else {
+        const s = await page.evaluate(() => window.__grappin!.state());
+        await page.screenshot({ path: join(outDir, `${file}.png`) });
+        console.log(`${file} : gravité (${s.gravityX.toFixed(2)} ; ${s.gravityY.toFixed(2)}), ${s.attached ? 'accroché' : 'en vol'}, position (${s.pos.x.toFixed(1)}, ${s.pos.y.toFixed(1)}) m, pas ${s.step}`);
+      }
+      await close();
+    }
+  }
+
+  // L'accordéon : le pilote est mené jusqu'à une prise de bande, puis on laisse passer le temps, sans qu'il agisse, jusqu'aux instants où les bandes
+  // sont resserrées (à mi-période de leur câble) puis écartées (à la période suivante) : le personnage reste accroché, la corde tendue.
+  if (wanted('accordeon')) {
+    const world = sceneWorld('accordeon', seed);
+    const bands = new Set(world.anchors.flatMap((a) => (a.band === undefined ? [] : [a.id])));
+    const { page, close } = await openScene(browser, 'accordeon');
+    await page.clock.runFor(PULSE_INTRO_MS);
+    const held = await climbUntil(page, (s, memory) => s.attached && memory.heldId !== null && bands.has(memory.heldId), { world });
+    if (!held) console.warn('39-scene-accordeon : le pilote ne s\'accroche à aucune bande, prises omises');
+    else {
+      /** Le premier pas, à partir de `from`, où le câble des bandes est à `phase` de sa période. */
+      const stepAt = (from: number, phase: number): number => {
+        const period = ACCORDION_PERIOD / DEFAULT_TUNING.stepSeconds;
+        return Math.round(phase * period + Math.max(0, Math.ceil((from - phase * period) / period)) * period);
+      };
+      const now = (await page.evaluate(() => window.__grappin!.state())).step;
+      const closed = stepAt(now, ACCORDION_CLOSING_PHASE);
+      const open = stepAt(closed + 1, ACCORDION_OPENING_PHASE);
+      for (const [file, target] of [
+        ['39-scene-accordeon', closed],
+        ['39-scene-accordeon-ecarte', open],
+      ] as const) {
+        await advanceToStep(page, target);
+        const s = await page.evaluate(() => window.__grappin!.state());
+        const spots = (await page.evaluate(() => window.__grappin!.anchors())).filter((a) => a.band !== null);
+        const gap = Math.min(...spots.filter((a) => a.band === 1).map((a) => Math.min(...spots.filter((b) => b.band === -1).map((b) => Math.abs(a.x - b.x)))));
+        await page.screenshot({ path: join(outDir, `${file}.png`) });
+        console.log(`${file} : pas ${s.step}, ${s.attached ? 'accroché' : 'en vol'}, position (${s.pos.x.toFixed(1)}, ${s.pos.y.toFixed(1)}) m, écart le plus court entre les bandes ${gap.toFixed(1)} m`);
+      }
+    }
+    await close();
   }
 
   // Les zones : le personnage attend sur le toit que la bannière d'intro s'efface (elle cacherait le haut de la zone), puis le pilote le mène
@@ -897,7 +972,7 @@ async function main(): Promise<void> {
     if (!tipShot) console.warn('27-conseil : aucun conseil affiché avant la fenêtre de lâcher, prise omise');
     await windowContext.close();
 
-    // Les scènes de démonstration du lot 2 : rebond, paroi cassable, porte, anneaux.
+    // Les scènes de démonstration des lots 2 et 3 : rebond, paroi cassable, porte, anneaux, zones, roue, tournant, glissière, serpentin, accordéon, poche.
     await captureScenes(browser);
 
     if (errors.length > 0) console.warn('Erreurs console :', errors);

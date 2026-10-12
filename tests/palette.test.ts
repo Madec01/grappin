@@ -30,6 +30,8 @@ const SPECIES: Record<string, number> = {
   drift: COLOR.drift,
   rocket: COLOR.rocket,
   brake: COLOR.brake,
+  // Les bandes de l'accordéon (0.14.0) : un bleu électrique, lui aussi hors de portée de l'ambiance.
+  accordion: COLOR.accordion,
 };
 
 /** Les quatre teintes nouvelles du lot 2 : surface de rebond, paroi cassable, porte, anneau de précision. */
@@ -302,5 +304,30 @@ describe('mixPalette', () => {
     expect(mixPalette(a, b, 0.3)).not.toBe(mixPalette(a, b, 0.3));
     expect(JSON.stringify([a, b])).toBe(snapshot);
     expect(mixPalette(b, b, 0.4)).toEqual(b);
+  });
+});
+
+describe('la teinte des bandes de l\'accordéon (0.14.0)', () => {
+  it('est un bleu électrique : le bleu domine nettement, le rouge est le canal le plus faible', () => {
+    const [r = 0, g = 0, b = 0] = channels(COLOR.accordion);
+    expect(b).toBeGreaterThan(g);
+    expect(b).toBeGreaterThan(r);
+    expect(r).toBeLessThan(g);
+    expect(b).toBeGreaterThanOrEqual(0xe0);
+  });
+
+  it('est à plus de 40 de toute autre couleur de sens, zones et poche comprises, et de toute couleur d\'effet d\'ambiance', () => {
+    for (const [name, color] of Object.entries({ ...SPECIES, ...ZONES, pocket: COLOR.pocket })) {
+      if (name === 'accordion') continue;
+      expect(distance(COLOR.accordion, color), name).toBeGreaterThan(40);
+    }
+    for (const family of FAMILIES) {
+      for (const field of ['effectA', 'effectB', 'effectC'] as const) expect(distance(COLOR.accordion, PALETTES[family][field]), `${family}.${field}`).toBeGreaterThan(40);
+    }
+  });
+
+  it('se lit sur le fond nuit : bien plus clair que le fond de chaque ambiance', () => {
+    const light = (color: number): number => channels(color).reduce((sum, channel) => sum + channel, 0);
+    for (const family of FAMILIES) expect(light(COLOR.accordion), family).toBeGreaterThan(2 * light(PALETTES[family].background));
   });
 });

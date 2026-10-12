@@ -2236,3 +2236,24 @@ describe('tutoriel et apprentissage', () => {
     expect(seenVeteran.lastTuning!.shadowSeconds).toBe(DEFAULT_TUNING.shadowSeconds);
   });
 });
+
+describe('anchors() : de quelle bande d\'accordéon est chaque prise', () => {
+  it('dans la scène « accordeon », les prises des deux bandes disent -1 (la gauche) ou 1 (la droite), toutes les autres null', () => {
+    const { game } = makeFreeGame('?scene=accordeon&graine=5');
+    const anchors = game.anchors();
+    const left = anchors.filter((anchor) => anchor.band === -1);
+    const right = anchors.filter((anchor) => anchor.band === 1);
+    expect(left.length).toBeGreaterThanOrEqual(2);
+    expect(right.length).toBe(left.length);
+    // La bande de gauche est à gauche du milieu, celle de droite à droite, à tout instant.
+    expect(Math.max(...left.map((anchor) => anchor.x))).toBeLessThan(0);
+    expect(Math.min(...right.map((anchor) => anchor.x))).toBeGreaterThan(0);
+    expect(anchors.filter((anchor) => anchor.band === null).length).toBeGreaterThan(0);
+    expect(anchors.every((anchor) => anchor.band === -1 || anchor.band === 1 || anchor.band === null)).toBe(true);
+  });
+
+  it('hors de la scène, aucune prise n\'est d\'une bande', () => {
+    const { game } = makeFreeGame('?scene=rebond&graine=5');
+    expect(game.anchors().every((anchor) => anchor.band === null)).toBe(true);
+  });
+});

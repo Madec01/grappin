@@ -273,7 +273,7 @@ function tierOfShare(index: number, count: number, shares: readonly number[]): n
  * éclat monte et descend à son tour, doucement. Particules par mètre carré de poche et bornes ; pulsations (radians par seconde) et portée
  * (mètres) du mouvement ; pulsation de l'éclat ; rayon en pixels de chacun des trois rangs de taille, et part de particules de chaque rang.
  */
-export const FLOATER_DENSITY = 0.2;
+export const FLOATER_DENSITY = 0.15;
 export const FLOATER_MIN = 8;
 export const FLOATER_MAX = 90;
 export const FLOATER_RATE_MIN = 0.12;
@@ -281,7 +281,7 @@ export const FLOATER_RATE_MAX = 0.32;
 export const FLOATER_REACH_MIN = 0.3;
 export const FLOATER_REACH_MAX = 0.9;
 export const FLOATER_GLOW_RATE = 0.9;
-export const FLOATER_RADII: readonly number[] = [1.3, 1.9, 2.8];
+export const FLOATER_RADII: readonly number[] = [1.2, 1.7, 2.4];
 export const FLOATER_SHARES: readonly number[] = [0.55, 0.3, 0.15];
 
 /** Une particule de poche : son point de repos (mètres depuis l'entrée de la zone et depuis son bord gauche), ses portées, ses pulsations et phases, et son rang de taille. */

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BAND_CHEVRON_SPACING,
+  BAND_LINK,
+  BAND_MIN_WIDTH,
+  BAND_PAD_X,
+  BAND_PAD_Y,
   DOOR_BLINK_HZ,
   CRACK_SPACING,
   ROTOR_PIVOT_RADIUS,
@@ -7,6 +12,8 @@ import {
   WHEEL_RIM_RADIUS,
   WHEEL_SPOKES,
   WHEEL_TURNS_PER_SECOND,
+  accordionBands,
+  bandChevronCount,
   crackPattern,
   doorLook,
   ringPhase,
@@ -20,10 +27,12 @@ import {
 } from '../src/render/skins';
 import { COLOR } from '../src/render/style';
 import { DOOR_OPEN_SECONDS, DOOR_PERIOD_SECONDS, DOOR_WARNING_SECONDS, doorGauge, doorState } from '../src/sim/cycles';
+import { cablePosition } from '../src/sim/events';
 import { RING_RADIUS } from '../src/sim/generator';
 import { ROTOR_THICKNESS } from '../src/sim/moving';
 import { motorStep } from '../src/sim/physics';
 import { RING_CENTRE_RATIO } from '../src/sim/rules';
+import type { Anchor } from '../src/sim/state';
 import { DEFAULT_TUNING as T } from '../src/sim/tuning';
 
 const SECOND = Math.round(1 / T.stepSeconds);
@@ -343,5 +352,100 @@ describe('rotorWidths : la barre d\'un obstacle tournant, en pixels', () => {
     const red = (color: number): number => (color >> 16) & 0xff;
     expect(red(SKIN.rotorBody)).toBeGreaterThan(red(COLOR.obstacle));
     expect(red(SKIN.rotorBody)).toBeLessThan(red(COLOR.obstacleEdge));
+  });
+});
+
+describe('les bandes de l\'accordéon : un panneau derrière les prises de chaque bande', () => {
+  const PERIOD = 6;
+  /** Une prise de bande : écartée au pas 0 (`from`, vers l'extérieur), elle va vers le milieu (`to`) jusqu'à mi-période, puis revient. */
+  const slider = (id: number, band: -1 | 1, x: number, y: number, sway = 1.2): Anchor => ({
+    id,
+    pos: { x, y },
+    kind: 'normal',
+    broken: false,
+    band,
+    cable: { from: { x: x + band * sway, y }, to: { x: x - band * sway, y }, period: PERIOD },
+  });
+  /** L'accordéon du générateur : trois prises par bande en zigzag (rentrée, sortie, rentrée), la droite décalée d'un demi-pas. */
+  const accordion = (): Anchor[] => [
+    slider(1, -1, -2.2 - 0.4, 14.2),
+    slider(2, 1, 2.2 - 0.4, 15.7),
+    slider(3, -1, -2.2 + 0.4, 17.2),
+    slider(4, 1, 2.2 + 0.4, 18.7),
+    slider(5, -1, -2.2 - 0.4, 20.2),
+    slider(6, 1, 2.2 - 0.4, 21.7),
+  ];
+  const quarter = Math.round((PERIOD / 4) / T.stepSeconds);
+
+  it('une bande par côté : la gauche et la droite, chacune du bas de sa plus basse prise au haut de sa plus haute, plus la marge', () => {
+    const bands = accordionBands(accordion(), 0, T);
+    expect(bands.map((band) => band.side).sort()).toEqual([-1, 1]);
+    const left = bands.find((band) => band.side === -1)!;
+    const right = bands.find((band) => band.side === 1)!;
+    expect(left.bottom).toBeCloseTo(14.2 - BAND_PAD_Y, 9);
+    expect(left.top).toBeCloseTo(20.2 + BAND_PAD_Y, 9);
+    expect(right.bottom).toBeCloseTo(15.7 - BAND_PAD_Y, 9);
+    expect(right.top).toBeCloseTo(21.7 + BAND_PAD_Y, 9);
+    // La bande de gauche est à gauche de celle de droite, et chaque panneau est centré sur le zigzag de ses prises.
+    expect(left.right).toBeLessThan(right.left);
+    expect((left.left + left.right) / 2).toBeCloseTo(-2.2, 9);
+    expect((right.left + right.right) / 2).toBeCloseTo(2.2, 9);
+  });
+
+  it('le panneau couvre le zigzag de ses prises plus sa marge, et ne fait jamais moins de 1,2 m de large', () => {
+    for (const band of accordionBands(accordion(), 0, T)) {
+      expect(band.right - band.left).toBeGreaterThanOrEqual(BAND_MIN_WIDTH - 1e-9);
+      expect(band.right - band.left).toBeCloseTo(0.8 + 2 * BAND_PAD_X, 9);
+    }
+    // Une bande en ligne droite garde la largeur minimale.
+    const straight = accordionBands([slider(1, -1, -2, 10), slider(2, -1, -2, 13)], 0, T);
+    expect(straight[0]!.right - straight[0]!.left).toBeCloseTo(BAND_MIN_WIDTH, 9);
+  });
+
+  it('le panneau suit les prises : il glisse avec elles d\'un pas à l\'autre (rien n\'est figé dans le temps)', () => {
+    const at = (step: number): number => {
+      const moved = accordion().map((anchor) => ({ ...anchor, pos: cablePosition(anchor, step, T) }));
+      const left = accordionBands(moved, step, T).find((band) => band.side === -1)!;
+      return (left.left + left.right) / 2;
+    };
+    // De l'écartement (pas 0) au resserrement (mi-période) : la bande de gauche va vers la droite, de deux fois l'amplitude.
+    expect(at(Math.round((PERIOD / 2) / T.stepSeconds)) - at(0)).toBeCloseTo(2.4, 6);
+  });
+
+  it('le sens de la bande : au début de la période, elle se resserre (gauche vers la droite, droite vers la gauche) ; à mi-période, elle s\'écarte', () => {
+    const closing = accordionBands(accordion(), quarter, T);
+    expect(closing.find((band) => band.side === -1)!.heading).toBe(1);
+    expect(closing.find((band) => band.side === 1)!.heading).toBe(-1);
+    const opening = accordionBands(accordion(), 3 * quarter, T);
+    expect(opening.find((band) => band.side === -1)!.heading).toBe(-1);
+    expect(opening.find((band) => band.side === 1)!.heading).toBe(1);
+  });
+
+  it('une prise qui ne glisse pas dit « 0 » : pas de sens à montrer', () => {
+    const still: Anchor = { id: 1, pos: { x: -2, y: 10 }, kind: 'normal', broken: false, band: -1 };
+    expect(accordionBands([still], quarter, T)[0]!.heading).toBe(0);
+  });
+
+  it('deux prises du même côté à moins de BAND_LINK mètres sont de la même bande, au-delà de deux bandes ; les deux côtés ne se mêlent jamais', () => {
+    expect(accordionBands([slider(1, -1, -2, 10), slider(2, -1, -2, 10 + BAND_LINK - 0.1)], 0, T)).toHaveLength(1);
+    expect(accordionBands([slider(1, -1, -2, 10), slider(2, -1, -2, 10 + BAND_LINK + 0.1)], 0, T)).toHaveLength(2);
+    expect(accordionBands([slider(1, -1, -2, 10), slider(2, 1, 2, 10)], 0, T)).toHaveLength(2);
+    // Une chaîne de prises à moins de BAND_LINK l'une de l'autre est une seule bande, même plus longue.
+    expect(accordionBands([slider(1, 1, 2, 10), slider(2, 1, 2, 15), slider(3, 1, 2, 20), slider(4, 1, 2, 25)], 0, T)).toHaveLength(1);
+  });
+
+  it('ni les prises cassées ni les autres prises (sans bande, même sur câble) ne font de panneau', () => {
+    const plain: Anchor = { id: 7, pos: { x: 0, y: 12 }, kind: 'normal', broken: false };
+    const cable: Anchor = { id: 8, pos: { x: 0, y: 13 }, kind: 'normal', broken: false, cable: { from: { x: -1, y: 13 }, to: { x: 1, y: 13 }, period: 3 } };
+    expect(accordionBands([plain, cable], 0, T)).toEqual([]);
+    expect(accordionBands([{ ...slider(1, -1, -2, 10), broken: true }], 0, T)).toEqual([]);
+    expect(accordionBands([], 0, T)).toEqual([]);
+  });
+
+  it('les chevrons : un tous les 0,9 m environ, un au moins', () => {
+    const [band] = accordionBands([slider(1, -1, -2, 10), slider(2, -1, -2, 13), slider(3, -1, -2, 16)], 0, T);
+    expect(bandChevronCount(band!)).toBe(Math.round((6 + 2 * BAND_PAD_Y) / BAND_CHEVRON_SPACING));
+    const [tiny] = accordionBands([slider(1, 1, 2, 10)], 0, T);
+    expect(bandChevronCount(tiny!)).toBe(1);
   });
 });

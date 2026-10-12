@@ -8,6 +8,13 @@ import {
   BRAKE_LINES_MIN,
   CHEVRON_SPACING,
   CHEVRON_SPEED,
+  FLOATER_DENSITY,
+  FLOATER_MAX,
+  FLOATER_MIN,
+  FLOATER_RADII,
+  FLOATER_RATE_MAX,
+  FLOATER_REACH_MAX,
+  FLOATER_SHARES,
   STREAK_MAX,
   STREAK_MIN,
   STREAK_TIERS,
@@ -16,6 +23,7 @@ import {
   ZONE_TONE,
   brakeLine,
   brakeLineCount,
+  buildFloaters,
   buildKit,
   buildMotes,
   chevronAlong,
@@ -23,6 +31,8 @@ import {
   chevronShape,
   clipBox,
   edgeFade,
+  floaterAt,
+  floaterCount,
   flowOf,
   frac,
   frameBox,
@@ -37,6 +47,7 @@ import {
   waveLight,
   type Box,
   type BrakeLine,
+  type FloaterSpot,
   type Point,
   type Span,
 } from '../src/render/zones';
@@ -492,5 +503,109 @@ describe('buildKit : ce que le rendu retient d\'une zone', () => {
     expect(band.lengthMeters).toBeCloseTo(10, 12);
     expect(band.breadthMeters).toBeCloseTo(3.5, 12);
     expect(buildKit(zone('acceleration')).motes).toEqual([]);
+  });
+});
+
+describe('la poche de faible gravité : des particules qui flottent, sans direction', () => {
+  /** La poche du jeu : toute la largeur du monde, douze mètres de haut. */
+  const pocket = (patch: Partial<Zone> = {}): Zone => zone('poche', { id: 5, x0: -15, x1: 15, y0: 8.6, y1: 20.6, strength: 0.3, dir: { x: 0, y: 0 }, ...patch });
+  const spot = (): FloaterSpot => ({ along: 0, across: 0, glow: 0 });
+
+  it('le nombre de particules est proportionnel à la surface de la poche, borné', () => {
+    expect(floaterCount(30, 12)).toBe(Math.round(30 * 12 * FLOATER_DENSITY));
+    expect(floaterCount(0.5, 0.5)).toBe(FLOATER_MIN);
+    expect(floaterCount(400, 400)).toBe(FLOATER_MAX);
+    expect(buildFloaters(pocket())).toHaveLength(floaterCount(30, 12));
+  });
+
+  it('toujours les mêmes pour le même numéro de zone, d\'autres pour un autre numéro', () => {
+    expect(buildFloaters(pocket())).toEqual(buildFloaters(pocket()));
+    expect(buildFloaters(pocket({ id: 6 }))).not.toEqual(buildFloaters(pocket()));
+  });
+
+  it('rien pour les autres espèces de zone, qui ont leurs traînées, leurs chevrons ou leurs bandes', () => {
+    for (const kind of ['ascendant', 'lateral', 'acceleration', 'freinage'] as const) expect(buildFloaters(zone(kind)), kind).toEqual([]);
+  });
+
+  it('une poche se dessine à plat, sans direction : le sens est « vers le haut » et le kit retient ses particules', () => {
+    expect(flowOf(pocket())).toEqual({ vertical: true, sign: 1 });
+    const kit = buildKit(pocket());
+    expect(kit.lengthMeters).toBeCloseTo(12, 12);
+    expect(kit.breadthMeters).toBeCloseTo(30, 12);
+    expect(kit.motes).toEqual([]);
+    expect(kit.floaters.length).toBeGreaterThan(0);
+    expect(buildKit(zone('ascendant')).floaters).toEqual([]);
+  });
+
+  it('une particule ne sort jamais de la poche par le haut ni par le bas, à aucun instant', () => {
+    const out = spot();
+    for (const floater of buildFloaters(pocket())) {
+      for (let clock = 0; clock < 200; clock += 0.5) {
+        floaterAt(floater, clock, out);
+        expect(out.along).toBeGreaterThanOrEqual(-1e-9);
+        expect(out.along).toBeLessThanOrEqual(12 + 1e-9);
+        expect(Math.abs(out.across - floater.across)).toBeLessThanOrEqual(FLOATER_REACH_MAX + 1e-9);
+      }
+    }
+  });
+
+  it('elles flottent sans direction : sur une longue durée, une particule revient autour de son repos, jamais d\'une dérive', () => {
+    const out = spot();
+    for (const floater of buildFloaters(pocket())) {
+      let alongSum = 0;
+      let acrossSum = 0;
+      const samples = 20000;
+      for (let k = 0; k < samples; k += 1) {
+        floaterAt(floater, k * 0.5, out);
+        alongSum += out.along - floater.along;
+        acrossSum += out.across - floater.across;
+      }
+      expect(Math.abs(alongSum / samples)).toBeLessThan(0.02);
+      expect(Math.abs(acrossSum / samples)).toBeLessThan(0.02);
+    }
+  });
+
+  it('et lentement : jamais plus de 0,3 m/s, la portée fois la pulsation la plus vive', () => {
+    expect(FLOATER_REACH_MAX * FLOATER_RATE_MAX).toBeLessThan(0.3);
+    const a = spot();
+    const b = spot();
+    const dt = 0.05;
+    for (const floater of buildFloaters(pocket())) {
+      for (let clock = 0; clock < 100; clock += 1) {
+        floaterAt(floater, clock, a);
+        floaterAt(floater, clock + dt, b);
+        expect(Math.hypot(b.along - a.along, b.across - a.across) / dt).toBeLessThan(0.3);
+      }
+    }
+  });
+
+  it('leur éclat bat doucement entre 0 et 1, d\'une particule à l\'autre à des moments différents', () => {
+    const floaters = buildFloaters(pocket());
+    const out = spot();
+    const glows = new Set<number>();
+    for (const floater of floaters) {
+      let low = Infinity;
+      let high = -Infinity;
+      for (let clock = 0; clock < 20; clock += 0.1) {
+        floaterAt(floater, clock, out);
+        low = Math.min(low, out.glow);
+        high = Math.max(high, out.glow);
+      }
+      expect(low).toBeGreaterThanOrEqual(0);
+      expect(high).toBeLessThanOrEqual(1);
+      expect(high - low).toBeGreaterThan(0.9);
+      floaterAt(floater, 0, out);
+      glows.add(Math.round(out.glow * 1000));
+    }
+    expect(glows.size).toBeGreaterThan(floaters.length / 2);
+  });
+
+  it('trois rangs de taille, dans les parts voulues : beaucoup de petites, peu de grosses', () => {
+    expect(FLOATER_RADII).toHaveLength(3);
+    expect(FLOATER_SHARES.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1, 12);
+    const floaters = buildFloaters(pocket());
+    const counts = FLOATER_RADII.map((_, tier) => floaters.filter((floater) => floater.tier === tier).length);
+    counts.forEach((count, tier) => expect(Math.abs(count - FLOATER_SHARES[tier]! * floaters.length), `rang ${tier}`).toBeLessThanOrEqual(1));
+    expect(FLOATER_RADII[0]!).toBeLessThan(FLOATER_RADII[2]!);
   });
 });
