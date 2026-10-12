@@ -9,7 +9,7 @@ Retour du propriétaire : « le jeu ne me propose toujours pas de l'installer »
 ### Ajouté
 
 - **Bouton « Installer le jeu » sur le titre** (`app/install.ts`), sous les accès, dès que le navigateur annonce qu'il sait installer en un geste (`beforeinstallprompt`, que le jeu garde pour lui au lieu de laisser Chrome l'afficher à sa guise) : l'appui ouvre l'invite d'installation du navigateur. Acceptée ou refusée, l'invite ne sert qu'une fois : le bouton s'efface jusqu'à ce que le navigateur en redonne une.
-- **Sur iPhone et iPad**, hors application, le titre rappelle le chemin en une ligne : « Pour installer : Partager, puis « Sur l'écran d'accueil » ».
+- **Sur iPhone et iPad**, hors application, le titre rappelle le chemin en une ligne : « Pour installer : Partager → Sur l'écran d'accueil ».
 - Ouvert depuis l'écran d'accueil, ou une fois installé, le titre ne dit plus rien. `debugState().install` dit ce que le titre montre ; un test de bout en bout imite l'annonce de Chrome, appuie sur le bouton et vérifie l'invite.
 
 ## [0.12.3] — 2026-10-12 — Comme en discothèque : trois lampes

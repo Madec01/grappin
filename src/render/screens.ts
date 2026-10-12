@@ -58,7 +58,7 @@ export type OverlayView =
 
 /** Marges et mise en page, en pixels CSS. */
 /** Sur iPhone et iPad, pas d'invite : le chemin par le menu Partager, en une ligne sous les accès du titre. */
-export const IOS_INSTALL_HINT = 'Pour installer : Partager, puis « Sur l\'écran d\'accueil »';
+export const IOS_INSTALL_HINT = 'Pour installer : Partager → Sur l\'écran d\'accueil';
 
 const SIDE_MARGIN = 20;
 const EDGE_MARGIN = 32;

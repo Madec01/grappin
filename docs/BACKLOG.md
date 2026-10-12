@@ -78,7 +78,7 @@ Choses à ne pas présenter comme des nouveautés : génération infinie, mode n
 
 ## Suites de l'installation sur téléphone (0.7.0)
 
-- **Bouton « Installer » sur le titre.** Fait en 0.12.4 (`app/install.ts`) : bouton « Installer le jeu » dès que Chrome annonce `beforeinstallprompt`, rappel « Partager, puis Sur l'écran d'accueil » sur iPhone et iPad, rien une fois installé. Sur demande du propriétaire : « le jeu ne me propose toujours pas de l'installer ».
+- **Bouton « Installer » sur le titre.** Fait en 0.12.4 (`app/install.ts`) : bouton « Installer le jeu » dès que Chrome annonce `beforeinstallprompt`, rappel « Partager → Sur l'écran d'accueil » sur iPhone et iPad, rien une fois installé. Sur demande du propriétaire : « le jeu ne me propose toujours pas de l'installer ».
 - **Musiques hors-ligne d'avance.** Aujourd'hui une piste se garde à sa première écoute ; un bouton « Garder les musiques » téléchargerait les treize (55 Mo) d'un coup, en Wi-Fi.
 
 ## Pistes techniques relevées par le Lead le 9 octobre 2026
