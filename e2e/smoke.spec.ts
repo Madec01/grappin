@@ -854,21 +854,27 @@ test('scène « rail » : un doigt glissé de côté change la position (pullX) 
 
   // Le doigt se pose, puis glisse de côté (au toucher, par les événements du protocole, comme au lanceur).
   const finger = await draggers[0]!.hold(page, { x: 195, y: 650 });
-  const slide = async (dx: number): Promise<number> => {
+  // Chromium livre un glissement du doigt à sa prochaine image réelle, tardive sur une machine lente : on joue des
+  // images de l'horloge figée jusqu'à ce que la traction le suive (soixante au plus), au lieu d'en compter trois.
+  const slide = async (dx: number, followed: (pull: number) => boolean): Promise<number> => {
     await finger.drag({ x: 195 + dx, y: 650 });
-    for (let i = 0; i < 3; i += 1) await page.clock.runFor(FRAME_MS);
-    return (await state(page)).pullX;
+    let pull = (await state(page)).pullX;
+    for (let i = 0; i < 60 && !followed(pull); i += 1) {
+      await page.clock.runFor(FRAME_MS);
+      pull = (await state(page)).pullX;
+    }
+    return pull;
   };
-  const perPixel = (await slide(40)) / 40;
+  const perPixel = (await slide(40, (pull) => pull > 0)) / 40;
   expect(perPixel, 'traction par pixel').toBeGreaterThan(0);
   const right = await state(page);
   expect(right.pullX).toBeGreaterThan(0.5);
   expect(right.pos.x, 'le personnage glisse vers le bout droit de l\'arc').toBeGreaterThan(rail.pos.x + 0.3);
-  const leftPull = await slide(-40);
+  const leftPull = await slide(-40, (pull) => pull < 0);
   expect(leftPull).toBeLessThan(-0.5);
   expect((await state(page)).pos.x, 'puis vers le bout gauche').toBeLessThan(rail.pos.x - 0.3);
   // Au bout de l'arc que le vérificateur a prouvé : la position suit le doigt, à une demi-image près.
-  const proven = await slide(proved!.x / perPixel);
+  const proven = await slide(proved!.x / perPixel, (pull) => Math.abs(pull - proved!.x) < 0.05);
   expect(proven).toBeCloseTo(proved!.x, 1);
 
   // Levé, le doigt lance : le personnage part dans la direction de cette position de l'arc.

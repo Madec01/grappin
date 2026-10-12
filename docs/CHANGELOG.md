@@ -20,7 +20,7 @@ Demande du propriétaire : « go lot 5, on garde le lot 4 pour plus tard ». Le 
 ### Modifié
 
 - `launchAim()` (pilotes de test) renvoie aussi la position prouvée d'un rail ; `debugState()` dit si un verrou est ouvert (`switchOpen`), si un passage se referme (`closing`) et lesquels sont déclenchés (`triggered`).
-- Les tests de bout en bout tournent désormais en parallèle sur deux processus (3 min 23 s pour 48 tests, contre 4 min 34 s bout à bout) ; le test des scènes exigées joue dix-huit scènes et a droit à trente secondes, et trois tests de robots (dix-huit scènes, cinq scènes, dix graines) à vingt, l'intégration continue étant deux fois plus lente que la machine de développement (une première publication y a échoué à cinq secondes).
+- Les tests de bout en bout tournent désormais en parallèle sur deux processus (3 min 23 s pour 48 tests, contre 4 min 34 s bout à bout) ; le test des scènes exigées joue dix-huit scènes et a droit à trente secondes, et trois tests de robots (dix-huit scènes, cinq scènes, dix graines) à vingt, l'intégration continue étant deux fois plus lente que la machine de développement (une première publication y a échoué à cinq secondes). Le test du rail joue des images jusqu'à ce que la traction suive le doigt, au lieu d'en compter trois : Chromium livre un glissement à sa prochaine image réelle, tardive sur l'intégration continue, qui lisait une traction périmée.
 
 ## [0.14.0] — 2026-10-12 — Lot 3 : le serpentin, l'accordéon, la poche de faible gravité
 
