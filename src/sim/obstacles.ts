@@ -33,7 +33,7 @@ export function solidObstacles(state: Pick<SimState, 'obstacles' | 'step' | 'doo
   return state.obstacles.filter((box) => isSolidNow(box, state.step, tuning, state.doorsInside) && obstacleKind(box) !== 'tournant').map((box) => obstacleAt(box, state.step, tuning));
 }
 
-/** Ce que le vérificateur tient pour solide : tout sauf les portes (à cycle ou commandées), les parois cassées, et ce qui bouge (tournants, panneaux qui glissent ou se referment), que l'on attend, que l'on commande ou que l'on évite. */
+/** Ce que le vérificateur tient pour solide : tout sauf les portes (à cycle ou commandées), les parois cassées, et ce qui bouge (tournants et panneaux à charnière, panneaux qui glissent ou se referment, surfaces d'une faille), que l'on attend, que l'on commande ou que l'on évite. */
 export function provableObstacles(obstacles: readonly Obstacle[]): Obstacle[] {
-  return obstacles.filter((box) => !box.broken && obstacleKind(box) !== 'porte' && obstacleKind(box) !== 'tournant' && box.slide === undefined && box.closer === undefined);
+  return obstacles.filter((box) => !box.broken && obstacleKind(box) !== 'porte' && obstacleKind(box) !== 'tournant' && box.slide === undefined && box.closer === undefined && box.rift === undefined && box.hinge === undefined);
 }

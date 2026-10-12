@@ -1,11 +1,13 @@
 import { createRng } from '../core/math/rng';
+import type { Vec2 } from '../core/math/vec2';
 import { STILL, turnedGravity, type Environment } from './environment';
+import { orbitPosition, riftPosition } from './moving';
 import type { Anchor, Pickup, RuleEvent, SimState } from './state';
 import type { Tuning } from './tuning';
 
 /**
  * Événements des niveaux : la bascule, le coup de vent, la panne, la pluie
- * d'étoiles, l'alerte, le câble, la traversière et le serpentin.
+ * d'étoiles, l'alerte, le câble, la traversière, le serpentin et le plafond.
  *
  * Un événement est planifié à une hauteur au-dessus du toit de départ et
  * dure une longueur de progression. Il commence quand la hauteur maximale
@@ -15,7 +17,7 @@ import type { Tuning } from './tuning';
  * part, le câble glisse selon le temps simulé.
  */
 
-export type EventKind = 'bascule' | 'vent' | 'panne' | 'pluie' | 'alerte' | 'cable' | 'traversiere' | 'serpentin';
+export type EventKind = 'bascule' | 'vent' | 'panne' | 'pluie' | 'alerte' | 'cable' | 'traversiere' | 'serpentin' | 'plafond';
 
 export interface ScheduledEvent {
   readonly kind: EventKind;
@@ -33,7 +35,7 @@ export interface ScheduledEvent {
 export interface EventRuntime {
   startStep: number | null;
   endStep: number | null;
-  /** Serpentin : l'inclinaison du moment, de 0 (gravité vers le bas) à 1 (un quart de tour), qui suit son stade en douceur. */
+  /** Serpentin : l'inclinaison du moment, de 0 (gravité vers le bas) à 1 (un quart de tour), qui suit son stade en douceur ; plafond : jusqu'à 2 (un demi-tour, la gravité vers le haut). */
   tilt?: number;
 }
 
@@ -52,6 +54,29 @@ export const TURN_SECONDS = 2;
 export const SERPENTIN_STAGES: readonly number[] = [0.5, 1, 0.5];
 export const SERPENTIN_TURN_SECONDS = 4;
 export const SERPENTIN_LENGTH = 45;
+/**
+ * Plafond (brief, T2 : « une transition inverse la gravité, la bille se balance
+ * au-dessus des prises, une inversion à l'entrée et une à la sortie »). Sur
+ * `PLAFOND_LENGTH` mètres la gravité tire vers le haut. Elle ne tourne pas pour
+ * s'inverser (un demi-tour passerait par l'horizontale, et jetterait hors du
+ * monde qui vole à ce moment-là) : elle faiblit jusqu'à rien, puis repousse
+ * vers le haut, en `PLAFOND_TURN_SECONDS` ; un instant d'apesanteur sépare
+ * les deux sens, et la fin fait le chemin inverse. La caméra ne tourne pas avec
+ * elle (`Environment.inverted`) : on tombe vers le haut de l'écran, on se
+ * balance au-dessus des prises, et le générateur pose des plafonds à trou à
+ * enfiler (`ceilingRun`). Deux inversions, jamais plus.
+ */
+export const PLAFOND_LENGTH = 30;
+export const PLAFOND_TURN_SECONDS = 3;
+/** L'inversion d'un plafond, de 0 (gravité vers le bas) à `PLAFOND_TILT` (vers le haut) ; à mi-chemin, rien ne pèse. */
+export const PLAFOND_TILT = 2;
+
+/** La gravité d'un plafond à ce point de son inversion : vers le bas à 0, nulle à 1, vers le haut à 2 ; un vecteur de la longueur de son poids. */
+export function invertedGravity(tilt: number): Vec2 {
+  const k = tilt < 0 ? 0 : tilt > PLAFOND_TILT ? PLAFOND_TILT : tilt;
+  // `|| 0` : jamais de zéro négatif, qui ferait deux empreintes d'un même état.
+  return { x: 0, y: k - 1 || 0 };
+}
 
 /** L'inclinaison visée par un serpentin à cette part de sa longueur (0 avant, 0 après). */
 export function serpentinTilt(progress: number): number {
@@ -59,9 +84,9 @@ export function serpentinTilt(progress: number): number {
   return SERPENTIN_STAGES[Math.min(SERPENTIN_STAGES.length - 1, Math.floor(progress * SERPENTIN_STAGES.length))]!;
 }
 
-/** Longueur d'un événement de course libre ou d'atelier : un segment, sauf le serpentin, qui en couvre trois. */
+/** Longueur d'un événement de course libre ou d'atelier : un segment, sauf le serpentin, qui en couvre trois, et le plafond, un et demi. */
 export function eventLength(kind: EventKind): number {
-  return kind === 'serpentin' ? SERPENTIN_LENGTH : 20;
+  return kind === 'serpentin' ? SERPENTIN_LENGTH : kind === 'plafond' ? PLAFOND_LENGTH : 20;
 }
 
 /**
@@ -109,15 +134,20 @@ export function eventsAt(schedule: readonly ScheduledEvent[], startY: number, y:
 export function environmentOf(events: readonly ScheduledEvent[], startY = 0, y?: number): Environment {
   let gravityDir = STILL.gravityDir;
   let wind = STILL.wind;
+  let inverted = false;
   for (const e of events) {
     if (e.kind === 'bascule') gravityDir = turnedGravity(e.side ?? 1, 1);
     if (e.kind === 'serpentin') {
       const tilt = y === undefined ? 1 : serpentinTilt((y - startY - e.at) / e.length);
       if (tilt > 0) gravityDir = turnedGravity(e.side ?? 1, tilt);
     }
+    if (e.kind === 'plafond') {
+      gravityDir = invertedGravity(PLAFOND_TILT);
+      inverted = true;
+    }
     if (e.kind === 'vent') wind = { x: (e.side ?? 1) * (e.strength ?? 3), y: 0 };
   }
-  return { gravityDir, wind };
+  return inverted ? { gravityDir, wind, inverted: true } : { gravityDir, wind };
 }
 
 /** Un lampadaire est-il éteint à ce pas, pendant une panne ? Décalé selon son numéro, pour des vagues. */
@@ -147,6 +177,7 @@ export function applyEvents(state: SimState, tuning: Tuning, events: RuleEvent[]
   const turnSteps = Math.round(TURN_SECONDS / dt);
   let gravityDir = STILL.gravityDir;
   let wind = STILL.wind;
+  let inverted = false;
   let fogFactor = 1;
   let lightsOff = false;
   let raining = false;
@@ -183,6 +214,19 @@ export function applyEvents(state: SimState, tuning: Tuning, events: RuleEvent[]
         if (tilt > 0) gravityDir = turnedGravity(scheduled.side ?? 1, tilt);
         break;
       }
+      case 'plafond': {
+        // La gravité faiblit jusqu'à rien puis repousse vers le haut à l'entrée, à plein pendant l'événement, le chemin inverse à la fin ; la caméra ne suit pas.
+        const target = sinceEnd === null ? PLAFOND_TILT : 0;
+        const rate = (PLAFOND_TILT * dt) / PLAFOND_TURN_SECONDS;
+        const current = runtime.tilt ?? 0;
+        const tilt = current < target ? Math.min(target, current + rate) : Math.max(target, current - rate);
+        runtime.tilt = tilt;
+        if (tilt > 0) {
+          gravityDir = invertedGravity(tilt);
+          inverted = true;
+        }
+        break;
+      }
       case 'vent': {
         if (sinceEnd !== null) break;
         const rise = Math.min(1, (sinceStart * dt) / WIND_RISE_SECONDS);
@@ -204,13 +248,15 @@ export function applyEvents(state: SimState, tuning: Tuning, events: RuleEvent[]
     }
   }
 
-  state.env = { gravityDir, wind };
+  state.env = inverted ? { gravityDir, wind, inverted: true } : { gravityDir, wind };
   state.fogFactor = fogFactor;
   state.lightsOff = lightsOff;
 
-  // Les points sur câble glissent.
+  // Les points sur câble glissent ; ceux d'un carrousel tournent, ceux d'une faille s'écartent.
   for (const anchor of state.anchors) {
     if (anchor.cable) anchor.pos = cablePosition(anchor, state.step, tuning);
+    else if (anchor.orbit) anchor.pos = orbitPosition(anchor.orbit, state.step, tuning);
+    else if (anchor.rift) anchor.pos = riftPosition(anchor, state.step, tuning);
   }
 
   // La pluie d'étoiles : une étoile tous les `RAIN_EVERY_SECONDS`, au-dessus du personnage, qui tombe.

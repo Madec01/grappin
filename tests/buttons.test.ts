@@ -16,7 +16,7 @@ describe('boutons des niveaux', () => {
 });
 
 describe('pages de la liste des niveaux', () => {
-  it('dix niveaux par page : les vingt-deux niveaux font trois pages', () => {
+  it('dix niveaux par page : les vingt-quatre niveaux font trois pages', () => {
     expect(LEVELS_PER_PAGE).toBe(10);
     expect(levelPageCount()).toBe(Math.ceil(LEVELS.length / 10));
     expect(levelPageCount()).toBe(3);

@@ -196,7 +196,7 @@ describe('vérification sous un événement', () => {
     expect(free.state.course.unverified).toBe(0);
   });
 
-  it('la course libre tire les huit événements au hasard dès le palier 1 (le serpentin dès le palier 2), jamais dans la zone d\'apprentissage, jamais deux fois le même de suite', () => {
+  it('la course libre tire les neuf événements au hasard dès le palier 1 (le serpentin dès le palier 2, le plafond dès le 4), jamais dans la zone d\'apprentissage, jamais deux fois le même de suite', () => {
     const seen = new Set<string>();
     let scheduled = 0;
     for (let seed = 1; seed <= 24; seed += 1) {
@@ -216,7 +216,7 @@ describe('vérification sous un événement', () => {
       }
       expect(free.state.course.unverified, `graine ${seed}`).toBe(0);
     }
-    expect([...seen].sort()).toEqual(['alerte', 'bascule', 'cable', 'panne', 'pluie', 'serpentin', 'traversiere', 'vent']);
+    expect([...seen].sort()).toEqual(['alerte', 'bascule', 'cable', 'panne', 'plafond', 'pluie', 'serpentin', 'traversiere', 'vent']);
     // Sur 400 m à une chance sur deux par segment d'une vingtaine de mètres, au moins une poignée d'événements par partie.
     expect(scheduled / 24).toBeGreaterThan(5);
   }, 20_000);

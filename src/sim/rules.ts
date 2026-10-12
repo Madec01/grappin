@@ -276,6 +276,41 @@ export function applyClosers(state: SimState, tuning: Tuning, events: RuleEvent[
   }
 }
 
+/**
+ * Failles (lot 5 B, T4) : dès que le personnage passe la ligne de déclenchement
+ * d'une faille, ses prises et ses surfaces commencent à s'écarter, et n'en
+ * reviennent pas. Un événement de règle le dit, pour l'annonce.
+ */
+export function applyRifts(state: SimState, events: RuleEvent[]): void {
+  let opened = false;
+  for (const anchor of state.anchors) {
+    if (!anchor.rift || anchor.riftStep !== undefined || state.hero.pos.y <= anchor.rift.triggerY) continue;
+    anchor.riftStep = state.step;
+    opened = true;
+  }
+  for (const box of state.obstacles) {
+    if (!box.rift || box.riftStep !== undefined || state.hero.pos.y <= box.rift.triggerY) continue;
+    box.riftStep = state.step;
+    opened = true;
+  }
+  if (opened) events.push({ type: 'faille' });
+}
+
+/**
+ * Panneaux à charnière (lot 5 B, T8) : ils s'ouvrent tant que leur prise
+ * interrupteur les commande (tenue, et le délai qui suit), se referment sinon,
+ * au même rythme ; leur prise portée suit (voir `applyEvents`).
+ */
+export function applyHinges(state: SimState, tuning: Tuning): void {
+  for (const box of state.obstacles) {
+    if (!box.hinge) continue;
+    const commanded = box.openUntilStep !== undefined && state.step < box.openUntilStep;
+    const rate = tuning.stepSeconds / box.hinge.seconds;
+    const current = box.hingeProgress ?? 0;
+    box.hingeProgress = commanded ? Math.min(1, current + rate) : Math.max(0, current - rate);
+  }
+}
+
 /** Rebond sur un obstacle solide : part de la vitesse rendue dans la direction du choc, et part gardée le long de la surface. */
 export const BUMP_RESTITUTION = 0.35;
 export const BUMP_FRICTION = 0.6;

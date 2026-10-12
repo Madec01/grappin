@@ -22,7 +22,7 @@ import { levelOfButton, levelPageCount, pageOfLevel, type ButtonId } from '../re
 import { Camera } from '../render/camera';
 import { heldKind, windSide, inReleaseWindow } from '../render/cues';
 import { Effects } from '../render/effects';
-import { ESCAPE_ANNOUNCEMENT, eventAnnouncement, levelTitle } from '../render/labels';
+import { ESCAPE_ANNOUNCEMENT, FAULT_ANNOUNCEMENT, eventAnnouncement, levelTitle } from '../render/labels';
 import { mixPalette, paletteFor, type Palette } from '../render/palette';
 import type { DeathCause, GameScreen, Renderer } from '../render/renderer';
 import type { CoursePlan } from '../sim/course';
@@ -179,6 +179,11 @@ export interface DebugState {
   readonly closing: boolean;
   /** Les passages qui se referment déclenchés : l'obstacle et le pas du déclenchement. Leur géométrie en dépend (`obstacleAt`), et un pilote qui rejoue le monde en Node ne le sait pas sans cela. */
   readonly triggered: readonly { readonly obstacleId: number; readonly step: number }[];
+  /** Lot 5 B : la gravité est inversée (plafond) ; une faille est déclenchée (elle s'ouvre ou est ouverte) ; l'ouverture du panneau dépliant le plus ouvert, de 0 à 1 ; les failles déclenchées, comme `triggered`. */
+  readonly inverted: boolean;
+  readonly faultOpen: boolean;
+  readonly unfolded: number;
+  readonly rifts: readonly { readonly obstacleId: number; readonly step: number }[];
   /** Le conseil du tutoriel affiché en ce moment, ou null. */
   readonly tip: string | null;
   /** Traction du doigt sur un lanceur tenu, en mètres de monde (y vers le haut), plafonnée ; nulle sinon. */
@@ -195,6 +200,8 @@ export interface DebugAnchor {
   readonly y: number;
   /** Bande d'accordéon dont la prise fait partie : la gauche (-1) ou la droite (1) ; null pour toute autre prise. */
   readonly band: -1 | 1 | null;
+  /** Ce qui fait bouger la prise : sur câble, en orbite (carrousel), d'une faille ; null pour une prise fixe. */
+  readonly mobile: 'cable' | 'orbit' | 'rift' | null;
 }
 
 /**
@@ -535,6 +542,7 @@ export class Game {
       if (cue) this.sfx.play(cue);
       if (event.type === 'event') this.announce(event.kind, event.phase);
       if (event.type === 'escape') effects.announce(ESCAPE_ANNOUNCEMENT.title, ESCAPE_ANNOUNCEMENT.detail);
+      if (event.type === 'faille') effects.announce(FAULT_ANNOUNCEMENT.title, FAULT_ANNOUNCEMENT.detail);
       // Un niveau porte déjà son nom : pas de bannière de palier.
       if (event.type !== 'tier' || this.run.level === null) effects.handle(event, heroOnScreen);
     }
@@ -592,7 +600,7 @@ export class Game {
 
   /** Les points d'accroche encore là, pour un pilote de test qui doit viser (un lanceur, un trou dans un mur). */
   anchors(): DebugAnchor[] {
-    return this.run.sim.state.anchors.filter((anchor) => !anchor.broken).map((anchor) => ({ id: anchor.id, kind: anchor.kind, x: anchor.pos.x, y: anchor.pos.y, band: anchor.band ?? null }));
+    return this.run.sim.state.anchors.filter((anchor) => !anchor.broken).map((anchor) => ({ id: anchor.id, kind: anchor.kind, x: anchor.pos.x, y: anchor.pos.y, band: anchor.band ?? null, mobile: anchor.cable ? 'cable' : anchor.orbit ? 'orbit' : anchor.rift ? 'rift' : null }));
   }
 
   debugState(): DebugState {
@@ -654,6 +662,10 @@ export class Game {
       switchOpen: state.obstacles.some((box) => box.switchedBy !== undefined && box.openUntilStep !== undefined && state.step < box.openUntilStep),
       closing: state.obstacles.some((box) => box.closer !== undefined && box.triggeredStep !== undefined && closerState(box, state.step, this.run.tuning) !== 'rouvre'),
       triggered: state.obstacles.flatMap((box) => (box.closer !== undefined && box.triggeredStep !== undefined ? [{ obstacleId: box.id, step: box.triggeredStep }] : [])),
+      inverted: state.env.inverted === true,
+      faultOpen: state.anchors.some((a) => a.rift !== undefined && a.riftStep !== undefined) || state.obstacles.some((box) => box.rift !== undefined && box.riftStep !== undefined),
+      unfolded: state.obstacles.reduce((best, box) => Math.max(best, box.hinge ? (box.hingeProgress ?? 0) : 0), 0),
+      rifts: state.obstacles.flatMap((box) => (box.rift !== undefined && box.riftStep !== undefined ? [{ obstacleId: box.id, step: box.riftStep }] : [])),
       tip: this.run.effects.banner?.tone === 'tip' ? this.run.effects.banner.text : null,
       pullX: state.pull.x,
       pullY: state.pull.y,

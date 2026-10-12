@@ -352,6 +352,10 @@ describe('jeu', () => {
         'switchOpen',
         'closing',
         'triggered',
+        'inverted',
+        'faultOpen',
+        'unfolded',
+        'rifts',
         'rings',
         'ropeLength',
         'runs',
@@ -2126,7 +2130,7 @@ describe('sons et départ', () => {
     expect(game.debugState().atelierChoice).toEqual(['roue']);
     seen.hit = () => 'atelierAll';
     game.press(1, 1);
-    expect(game.debugState().atelierChoice).toHaveLength(36);
+    expect(game.debugState().atelierChoice).toHaveLength(41);
     seen.hit = () => 'atelierNone';
     game.press(1, 1);
     expect(game.debugState().atelierChoice).toEqual([]);

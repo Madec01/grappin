@@ -4,6 +4,7 @@ import { environmentOf, eventBoundaries, eventLength, eventsAt, type EventKind, 
 import { buildPlainSegment, buildSegment, tierProfile, type IdCounters, type Segment, type SegmentContext, type TierProfile } from './generator';
 import { atelierEvents, atelierProfile, type AtelierId } from '../data/atelier';
 import { buildScene, type SceneId } from '../data/scenes';
+import { ORBIT_PLACEMENTS, isMobile, orbitPoint } from './moving';
 import type { Anchor, Obstacle, Ring, SimState, Zone } from './state';
 import type { Tuning } from './tuning';
 import { verifySegment } from './verifier';
@@ -68,12 +69,14 @@ const BEYOND_FINISH = 6;
  * Course libre : chance qu'un segment porte un événement, et événements permis
  * par palier. Décision du propriétaire : tous dès que la zone d'apprentissage
  * du palier 0 est passée, pour que la grimpe sans fin ait toutes les nouveautés ;
- * le serpentin (lot 3), qui incline le monde sur trois segments, au palier 2.
+ * le serpentin (lot 3), qui incline le monde sur trois segments, au palier 2 ;
+ * le plafond (lot 5 B), qui inverse la gravité, au palier 4.
  */
 const FREE_EVENT_CHANCE = 0.5;
 const FREE_EVENT_KINDS: readonly EventKind[] = ['bascule', 'vent', 'panne', 'pluie', 'alerte', 'cable', 'traversiere'];
 function freeEventsFor(tier: number): readonly EventKind[] {
   if (tier < 1) return [];
+  if (tier >= 4) return [...FREE_EVENT_KINDS, 'serpentin', 'plafond'];
   return tier >= 2 ? [...FREE_EVENT_KINDS, 'serpentin'] : FREE_EVENT_KINDS;
 }
 
@@ -117,24 +120,40 @@ function segmentContext(state: SimState, segmentY: number): SegmentContext {
 }
 
 /**
- * Vérifie un segment ; s'il porte des points qui glissent, les prouve à chaque
- * bout de leur course et au milieu. Un câble court doit passer dans les trois
- * positions : on l'attrape où il est. Une traversière balaie toute la largeur,
- * on peut l'attendre en pendant au point d'avant : il suffit qu'une des trois
- * positions fasse passer le segment. Les bandes d'un accordéon se prouvent dans
- * leurs trois états, écartées, à mi-course et resserrées : on grimpe sa bande ou
- * l'on traverse, quel que soit le moment.
+ * Vérifie un segment ; s'il porte des points qui bougent, les prouve à trois
+ * positions de leur course. Un câble court doit passer dans les trois
+ * positions (ses deux bouts et le milieu) : on l'attrape où il est. Une
+ * traversière balaie toute la largeur, on peut l'attendre en pendant au point
+ * d'avant : il suffit qu'une des trois positions fasse passer le segment. Les
+ * bandes d'un accordéon se prouvent dans leurs trois états, écartées, à
+ * mi-course et resserrées : on grimpe sa bande ou l'on traverse, quel que soit
+ * le moment. Lot 5 B : les prises d'une faille dans ses trois états (fermée, à
+ * demi, ouverte) ; celles d'un carrousel à trois phases d'un tiers de tour ; et
+ * les plateformes d'un convoyeur, surfaces comprises (`Slide.proven`), à trois
+ * positions dont une seule doit passer : on se laisse porter jusqu'à la bonne.
  */
-function verifyWithCables(context: readonly Anchor[], contextObstacles: readonly Obstacle[], contextZones: readonly Zone[], contextRings: readonly Ring[], segment: Segment, tuning: Tuning, conditions: SegmentContext): boolean {
+export function verifyWithMotions(context: readonly Anchor[], contextObstacles: readonly Obstacle[], contextZones: readonly Zone[], contextRings: readonly Ring[], segment: Segment, tuning: Tuning, conditions: SegmentContext): boolean {
   const { env, entryEnv } = conditions;
-  if (!segment.anchors.some((a) => a.cable)) return verifySegment(context, contextObstacles, segment, tuning, env, entryEnv, contextZones, contextRings);
-  const placements: ((a: Anchor) => Vec2)[] = [(a) => a.cable!.from, (a) => a.pos, (a) => a.cable!.to];
-  const passes = (place: (a: Anchor) => Vec2): boolean => {
-    const anchors = segment.anchors.map((a) => (a.cable ? { ...a, pos: place(a) } : a));
-    return verifySegment(context, contextObstacles, { ...segment, anchors }, tuning, env, entryEnv, contextZones, contextRings);
+  const conveyor = segment.obstacles.some((box) => box.slide?.proven);
+  if (!segment.anchors.some(isMobile) && !conveyor) return verifySegment(context, contextObstacles, segment, tuning, env, entryEnv, contextZones, contextRings);
+  const place = (a: Anchor, k: number): Vec2 => {
+    if (a.cable) return k === 0 ? a.cable.from : k === 1 ? a.pos : a.cable.to;
+    if (a.rift) return { x: a.rift.rest.x + (a.rift.dx * k) / 2, y: a.rift.rest.y };
+    if (a.orbit) return orbitPoint(a.orbit, ORBIT_PLACEMENTS[k] ?? 0);
+    return a.pos;
   };
-  const strict = conditions.cable !== 'traversiere' || segment.anchors.some((a) => a.band !== undefined);
-  return strict ? placements.every(passes) : placements.some(passes);
+  const passes = (k: number): boolean => {
+    const anchors = segment.anchors.map((a) => (isMobile(a) ? { ...a, pos: place(a, k) } : a));
+    // Une plateforme de convoyeur se prouve là où elle est, comme une surface fixe.
+    const obstacles = segment.obstacles.map((box): Obstacle => {
+      if (!box.slide?.proven) return box;
+      const { slide, ...still } = box;
+      return { ...still, x0: box.x0 + slide.amplitude * (k - 1), x1: box.x1 + slide.amplitude * (k - 1) };
+    });
+    return verifySegment(context, contextObstacles, { ...segment, anchors, obstacles }, tuning, env, entryEnv, contextZones, contextRings);
+  };
+  const strict = !conveyor && (conditions.cable !== 'traversiere' || segment.anchors.some((a) => a.band !== undefined));
+  return strict ? [0, 1, 2].every(passes) : [0, 1, 2].some(passes);
 }
 
 export function createCourse(seed: number, plan: CoursePlan): CourseState {
@@ -176,8 +195,10 @@ export function extendCourse(state: SimState, untilY: number, tuning: Tuning): v
     // Une scène commence par son segment construit à la main (prouvé par les tests) ; la suite est engendrée comme une course libre.
     if (course.plan.kind === 'scene' && course.segments === 0) accepted = buildScene(course.plan.sceneId, course.ids, origin);
     for (let attempt = 0; attempt < MAX_ATTEMPTS && !accepted; attempt += 1) {
-      const candidate = buildSegment(rng, course.ids, from, origin, profile, rng.pick(profile.archetypes), conditions);
-      if (verifyWithCables(context, contextObstacles, contextZones, contextRings, candidate, tuning, conditions)) accepted = candidate;
+      // Sous un plafond (gravité inversée), le motif est imposé : des plafonds à trou.
+      const archetype = conditions.env.inverted ? 'plafond' : rng.pick(profile.archetypes);
+      const candidate = buildSegment(rng, course.ids, from, origin, profile, archetype, conditions);
+      if (verifyWithMotions(context, contextObstacles, contextZones, contextRings, candidate, tuning, conditions)) accepted = candidate;
     }
     if (!accepted) {
       // Repli : une chaîne serrée sans rien d'autre, vérifiée elle aussi. Si même cela échoue, on

@@ -286,7 +286,7 @@ describe('les segments, scènes, robots, atelier et niveaux du lot 5 A', () => {
   });
 
   it('les niveaux 21 et 22 existent, se suivent, et portent les nouveautés', () => {
-    expect(LEVELS).toHaveLength(22);
+    expect(LEVELS.length).toBeGreaterThanOrEqual(22);
     const aimants = LEVELS.find((l) => l.id === 21)!;
     const rails = LEVELS.find((l) => l.id === 22)!;
     expect(aimants.startY).toBe(LEVELS.find((l) => l.id === 20)!.endY);

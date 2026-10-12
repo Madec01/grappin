@@ -11,10 +11,18 @@ import type { Tuning } from './tuning';
  * « bas ».
  */
 export interface Environment {
-  /** Direction unitaire de la gravité. */
+  /** Direction unitaire de la gravité ; plus courte pendant l'inversion d'un plafond, où elle faiblit jusqu'à rien avant de repousser vers le haut (`invertedGravity`). */
   readonly gravityDir: Vec2;
   /** Accélération du vent, en m/s². */
   readonly wind: Vec2;
+  /**
+   * Plafond (lot 5 B, T2) : la gravité s'inverse, et la caméra ne tourne PAS
+   * avec elle (brief : « ne pas tout compenser visuellement par une caméra qui
+   * rendrait la transformation imperceptible ») : le personnage se balance
+   * au-dessus des prises, à l'écran comme dans le monde. Vrai pendant toute
+   * l'inversion, retournements compris.
+   */
+  readonly inverted?: true;
 }
 
 export const STILL: Environment = { gravityDir: { x: 0, y: -1 }, wind: { x: 0, y: 0 } };
@@ -32,13 +40,15 @@ export function upOf(env: Environment): Vec2 {
 
 /**
  * Gravité en cours de bascule : de « vers le bas » à « vers le côté `side` »,
- * pour `t` de 0 à 1. Interpolation du vecteur puis normalisation : pas de
- * trigonométrie, donc identique sur tout moteur.
+ * pour `t` de 0 à 1 ; et au-delà, jusqu'à « vers le haut » pour `t` de 1 à 2
+ * (le plafond, un demi-tour par le côté `side`). Interpolation du vecteur puis
+ * normalisation : pas de trigonométrie, donc identique sur tout moteur.
  */
 export function turnedGravity(side: -1 | 1, t: number): Vec2 {
-  const k = t < 0 ? 0 : t > 1 ? 1 : t;
+  const k = t < 0 ? 0 : t > 2 ? 2 : t;
   // `|| 0` évite un zéro négatif, qui casserait l'égalité des empreintes d'état.
-  return normalize({ x: side * k || 0, y: k - 1 || 0 });
+  if (k <= 1) return normalize({ x: side * k || 0, y: k - 1 || 0 });
+  return normalize({ x: side * (2 - k) || 0, y: k - 1 || 0 });
 }
 
 /** Vrai si la gravité tire vers le bas, à peu de chose près : le toit de départ ne retient que dans ce cas. */

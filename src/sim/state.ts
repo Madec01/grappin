@@ -50,6 +50,35 @@ export interface Anchor {
   readonly band?: -1 | 1;
   /** Rail de lancement : son arc. */
   readonly rail?: Rail;
+  /** Prise d'un carrousel (lot 5 B, T5) : elle tourne autour d'un pivot, la prise glisse avec lui. */
+  readonly orbit?: Orbit;
+  /** Prise d'une faille (T4) : elle s'écarte de `rest` quand la faille s'ouvre ; `riftStep`, le pas du déclenchement. */
+  readonly rift?: AnchorRift;
+  riftStep?: number;
+}
+
+/** Rotation d'une prise de carrousel : pivot, rayon en mètres, phase en tours au pas zéro, vitesse en tours par seconde (signée). */
+export interface Orbit {
+  readonly pivot: Vec2;
+  readonly radius: number;
+  readonly phase: number;
+  readonly spin: number;
+}
+
+/**
+ * Faille (lot 5 B, T4) : dès que le personnage passe `triggerY`, l'élément
+ * glisse de `dx` mètres de côté en `seconds`, et y reste. Les deux ensembles de
+ * la faille portent des `dx` opposés : ils s'écartent, le vide s'ouvre entre eux.
+ */
+export interface Rift {
+  readonly triggerY: number;
+  readonly dx: number;
+  readonly seconds: number;
+}
+
+/** La faille d'une prise : avec sa position de repos, d'où elle glisse. */
+export interface AnchorRift extends Rift {
+  readonly rest: Vec2;
 }
 
 /**
@@ -63,19 +92,49 @@ export interface Anchor {
  */
 export type ObstacleKind = 'solide' | 'rebond' | 'cassable' | 'porte' | 'tournant';
 
-/** Barre qui tourne autour d'un pivot (obstacle « tournant », O2 du brief) : longueur en mètres, vitesse en tours par seconde (signée), phase en tours. */
+/**
+ * Barre qui tourne autour d'un pivot (obstacle « tournant », O2 du brief) :
+ * longueur en mètres, vitesse en tours par seconde (signée), phase en tours.
+ * `arm` (lot 5 B) : le centre de la barre, décalé du pivot dans le repère de
+ * la barre (x le long d'elle, y en travers), qui tourne avec elle ; absent, la
+ * barre tourne autour de son milieu. La coque d'un carrousel est faite de
+ * barres tangentes (`arm` en travers), le panneau d'une structure dépliante
+ * d'une barre qui part de sa charnière (`arm` le long).
+ */
 export interface Rotor {
   readonly pivot: Vec2;
   readonly length: number;
   readonly spin: number;
   readonly phase: number;
+  readonly arm?: Vec2;
 }
 
-/** Va-et-vient horizontal d'un obstacle (ouverture mobile, L3 du brief) : amplitude en mètres de part et d'autre de la position de repos, période d'un aller-retour en secondes, phase en tours. */
+/**
+ * Panneau d'une structure dépliante (lot 5 B, T8) : une barre à charnière
+ * (`rotor`, dont `spin` ne compte pas) qui tourne de `closedTurns` à
+ * `openTurns` en `seconds` tant que sa prise interrupteur la commande
+ * (`switchedBy`, `openUntilStep`), et revient sinon ; `hingeProgress`, de 0
+ * (fermé) à 1 (ouvert), est l'état du moment.
+ */
+export interface Hinge {
+  readonly closedTurns: number;
+  readonly openTurns: number;
+  readonly seconds: number;
+}
+
+/**
+ * Va-et-vient horizontal d'un obstacle (ouverture mobile, L3 du brief) :
+ * amplitude en mètres de part et d'autre de la position de repos, période
+ * d'un aller-retour en secondes, phase en tours. `proven` (lot 5 B) : le
+ * vérificateur joue ce panneau à chacune de ses positions, avec les prises
+ * sur câble du segment (les plateformes d'un convoyeur) ; sinon il n'en tient
+ * pas compte (le mur d'une glissière : on tire quand le trou passe).
+ */
 export interface Slide {
   readonly amplitude: number;
   readonly period: number;
   readonly phase: number;
+  readonly proven?: true;
 }
 
 /**
@@ -118,6 +177,12 @@ export interface Obstacle {
   /** Panneau d'un passage qui se referme (lot 5, O6), et le pas où le personnage l'a déclenché. */
   readonly closer?: Closer;
   triggeredStep?: number;
+  /** Surface d'une faille (lot 5 B, T4) : elle glisse avec son ensemble ; `riftStep`, le pas du déclenchement. */
+  readonly rift?: Rift;
+  riftStep?: number;
+  /** Panneau d'une structure dépliante (T8) : sa charnière, et son ouverture du moment. */
+  readonly hinge?: Hinge;
+  hingeProgress?: number;
 }
 
 /**
@@ -221,7 +286,9 @@ export type RuleEvent =
   /** Décharge d'une prise électrique tenue quand elle se charge : corde lâchée, personnage repoussé et étourdi. */
   | { readonly type: 'shock'; readonly anchorId: number }
   /** Un passage qui se referme vient de se déclencher derrière le personnage : il faut sortir avant la fermeture. */
-  | { readonly type: 'escape'; readonly obstacleId: number };
+  | { readonly type: 'escape'; readonly obstacleId: number }
+  /** Une faille vient de se déclencher : ses deux ensembles s'écartent, le vide s'ouvre. */
+  | { readonly type: 'faille' };
 
 export interface SimState {
   /** Numéro du pas courant. */

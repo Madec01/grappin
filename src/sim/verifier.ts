@@ -62,6 +62,13 @@ const FLIGHT_SAMPLE = 0.05;
 const MIN_GAIN = 0.3;
 /** Après l'accroche, le balancement est suivi ce temps pour s'assurer qu'il ne heurte rien. */
 const AFTER_CATCH_SECONDS = 0.6;
+/**
+ * Un point dont le balancement heurtait un obstacle à un instant du vol est
+ * réexaminé ce nombre d'échantillons plus tard : plus loin dans le vol, on
+ * l'attrape d'ailleurs (sous un plafond, une fois dans le trou, et plus de
+ * côté). Sans cela, le premier refus était définitif.
+ */
+const RETRY_SAMPLES = 4;
 
 interface Swing {
   body: Body;
@@ -145,19 +152,24 @@ export function flightCatches(from: Anchor, body: Body, anchors: readonly Anchor
   // Les prises électriques et à éclipse ne comptent jamais comme sortie : le parcours se prouve sans elles.
   const catchable = anchors.filter((a) => !isOptional(a));
   const caught: number[] = [];
-  const rejected = new Set<number>();
-  const consider = (pos: Vec2, vel: Vec2, standing: readonly Obstacle[]): void => {
+  /** Les points refusés, et l'échantillon du refus. */
+  const rejected = new Map<number, number>();
+  const consider = (sample: number, pos: Vec2, vel: Vec2, standing: readonly Obstacle[]): void => {
     const best = bestAnchor(catchable, standing, { pos, vel }, false, from.id, tuning, env, zones);
-    if (!best || caught.includes(best.id) || rejected.has(best.id)) return;
+    if (!best || caught.includes(best.id)) return;
+    const refusedAt = rejected.get(best.id);
+    if (refusedAt !== undefined && sample - refusedAt < RETRY_SAMPLES) return;
     if (best.pos.y <= from.pos.y + MIN_GAIN || distance(best.pos, pos) > reach) return;
     if (swingIsClear(best, { pos, vel }, anchors, standing, tuning, env, zones)) caught.push(best.id);
-    else rejected.add(best.id);
+    else rejected.set(best.id, sample);
   };
   if (!needsSteps(obstacles, rings, zones)) {
     // Rien que des solides : la formule fermée du vol libre, et le vol s'arrête au premier obstacle touché.
+    let sample = 0;
     for (const { pos, vel } of flightSamples(body, tuning.verifyFlightSeconds, FLIGHT_SAMPLE, tuning, env)) {
       if (obstacles.some((box) => circleBoxGap(pos, tuning.heroRadius, box) <= 0)) break;
-      consider(pos, vel, obstacles);
+      sample += 1;
+      consider(sample, pos, vel, obstacles);
     }
     return caught;
   }
@@ -171,7 +183,7 @@ export function flightCatches(from: Anchor, body: Body, anchors: readonly Anchor
     if (k % stepsPerSample !== 0) continue;
     // Une paroi cassée pendant ce vol ne coupe plus la ligne de vue ni le balancement qui suit.
     const standing = flight.smashed.size === 0 ? obstacles : obstacles.filter((box) => !flight.smashed.has(box.id));
-    consider(flight.body.pos, flight.body.vel, standing);
+    consider(k / stepsPerSample, flight.body.pos, flight.body.vel, standing);
   }
   return caught;
 }

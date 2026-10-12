@@ -7,7 +7,7 @@ import { STILL } from './environment';
 import { applyEvents, type ScheduledEvent } from './events';
 import { integrate, swingStep } from './physics';
 import { elasticStep, magnetStep, railParam, railPoint } from './holds';
-import { applyBufferedPress, applyClosers, applyFall, applyFinish, applyFog, applyCycles, applyFragile, applyGround, applyHang, applyObstacles, applyPickups, applyRings, applyScore, applySwitches, applyTier, press, release } from './rules';
+import { applyBufferedPress, applyClosers, applyFall, applyFinish, applyFog, applyCycles, applyFragile, applyGround, applyHang, applyHinges, applyObstacles, applyPickups, applyRifts, applyRings, applyScore, applySwitches, applyTier, press, release } from './rules';
 import type { RuleEvent, SimState } from './state';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 
@@ -109,8 +109,9 @@ export class Simulation {
   }
 
   /**
-   * Avance d'un pas. Ordre fixe : événements, casse fragile, cycles, interrupteurs, treuil et mouvement, passages qui se referment,
-   * sol, chute, obstacles, étoiles, anneaux, pendaison, score, palier, arrivée, brume, parcours, visée, appui en mémoire.
+   * Avance d'un pas. Ordre fixe : événements, casse fragile, cycles, interrupteurs et panneaux à charnière, treuil et mouvement,
+   * passages qui se referment, failles, sol, chute, obstacles, étoiles, anneaux, pendaison, score, palier, arrivée, brume,
+   * parcours, visée, appui en mémoire.
    */
   step(): void {
     const s = this.state;
@@ -119,6 +120,7 @@ export class Simulation {
     applyFragile(s, this.tuning, this.events);
     applyCycles(s, this.tuning, this.events);
     applySwitches(s, this.tuning);
+    applyHinges(s, this.tuning);
     const held = s.rope ? s.anchors.find((a) => a.id === s.rope!.anchorId) : undefined;
     if (s.rope && held && held.kind === 'lanceur') {
       // Tenu au lanceur, reculé de la traction du doigt : pas de balancement, pas de gravité.
@@ -150,6 +152,7 @@ export class Simulation {
     }
     s.step += 1;
     applyClosers(s, this.tuning, this.events);
+    applyRifts(s, this.events);
     applyGround(s, this.tuning);
     applyFall(s, this.events);
     applyObstacles(s, this.tuning, this.events);

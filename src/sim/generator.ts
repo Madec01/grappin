@@ -5,9 +5,10 @@ import { CABLE_HALF_LENGTH, CABLE_PERIOD_SECONDS, TRAVERSIERE_PERIOD_SECONDS } f
 import { circleBoxGap } from './geometry';
 import { LANCEUR_CLEARANCE } from './launcher';
 import { DEFAULT_RAIL, RAIL_CLEARANCE } from './holds';
+import { CAROUSEL_ANCHORS, anchorPlacements, isMobile, orbitPoint } from './moving';
 import { zoneAt } from './physics';
 import { WORLD_HALF_WIDTH } from './rules';
-import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from './state';
+import type { Anchor, Obstacle, ObstacleKind, Orbit, Pickup, Ring, Zone } from './state';
 
 /**
  * Construction d'un segment de parcours : une chaîne de points d'accroche qui
@@ -26,7 +27,7 @@ import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from './state
  * d'accélération puis une zone de freinage avant le point suivant
  * (« accélération, envolée, freinage, rattrapage »).
  */
-export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' | 'fragiles' | 'saut' | 'lanceur' | 'courant' | 'derive' | 'fusee' | 'brise' | 'sas' | 'cerceau' | 'ricochet' | 'percee' | 'roue' | 'tournant' | 'glissiere' | 'accordeon' | 'poche' | 'aimant' | 'interrupteur' | 'rail' | 'elastique' | 'evasion';
+export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' | 'fragiles' | 'saut' | 'lanceur' | 'courant' | 'derive' | 'fusee' | 'brise' | 'sas' | 'cerceau' | 'ricochet' | 'percee' | 'roue' | 'tournant' | 'glissiere' | 'accordeon' | 'poche' | 'aimant' | 'interrupteur' | 'rail' | 'elastique' | 'evasion' | 'plafond' | 'faille' | 'carrousel' | 'depliante' | 'convoyeur';
 
 /**
  * Les cinq derniers motifs EXIGENT une mécanique du lot 2 (retour du
@@ -50,7 +51,13 @@ export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' 
  * au-dessus d'elle ; « rail », un rail de lancement sous un mur à trou décalé ;
  * « elastique », un lien élastique de côté, dont le rappel seul monte à la
  * prise suivante ; « evasion », un couloir dont la sortie se referme derrière
- * le personnage.
+ * le personnage. Lot 5 B, le terrain avancé : « plafond », les plafonds à
+ * trou d'un segment sous gravité inversée (le motif est imposé par
+ * l'événement, jamais tiré au sort) ; « faille », deux ensembles de prises et
+ * de surfaces qui s'écartent dès qu'on y entre ; « carrousel », une couronne de
+ * prises sous une coque qui tourne ; « depliante », un mur dont un panneau à
+ * charnière s'ouvre quand on tient sa prise interrupteur ; « convoyeur », des
+ * plateformes qui vont et viennent de côté, et un lanceur sur la dernière.
  */
 export const ARCHETYPES: readonly Archetype[] = ['chaine', 'escalier', 'couloir', 'dalles', 'rafale', 'fragiles', 'saut', 'lanceur', 'courant', 'derive', 'fusee', 'brise', 'sas', 'cerceau', 'ricochet', 'percee'];
 
@@ -228,6 +235,11 @@ export function tierProfile(tier: number): TierProfile {
   if (tier >= 3) archetypes.push('aimant', 'interrupteur');
   if (tier >= 4) archetypes.push('rail', 'elastique');
   if (tier >= 5) archetypes.push('evasion');
+  // Lot 5 B : la faille (lisible, on traverse tôt) au palier 3, le carrousel et le convoyeur (du timing) au 4, la structure dépliante
+  // (un interrupteur et un panneau qui se referme) au 5. Le plafond est un événement de course libre, dès le palier 4 (voir `course.ts`).
+  if (tier >= 3) archetypes.push('faille');
+  if (tier >= 4) archetypes.push('carrousel', 'convoyeur');
+  if (tier >= 5) archetypes.push('depliante');
   return {
     spacing: Math.min(5, 3 + 0.4 * tier),
     obstacles: tier === 0 ? 0 : Math.min(3, 1 + Math.floor(tier / 2)),
@@ -305,6 +317,11 @@ const SHAPES: Record<Archetype, { dy: readonly [number, number]; dx: readonly [n
   rail: { dy: [0.55, 0.9], dx: [0.4, 1] },
   elastique: { dy: [0.55, 0.9], dx: [0.4, 1] },
   evasion: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  plafond: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  faille: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  carrousel: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  depliante: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  convoyeur: { dy: [0.55, 0.9], dx: [0.4, 1] },
 };
 
 /**
@@ -747,6 +764,264 @@ const TIGHT_STAR_ABOVE_WALL = 1.3;
 const MERGE_ABOVE_EXITS = 3.2;
 
 /**
+ * Lot 5 B (0.16.0), le terrain avancé du brief (section 12), en mètres.
+ * Plafond (T2, un événement : voir `events.ts`) : sous gravité inversée, le
+ * générateur pose des plafonds de toute la largeur tous les `CEILING_STEP`, un
+ * trou de deux `CEILING_GAP_HALF` décalé de `CEILING_HOLE_OFFSET` d'un côté puis
+ * de l'autre, et au-dessus de chaque trou, à `CEILING_ANCHOR_ABOVE`, une prise :
+ * on tombe vers le haut, on attrape la prise en passant le trou, on se balance
+ * au-dessus d'elle, on lâche vers le trou suivant. Rien d'autre ne s'y pose.
+ * Faille (T4) : deux ensembles de `FAULT_LEVELS` prises en zigzag, gauche et
+ * droite, à `FAULT_REST` de l'axe, chacun doublé d'une surface sur son dehors ;
+ * dès que le personnage passe la ligne de déclenchement, un mètre au-dessus du
+ * point d'entrée, ils s'écartent de `FAULT_TRAVEL` chacun en `FAULT_SECONDS`,
+ * et le vide s'ouvre entre eux : on traverse tôt, ou l'on grimpe son côté. Le
+ * vérificateur prouve les trois états (fermée, à demi, ouverte). La chaîne
+ * reprend au milieu, `FAULT_EXIT_RISE` au-dessus.
+ * Carrousel (T5) : une couronne de `CAROUSEL_ANCHORS` prises à `CAROUSEL_RADIUS`
+ * d'un pivot, qui tourne en `CAROUSEL_PERIOD` par tour, dans une coque fixe de
+ * plots à `CAROUSEL_SHELL`, ouverte en bas (on y entre) et en haut (on en
+ * sort, vers la prise `CAROUSEL_EXIT_ABOVE` au-dessus de la coque) : la prise
+ * tenue porte le personnage autour du pivot, et l'ouverture du haut passe
+ * devant lui une fois par tour, il choisit quand la quitter. La coque, fixe et
+ * faite de boîtes, est dans la preuve : le vérificateur prouve la couronne à
+ * trois phases, sans jamais toucher un plot.
+ * Structure dépliante (T8) : comme le verrou d'un interrupteur (`switchLock`),
+ * une surface de `UNFOLD_PANEL` posée sur le vol entre la prise interrupteur et
+ * la prise suivante, `SWITCH_NEXT_RISE` plus haut ; mais c'est un panneau à
+ * charnière, articulé à son bout du côté de l'interrupteur : tenir la prise le
+ * fait pivoter d'un demi-tour par le haut en `HINGE_SECONDS` (il se couche
+ * alors de l'autre côté de sa charnière, à l'opposé de la prise suivante, hors
+ * du vol et hors de la pendaison sous elle : l'ouverture apparaît), et il
+ * reste ouvert quatre secondes après le lâcher, puis se referme en balayant,
+ * par le haut, le vol. On tient, le panneau se déplie sous nos yeux, on lâche,
+ * on passe. Pas de prise portée par le panneau (essayé : au bout d'une barre,
+ * elle attire la visée hors de la route et tout vol qui en part heurte la
+ * barre) ; la surface qui change d'orientation est le panneau même.
+ * Convoyeur (T9) : `CONVEYOR_LEVELS` plateformes (une surface, et sa prise
+ * `CONVEYOR_ANCHOR_BELOW` dessous) qui vont et viennent de côté de
+ * `CONVEYOR_AMPLITUDE` en `CONVEYOR_PERIOD`, chacune à contresens de la
+ * précédente : la distance entre deux prises va et vient, on se laisse porter
+ * et l'on change de support quand il s'approche. La dernière plateforme est un
+ * lanceur, sous un mur dont le trou, fixe, passe au-dessus de lui à chaque
+ * aller-retour : on tire quand on y est (brief : « une sortie au lanceur peut
+ * retrouver le parcours vertical »). Le vérificateur joue les plateformes avec
+ * leurs prises, à trois positions, et il suffit qu'une passe : on attend la bonne.
+ */
+/** Un plafond est toujours plus loin que la plus longue corde (7 m) au-dessus de la prise d'avant : on y monte au bout de sa corde sans le heurter. */
+export const CEILING_STEP = 9.5;
+export const CEILING_FIRST = 8;
+export const CEILING_GAP_HALF = 1.3;
+const CEILING_HOLE_OFFSET = 1.8;
+export const CEILING_ANCHOR_ABOVE = 1.6;
+/**
+ * Sous chaque plafond, un crochet : une prise `CEILING_HOOK_BELOW` sous lui, au
+ * milieu de la largeur. Qui manque le trou s'arrête contre le plafond, l'attrape,
+ * se balance et repart vers le trou : une erreur coûte un choc, pas la partie.
+ * Assez bas pour que le vérificateur, qui pend trois mètres « sous » la prise
+ * (au-dessus d'elle, sous un plafond), ne touche pas le plafond.
+ */
+export const CEILING_HOOK_BELOW = 3.8;
+export const FAULT_SECONDS = 6;
+export const FAULT_TRAVEL = 2;
+const FAULT_REST = 1.2;
+const FAULT_LEVELS = 3;
+const FAULT_STEP = 3;
+const FAULT_RISE = 3.2;
+const FAULT_EXIT_RISE = 3.5;
+const FAULT_ZIG = 0.4;
+const FAULT_WALL_OUT = 3;
+const FAULT_TRIGGER_ABOVE = 1;
+/** Hauteur d'une faille, de son point d'entrée à la prise où la chaîne reprend. */
+export const FAULT_HEIGHT = FAULT_RISE + FAULT_STEP / 2 + (FAULT_LEVELS - 1) * FAULT_STEP + FAULT_EXIT_RISE;
+export { CAROUSEL_ANCHORS } from './moving';
+/**
+ * La couronne et la coque : pendu sous une prise de côté, au bout d'une corde
+ * au plus court (1,5 m), on est à 3 m du pivot, loin des plots ; pendu sous la
+ * prise du bas, on est dans l'ouverture du bas. La couronne est large, pour que
+ * la prise tenue aille vite (2 m/s) et que l'on s'élève assez, lâché au sommet.
+ */
+export const CAROUSEL_RADIUS = 2.6;
+export const CAROUSEL_SHELL = 5;
+export const CAROUSEL_PERIOD = 8;
+const CAROUSEL_BELOW = 2;
+/** La sortie, juste au-dessus de l'ouverture du haut : à portée de qui pend sous la prise du sommet et s'élève un peu. */
+const CAROUSEL_EXIT_ABOVE = 0.6;
+/** La coque : des plots carrés tous les `CAROUSEL_STUD_TURNS` de tour, sauf dans les ouvertures du haut et du bas, chacune de `CAROUSEL_OPENING_TURNS` de tour de part et d'autre de la verticale. */
+const CAROUSEL_STUD = 0.5;
+const CAROUSEL_STUD_TURNS = 1 / 30;
+const CAROUSEL_OPENING_TURNS = 0.1;
+/** Hauteur d'un carrousel, de son point d'entrée à la prise où la chaîne reprend. */
+export const CAROUSEL_HEIGHT = CAROUSEL_BELOW + 2 * CAROUSEL_SHELL + CAROUSEL_EXIT_ABOVE;
+export const HINGE_SECONDS = 2;
+export const UNFOLD_PANEL = 3.2;
+/** Le panneau est posé plus haut que le verrou d'un interrupteur : fermé ou en train de s'ouvrir, il balaie au-dessus de là où l'on pend à la prise. */
+const UNFOLD_ABOVE_LINE = 1.1;
+/** Hauteur d'une structure dépliante, de sa prise interrupteur à la prise où la chaîne reprend. */
+export const UNFOLD_HEIGHT = SWITCH_NEXT_RISE;
+export const CONVEYOR_PERIOD = 6;
+export const CONVEYOR_AMPLITUDE = 1.6;
+const CONVEYOR_LEVELS = 3;
+const CONVEYOR_STEP = 4;
+const CONVEYOR_REST = 1.4;
+const CONVEYOR_FIRST_RISE = 3.2;
+const CONVEYOR_SLAB_HALF = 0.9;
+export const CONVEYOR_ANCHOR_BELOW = 0.8;
+/** Hauteur d'un convoyeur, de son point d'entrée à la prise où la chaîne reprend au-dessus du mur de son lanceur. */
+export const CONVEYOR_HEIGHT = CONVEYOR_FIRST_RISE + (CONVEYOR_LEVELS - 1) * CONVEYOR_STEP + WALL_RISE_MIN + ABOVE_WALL;
+
+/** Les plafonds à trou d'un segment sous gravité inversée, depuis le point `from` jusqu'à `untilY`, et leurs prises (le crochet sous chaque plafond, la prise au-dessus de chaque trou), dans l'ordre des hauteurs. Partagé avec les scènes. */
+export function ceilingRun(ids: IdCounters, from: Vec2, halfWidth: number, untilY: number): { walls: Obstacle[]; anchors: Anchor[] } {
+  const walls: Obstacle[] = [];
+  const anchors: Anchor[] = [];
+  let side = from.x > 0 ? -1 : 1;
+  for (let y = from.y + CEILING_FIRST; y + CEILING_ANCHOR_ABOVE <= untilY; y += CEILING_STEP) {
+    const x = clampX(side * CEILING_HOLE_OFFSET, halfWidth - CEILING_GAP_HALF);
+    walls.push(
+      { id: ids.obstacle, x0: -WALL_EDGE, y0: y, x1: x - CEILING_GAP_HALF, y1: y + OBSTACLE_THICKNESS },
+      { id: ids.obstacle + 1, x0: x + CEILING_GAP_HALF, y0: y, x1: WALL_EDGE, y1: y + OBSTACLE_THICKNESS },
+    );
+    ids.obstacle += 2;
+    anchors.push(makeAnchor(ids, { x: 0, y: y - CEILING_HOOK_BELOW }));
+    anchors.push(makeAnchor(ids, { x, y: y + CEILING_ANCHOR_ABOVE }));
+    side = -side;
+  }
+  return { walls, anchors };
+}
+
+/** Avant le premier plafond, une prise de palier, un pas de chaîne au-dessus du point d'entrée : on l'atteint encore sous la gravité d'avant, et l'inversion nous y trouve. */
+const CEILING_LANDING_RISE = 4;
+const CEILING_LANDING_SIDE = 1.6;
+
+/**
+ * Un segment de plafond : une prise de palier (le point d'entrée se joue dans
+ * les conditions d'avant l'inversion, qui ne portent pas jusqu'à un trou), puis
+ * les plafonds à trou et leurs prises, rien d'autre ; la prise de palier seule
+ * si la place manque pour un plafond.
+ */
+function ceilingSegment(ids: IdCounters, from: Vec2 | null, origin: Vec2, halfWidth: number, targetY: number, maxY: number): Segment {
+  const anchors: Anchor[] = [];
+  const cur: Vec2 = from ?? { x: origin.x + FIRST_ANCHOR_OFFSET.x, y: origin.y + FIRST_ANCHOR_OFFSET.y };
+  if (!from) anchors.push(makeAnchor(ids, cur));
+  const side = cur.x > 0 ? -1 : 1;
+  const landing = { x: clampX(cur.x + side * CEILING_LANDING_SIDE, halfWidth), y: Math.min(maxY - 1, cur.y + CEILING_LANDING_RISE) };
+  anchors.push(makeAnchor(ids, landing));
+  const run = ceilingRun(ids, landing, halfWidth, targetY);
+  anchors.push(...run.anchors);
+  return { anchors, obstacles: run.walls, pickups: [], rings: [], zones: [], junctionId: null, branchIds: [] };
+}
+
+/** La faille au-dessus du point `from` : ses deux ensembles de prises (dans l'ordre des hauteurs), leurs surfaces, et où la chaîne reprend. Partagé avec les scènes. */
+export function fault(ids: IdCounters, from: Vec2, halfWidth: number): { anchors: Anchor[]; walls: Obstacle[]; exit: Vec2 } {
+  const triggerY = from.y + FAULT_TRIGGER_ABOVE;
+  const anchors: Anchor[] = [];
+  let top = from.y;
+  for (let level = 0; level < FAULT_LEVELS; level += 1) {
+    // Un niveau sur deux est rentré vers le milieu, l'autre sorti : chaque ensemble zigzague, la droite décalée d'un demi-pas.
+    const zig = level % 2 === 0 ? -FAULT_ZIG : FAULT_ZIG;
+    for (const side of [-1, 1] as const) {
+      const rest = { x: side * (FAULT_REST + zig), y: from.y + FAULT_RISE + level * FAULT_STEP + (side > 0 ? FAULT_STEP / 2 : 0) };
+      anchors.push({ ...makeAnchor(ids, { ...rest }), rift: { triggerY, dx: side * FAULT_TRAVEL, seconds: FAULT_SECONDS, rest } });
+      top = rest.y;
+    }
+  }
+  const y0 = from.y + FAULT_RISE - 1;
+  const y1 = top + 1;
+  const walls: Obstacle[] = [];
+  for (const side of [-1, 1] as const) {
+    const inner = side * (FAULT_REST + FAULT_WALL_OUT);
+    const outer = inner + side * OBSTACLE_THICKNESS;
+    walls.push({ id: ids.obstacle, x0: Math.min(inner, outer), y0, x1: Math.max(inner, outer), y1, rift: { triggerY, dx: side * FAULT_TRAVEL, seconds: FAULT_SECONDS } });
+    ids.obstacle += 1;
+  }
+  return { anchors, walls, exit: { x: clampX(from.x * 0.3, halfWidth), y: top + FAULT_EXIT_RISE } };
+}
+
+/** Le carrousel au-dessus du point `from`, tournant dans le sens `spin` (1 : sens trigonométrique) : sa couronne de prises, les plots de sa coque, et où la chaîne reprend. Partagé avec les scènes. */
+export function carousel(ids: IdCounters, from: Vec2, halfWidth: number, spin: -1 | 1): { anchors: Anchor[]; shell: Obstacle[]; exit: Vec2 } {
+  const pivot = { x: 0, y: from.y + CAROUSEL_BELOW + CAROUSEL_SHELL };
+  const turnsPerSecond = spin / CAROUSEL_PERIOD;
+  const anchors: Anchor[] = [];
+  for (let k = 0; k < CAROUSEL_ANCHORS; k += 1) {
+    // Au pas zéro, une prise est au sommet.
+    const orbit: Orbit = { pivot, radius: CAROUSEL_RADIUS, phase: 0.25 + k / CAROUSEL_ANCHORS, spin: turnsPerSecond };
+    anchors.push({ ...makeAnchor(ids, orbitPoint(orbit, 0)), orbit });
+  }
+  // La coque : des plots sur le cercle, hors des ouvertures du haut (un quart de tour) et du bas (trois quarts).
+  const shell: Obstacle[] = [];
+  const half = CAROUSEL_STUD / 2;
+  for (let turns = 0; turns < 1 - 1e-9; turns += CAROUSEL_STUD_TURNS) {
+    const fromTop = Math.abs(turns - 0.25);
+    const fromBottom = Math.abs(turns - 0.75);
+    if (fromTop < CAROUSEL_OPENING_TURNS || fromBottom < CAROUSEL_OPENING_TURNS) continue;
+    const centre = orbitPoint({ pivot, radius: CAROUSEL_SHELL, phase: turns, spin: 0 }, 0);
+    shell.push({ id: ids.obstacle, x0: centre.x - half, y0: centre.y - half, x1: centre.x + half, y1: centre.y + half });
+    ids.obstacle += 1;
+  }
+  return { anchors, shell, exit: { x: clampX(from.x * 0.3, halfWidth), y: pivot.y + CAROUSEL_SHELL + CAROUSEL_EXIT_ABOVE } };
+}
+
+/**
+ * La structure dépliante au point `from`, vers la prise suivante `next` : la
+ * prise devient un interrupteur, un panneau à charnière est couché sur le vol
+ * vers `next` (fermé) et se couche de l'autre côté de sa charnière, à l'opposé
+ * de `next`, une fois déplié. Partagé avec les scènes.
+ */
+export function unfolding(ids: IdCounters, from: Vec2, next: Vec2): { anchor: Anchor; panel: Obstacle } {
+  const anchor = makeAnchor(ids, from, 'interrupteur');
+  const x = (from.x + next.x) / 2;
+  const y = (from.y + next.y) / 2 + UNFOLD_ABOVE_LINE;
+  // La charnière au bout du côté de l'interrupteur ; fermé, le panneau pointe vers la prise suivante ; déplié, il a fait un demi-tour par le
+  // haut et pointe à l'opposé (déplié de l'autre côté, il se couchait sous la prise suivante, là où l'on pend).
+  const side: -1 | 1 = next.x >= from.x ? 1 : -1;
+  const pivot = { x: x - side * (UNFOLD_PANEL / 2), y };
+  const closedTurns = side > 0 ? 0 : 0.5;
+  const openTurns = side > 0 ? 0.5 : 0;
+  const panel: Obstacle = {
+    id: ids.obstacle,
+    x0: pivot.x - UNFOLD_PANEL,
+    y0: pivot.y - UNFOLD_PANEL,
+    x1: pivot.x + UNFOLD_PANEL,
+    y1: pivot.y + UNFOLD_PANEL,
+    kind: 'tournant',
+    rotor: { pivot, length: UNFOLD_PANEL, spin: 0, phase: closedTurns, arm: { x: UNFOLD_PANEL / 2, y: 0 } },
+    hinge: { closedTurns, openTurns, seconds: HINGE_SECONDS },
+    switchedBy: anchor.id,
+  };
+  ids.obstacle += 1;
+  return { anchor, panel };
+}
+
+/** Le convoyeur au-dessus du point `from` : ses plateformes (prises sur câble, dans l'ordre des hauteurs, un lanceur en dernier), leurs surfaces, le mur à trou au-dessus, et où la chaîne reprend. Partagé avec les scènes. */
+export function conveyor(ids: IdCounters, from: Vec2, halfWidth: number): { anchors: Anchor[]; slabs: Obstacle[]; walls: Obstacle[]; exit: Vec2 } {
+  const anchors: Anchor[] = [];
+  const slabs: Obstacle[] = [];
+  let side: -1 | 1 = from.x > 0 ? -1 : 1;
+  let dir: -1 | 1 = side;
+  for (let k = 0; k < CONVEYOR_LEVELS; k += 1) {
+    const x = clampX(side * CONVEYOR_REST, halfWidth - CONVEYOR_AMPLITUDE);
+    const y = from.y + CONVEYOR_FIRST_RISE + k * CONVEYOR_STEP;
+    const last = k === CONVEYOR_LEVELS - 1;
+    // Au pas zéro, la plateforme est à `from` ; la suivante part dans l'autre sens.
+    const cable = { from: { x: x - dir * CONVEYOR_AMPLITUDE, y }, to: { x: x + dir * CONVEYOR_AMPLITUDE, y }, period: CONVEYOR_PERIOD };
+    anchors.push({ ...makeAnchor(ids, { x, y }, last ? 'lanceur' : 'normal'), cable });
+    if (!last) {
+      slabs.push({ id: ids.obstacle, x0: x - CONVEYOR_SLAB_HALF, y0: y + CONVEYOR_ANCHOR_BELOW, x1: x + CONVEYOR_SLAB_HALF, y1: y + CONVEYOR_ANCHOR_BELOW + OBSTACLE_THICKNESS, slide: { amplitude: dir * CONVEYOR_AMPLITUDE, period: CONVEYOR_PERIOD, phase: 0, proven: true } });
+      ids.obstacle += 1;
+    }
+    side = side > 0 ? -1 : 1;
+    dir = dir > 0 ? -1 : 1;
+  }
+  const wallY = anchors[anchors.length - 1]!.pos.y + WALL_RISE_MIN;
+  const walls: Obstacle[] = [
+    { id: ids.obstacle, x0: -WALL_EDGE, y0: wallY, x1: -GAP_HALF_WIDTH, y1: wallY + OBSTACLE_THICKNESS },
+    { id: ids.obstacle + 1, x0: GAP_HALF_WIDTH, y0: wallY, x1: WALL_EDGE, y1: wallY + OBSTACLE_THICKNESS },
+  ];
+  ids.obstacle += 2;
+  return { anchors, slabs, walls, exit: { x: 0, y: wallY + ABOVE_WALL } };
+}
+
+/**
  * Construit un segment depuis le dernier point connu (`from`), ou depuis le
  * toit de départ `origin` si `from` est null. Le segment monte jusqu'à environ
  * `16 à 24 m` au-dessus de son départ, selon le motif demandé.
@@ -769,10 +1044,10 @@ export interface SegmentContext {
 
 export const PLAIN_CONTEXT: SegmentContext = { env: STILL, entryEnv: STILL, cable: 'none', maxY: Infinity };
 
-/** Longueur visée d'un segment : de 16 à 24 m (de 22 à 26 pour un motif qui demande de la place), ou jusqu'à la frontière proche d'un événement, à 28 m au plus. */
+/** Longueur visée d'un segment : de 16 à 24 m (de 22 à 26 pour un motif qui demande de la place, de 26 à 30 pour le convoyeur), ou jusqu'à la frontière proche d'un événement, à 28 m au plus. */
 function targetHeight(rng: Rng, startY: number, maxY: number, archetype: Archetype): number {
-  const roomy = archetype === 'accordeon' || archetype === 'poche' || archetype === 'evasion';
-  const natural = roomy ? startY + 22 + 4 * rng.next() : startY + 16 + 8 * rng.next();
+  const roomy = archetype === 'accordeon' || archetype === 'poche' || archetype === 'evasion' || archetype === 'faille' || archetype === 'carrousel';
+  const natural = archetype === 'convoyeur' ? startY + 28 + 4 * rng.next() : roomy ? startY + 22 + 4 * rng.next() : startY + 16 + 8 * rng.next();
   return maxY - 2 <= natural + 4 ? maxY - 2 : natural;
 }
 
@@ -786,6 +1061,8 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
   const halfWidth = playableHalfWidth(profile.spread);
   const startY = from?.y ?? origin.y;
   const targetY = targetHeight(rng, startY, context.maxY, archetype);
+  // Sous un plafond, rien que des plafonds à trou et leurs prises.
+  if (archetype === 'plafond') return ceilingSegment(ids, from, origin, halfWidth, targetY, context.maxY);
   let cur: Vec2 = from ?? { x: origin.x + FIRST_ANCHOR_OFFSET.x, y: origin.y + FIRST_ANCHOR_OFFSET.y };
   if (!from) anchors.push(makeAnchor(ids, cur));
   const wantsSplit = archetype === 'chaine' && profile.split && rng.next() < 0.8;
@@ -983,6 +1260,52 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
       featureDone = true;
       continue;
     }
+    if (archetype === 'faille' && !featureDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > FAULT_HEIGHT + 1) {
+      // Faille : deux ensembles de prises et de surfaces qui s'écartent dès que l'on passe la ligne au-dessus du point courant.
+      const { anchors: sides, walls, exit } = fault(ids, cur, halfWidth);
+      anchors.push(...sides);
+      fixed.push(...walls);
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      featureDone = true;
+      continue;
+    }
+    // Le carrousel et le convoyeur demandent du temps : jamais dans les six premiers mètres d'un segment, ni d'un niveau qui commence.
+    if (archetype === 'carrousel' && !featureDone && anchors.length > 0 && cur.y - startY > 6 && targetY - cur.y > CAROUSEL_HEIGHT + 1) {
+      // Carrousel : une couronne de prises sous une coque qui tourne ; elle tourne dans le sens où l'on arrive, comme une roue.
+      const previous = anchors.length >= 2 ? anchors[anchors.length - 2]!.pos : (from ?? cur);
+      const spin: -1 | 1 = previous.x <= cur.x ? 1 : -1;
+      const { anchors: ring, shell, exit } = carousel(ids, cur, halfWidth, spin);
+      anchors.push(...ring);
+      fixed.push(...shell);
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      featureDone = true;
+      continue;
+    }
+    if (archetype === 'depliante' && !featureDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > UNFOLD_HEIGHT + 3) {
+      // Structure dépliante : le dernier point commande un panneau à charnière couché sur le vol vers le point suivant, placé haut et de
+      // côté comme après un interrupteur ; on tient, il s'ouvre sous nos yeux, on lâche, on passe avant qu'il se referme.
+      const side = cur.x > 0 ? -1 : 1;
+      const next = { x: clampX(cur.x + side * (SWITCH_NEXT_SIDE_MIN + (SWITCH_NEXT_SIDE_MAX - SWITCH_NEXT_SIDE_MIN) * rng.next()), halfWidth), y: cur.y + SWITCH_NEXT_RISE };
+      const { anchor, panel } = unfolding(ids, cur, next);
+      anchors[anchors.length - 1] = anchor;
+      fixed.push(panel);
+      cur = next;
+      anchors.push(makeAnchor(ids, cur));
+      featureDone = true;
+      continue;
+    }
+    if (archetype === 'convoyeur' && !featureDone && anchors.length > 0 && cur.y - startY > 6 && targetY - cur.y > CONVEYOR_HEIGHT + 1) {
+      // Convoyeur : des plateformes qui vont et viennent, un lanceur sur la dernière sous un mur à trou fixe.
+      const { anchors: belt, slabs, walls, exit } = conveyor(ids, cur, halfWidth);
+      anchors.push(...belt);
+      fixed.push(...slabs, ...walls);
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      featureDone = true;
+      continue;
+    }
     if (archetype === 'accordeon' && !featureDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > ACCORDION_HEIGHT + 1) {
       // Accordéon : deux bandes de prises qui se rapprochent et s'écartent. Une fois sur deux, quand les lanceurs sont permis, on y entre
       // par un lanceur (brief : « très bonne association avec le lanceur : la distance cible évolue »).
@@ -1101,7 +1424,7 @@ function placeRings(rng: Rng, ids: IdCounters, anchors: readonly Anchor[], picku
   for (let i = 1; i < anchors.length - 2; i += 1) {
     const a = anchors[i]!;
     const b = anchors[i + 1]!;
-    if (LAUNCHING.has(a.kind) || LAUNCHING.has(b.kind) || a.cable || b.cable || protectedIds.has(a.id) || protectedIds.has(b.id)) continue;
+    if (LAUNCHING.has(a.kind) || LAUNCHING.has(b.kind) || isMobile(a) || isMobile(b) || protectedIds.has(a.id) || protectedIds.has(b.id)) continue;
     if (b.pos.y < a.pos.y + 2) continue;
     pairs.push(i);
   }
@@ -1172,12 +1495,12 @@ function addSpecialAnchors(rng: Rng, ids: IdCounters, anchors: Anchor[], profile
   const inBand = (pos: Vec2): boolean => bands.some((band) => pos.y > band.y0 && pos.y < band.y1);
   for (const kind of wanted) {
     for (let attempt = 0; attempt < 6; attempt += 1) {
-      // Jamais sur le premier ni le dernier point, ni sur un point qui glisse.
+      // Jamais sur le premier ni le dernier point, ni sur un point qui bouge.
       const i = 1 + Math.floor(rng.next() * (anchors.length - 3));
       const before = anchors[i - 1]!;
       const here = anchors[i]!;
       const after = anchors[i + 1]!;
-      if (here.cable || before.cable || after.cable) continue;
+      if (isMobile(here) || isMobile(before) || isMobile(after)) continue;
       // Jamais autour d'un lanceur (rail, interrupteur, aimant, lien élastique) ni dans sa bande de tir : sous le mur, une prise n'aurait pas de sortie.
       if (LAUNCHING.has(before.kind) || LAUNCHING.has(here.kind) || LAUNCHING.has(after.kind)) continue;
       if (before.kind === 'roue' || here.kind === 'roue' || after.kind === 'roue') continue;
@@ -1204,8 +1527,8 @@ const TRAVERSIERE_INSET = 0.3;
  */
 function hangCables(anchors: Anchor[], junctionId: number | null, branchIds: readonly number[], halfWidth: number, kind: 'cable' | 'traversiere'): void {
   const protectedIds = new Set<number>([...branchIds, junctionId ?? -1, anchors.at(-1)?.id ?? -1, anchors[0]?.id ?? -1]);
-  // Jamais une prise qui glisse déjà (une bande d'accordéon).
-  const candidates = anchors.map((a, i) => ({ a, i })).filter(({ a }) => !protectedIds.has(a.id) && a.kind === 'normal' && !a.cable);
+  // Jamais une prise qui bouge déjà (une bande d'accordéon, une couronne de carrousel, une faille, un panneau).
+  const candidates = anchors.map((a, i) => ({ a, i })).filter(({ a }) => !protectedIds.has(a.id) && a.kind === 'normal' && !isMobile(a));
   const slots = kind === 'cable' ? [1 / 3, 2 / 3] : [1 / 4, 1 / 2, 3 / 4];
   const picked = new Set<number>();
   for (const slot of slots) {
@@ -1232,8 +1555,8 @@ export function buildPlainSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, 
  */
 function assignKinds(rng: Rng, anchors: Anchor[], profile: TierProfile, archetype: Archetype, junctionId: number | null, branchIds: readonly number[], pinned: ReadonlySet<number> = new Set()): void {
   const protectedIds = new Set<number>([...branchIds, junctionId ?? -1, anchors.at(-1)?.id ?? -1, anchors[0]?.id ?? -1, ...pinned]);
-  // Les prises d'une bande d'accordéon glissent déjà : ni fragiles ni propulseurs.
-  const eligible = anchors.filter((a) => !protectedIds.has(a.id) && a.kind === 'normal' && !a.cable);
+  // Les prises qui bougent (bande d'accordéon, couronne, faille, panneau) : ni fragiles ni propulseurs.
+  const eligible = anchors.filter((a) => !protectedIds.has(a.id) && a.kind === 'normal' && !isMobile(a));
   const fragile = new Set<number>();
   const boosters = new Set<number>();
   const runOf = (count: number, into: Set<number>): void => {
@@ -1287,10 +1610,10 @@ function placeObstacles(
   const bands = launchBands(anchors);
   const inLaunchBand = (box: Obstacle): boolean => bands.some((band) => box.y1 > band.y0 && box.y0 < band.y1);
   const { env, entryEnv } = context;
-  // Un point qui glisse est tenu à l'écart partout où il passe : à ses deux bouts et au milieu. Autour d'un lanceur, rien jusqu'où la traction recule le personnage.
+  // Un point qui bouge est tenu à l'écart partout où il passe (`anchorPlacements`). Autour d'un lanceur, rien jusqu'où la traction recule le personnage.
   const clearOf = (pos: Vec2, box: Obstacle): boolean => circleBoxGap(pos, 0, box) >= OBSTACLE_CLEARANCE && !underAnchor(pos, box, env);
   const keepAway = (box: Obstacle): boolean =>
-    anchors.every((a) => (a.kind === 'lanceur' ? circleBoxGap(a.pos, LANCEUR_CLEARANCE, box) > 0 : a.kind === 'rail' ? circleBoxGap(a.pos, RAIL_CLEARANCE, box) > 0 : a.kind === 'roue' ? circleBoxGap(a.pos, WHEEL_CLEARANCE, box) > 0 : (a.cable ? [a.cable.from, a.pos, a.cable.to] : [a.pos]).every((pos) => clearOf(pos, box)))) &&
+    anchors.every((a) => (a.kind === 'lanceur' ? anchorPlacements(a).every((pos) => circleBoxGap(pos, LANCEUR_CLEARANCE, box) > 0) : a.kind === 'rail' ? circleBoxGap(a.pos, RAIL_CLEARANCE, box) > 0 : a.kind === 'roue' ? circleBoxGap(a.pos, WHEEL_CLEARANCE, box) > 0 : anchorPlacements(a).every((pos) => clearOf(pos, box)))) &&
     pickups.every((p) => circleBoxGap(p.pos, 0, box) >= PICKUP_CLEARANCE) &&
     rings.every((r) => circleBoxGap(r.pos, r.radius, box) >= RING_OBSTACLE_CLEARANCE) &&
     !nearZone(box, zones) &&

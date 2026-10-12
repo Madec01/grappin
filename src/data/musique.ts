@@ -65,6 +65,8 @@ const LEVEL_TRACKS: readonly TrackId[] = [
   'boss4',
   'biome2-1',
   'boss4',
+  'biome3-2',
+  'boss4',
 ];
 
 /** La piste du niveau `id` ; au-delà du dernier niveau, la dernière piste. */

@@ -268,6 +268,28 @@ export const LEVELS: readonly LevelDef[] = [
     profile: { spacing: 4.7, obstacles: 2, split: true, fragileChance: 0.3, boosters: 1, archetypes: ['rail', 'rail', 'elastique', 'elastique', 'evasion', 'chaine', 'escalier'], spread: 1.4, electric: 1, eclipse: 1 },
     events: [{ kind: 'vent', at: 25, length: 30, side: 1, strength: 3 }, { kind: 'cable', at: 90, length: 30 }, { kind: 'vent', at: 160, length: 30, side: -1, strength: 3 }],
   },
+  {
+    id: 23,
+    name: 'Le plafond',
+    intro: 'Deux fois, la gravité s\'inverse : tu tombes vers le haut, enfile les trous. Entre les deux, des failles qui s\'ouvrent et un carrousel.',
+    seed: 1023,
+    startY: 4050,
+    endY: 4290,
+    fogBaseSpeed: 1.55,
+    profile: { spacing: 4.6, obstacles: 2, split: true, fragileChance: 0.25, boosters: 1, archetypes: ['faille', 'faille', 'carrousel', 'carrousel', 'chaine', 'couloir', 'dalles'], spread: 1.35, electric: 1, eclipse: 1 },
+    events: [{ kind: 'plafond', at: 40, length: 30, side: 1 }, { kind: 'pluie', at: 110, length: 25 }, { kind: 'plafond', at: 170, length: 30, side: -1 }],
+  },
+  {
+    id: 24,
+    name: 'Les machines',
+    intro: 'Des panneaux qui se déplient quand tu tiens leur prise, des convoyeurs qui te portent, un carrousel, une faille : la ville est une machine.',
+    seed: 1024,
+    startY: 4290,
+    endY: 4540,
+    fogBaseSpeed: 1.6,
+    profile: { spacing: 4.7, obstacles: 2, split: true, fragileChance: 0.3, boosters: 1, archetypes: ['depliante', 'depliante', 'convoyeur', 'convoyeur', 'carrousel', 'faille', 'chaine', 'escalier'], spread: 1.4, electric: 1, eclipse: 1 },
+    events: [{ kind: 'vent', at: 30, length: 30, side: -1, strength: 3 }, { kind: 'cable', at: 100, length: 30 }, { kind: 'plafond', at: 180, length: 30, side: 1 }],
+  },
 ];
 
 export function levelById(id: number): LevelDef | undefined {

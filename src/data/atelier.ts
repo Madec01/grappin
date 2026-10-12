@@ -19,7 +19,7 @@ export type AtelierId =
   | 'dalles' | 'rebond' | 'cassable' | 'porte' | 'anneau' | 'tournant' | 'evasion'
   | 'brise' | 'sas' | 'cerceau' | 'ricochet' | 'percee' | 'glissiere'
   | 'courant' | 'derive' | 'fusee'
-  | 'serpentin' | 'accordeon' | 'poche'
+  | 'serpentin' | 'accordeon' | 'poche' | 'plafond' | 'faille' | 'carrousel' | 'depliante' | 'convoyeur'
   | 'bascule' | 'vent' | 'panne' | 'pluie' | 'alerte' | 'cable' | 'traversiere';
 
 export interface AtelierElement {
@@ -67,6 +67,11 @@ export const ATELIER_ELEMENTS: readonly AtelierElement[] = [
   { id: 'serpentin', label: 'Serpentin', group: 'transformations' },
   { id: 'accordeon', label: 'Accordéon', group: 'transformations' },
   { id: 'poche', label: 'Poche', group: 'transformations' },
+  { id: 'plafond', label: 'Plafond', group: 'transformations' },
+  { id: 'faille', label: 'Faille', group: 'transformations' },
+  { id: 'carrousel', label: 'Carrousel', group: 'transformations' },
+  { id: 'depliante', label: 'Dépliante', group: 'transformations' },
+  { id: 'convoyeur', label: 'Convoyeur', group: 'transformations' },
   { id: 'bascule', label: 'Bascule', group: 'evenements' },
   { id: 'vent', label: 'Vent', group: 'evenements' },
   { id: 'panne', label: 'Panne', group: 'evenements' },
@@ -96,9 +101,9 @@ export function toggleAtelier(selection: readonly AtelierId[], id: AtelierId): A
   return ATELIER_ELEMENTS.map((element) => element.id).filter((candidate) => next.has(candidate));
 }
 
-/** Les événements choisis, dans l'ordre du catalogue ; le serpentin, transformation du terrain, en est un. */
+/** Les événements choisis, dans l'ordre du catalogue ; le serpentin et le plafond, transformations du terrain, en sont. */
 export function atelierEvents(selection: readonly AtelierId[]): EventKind[] {
-  const events: EventKind[] = ['serpentin', 'bascule', 'vent', 'panne', 'pluie', 'alerte', 'cable', 'traversiere'];
+  const events: (EventKind & AtelierId)[] = ['serpentin', 'plafond', 'bascule', 'vent', 'panne', 'pluie', 'alerte', 'cable', 'traversiere'];
   return events.filter((kind) => selection.includes(kind));
 }
 
@@ -118,7 +123,7 @@ export function atelierProfile(selection: readonly AtelierId[]): TierProfile {
   if (has('lanceur')) archetypes.push('lanceur');
   if (has('roue')) archetypes.push('roue');
   if (has('tournant')) archetypes.push('tournant');
-  for (const id of ['brise', 'sas', 'cerceau', 'ricochet', 'percee', 'glissiere', 'courant', 'derive', 'fusee', 'accordeon', 'poche', 'aimant', 'interrupteur', 'rail', 'elastique', 'evasion'] as const) if (has(id)) archetypes.push(id);
+  for (const id of ['brise', 'sas', 'cerceau', 'ricochet', 'percee', 'glissiere', 'courant', 'derive', 'fusee', 'accordeon', 'poche', 'aimant', 'interrupteur', 'rail', 'elastique', 'evasion', 'faille', 'carrousel', 'depliante', 'convoyeur'] as const) if (has(id)) archetypes.push(id);
   if (archetypes.length === 0) archetypes.push('chaine', 'couloir');
   return {
     spacing: 4,

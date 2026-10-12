@@ -1,6 +1,7 @@
 import type { Vec2 } from '../core/math/vec2';
 import type { ScheduledEvent } from '../sim/events';
-import { FIRST_ANCHOR_OFFSET, HALF_WIDTH, RICOCHET_WALL_RISE, RING_RADIUS, ROTOR_TURN_SECONDS, SWITCH_NEXT_RISE, WHEEL_RISE, accordion, drift, elasticHold, escapeCorridor, hoop, magnetHold, pocket, railHold, ricochet, rocket, rotorBar, slidingWall, smashWall, switchLock, updraft, wheel, type IdCounters, type Segment } from '../sim/generator';
+import { FIRST_ANCHOR_OFFSET, HALF_WIDTH, RICOCHET_WALL_RISE, RING_RADIUS, ROTOR_TURN_SECONDS, SWITCH_NEXT_RISE, WHEEL_RISE, accordion, carousel, conveyor, drift, elasticHold, escapeCorridor, fault, hoop, magnetHold, pocket, railHold, ricochet, rocket, rotorBar, slidingWall, smashWall, switchLock, unfolding, updraft, wheel, type IdCounters, type Segment } from '../sim/generator';
+import { PLAFOND_LENGTH } from '../sim/events';
 import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from '../sim/state';
 
 /**
@@ -14,7 +15,7 @@ import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from '../sim/
  * monde au-dessus de sa chaîne).
  */
 
-export type SceneId = 'rebond' | 'cassable' | 'porte' | 'anneau' | 'courant' | 'derive' | 'fusee' | 'roue' | 'tournant' | 'glissiere' | 'serpentin' | 'accordeon' | 'poche' | 'aimant' | 'interrupteur' | 'rail' | 'elastique' | 'evasion';
+export type SceneId = 'rebond' | 'cassable' | 'porte' | 'anneau' | 'courant' | 'derive' | 'fusee' | 'roue' | 'tournant' | 'glissiere' | 'serpentin' | 'accordeon' | 'poche' | 'aimant' | 'interrupteur' | 'rail' | 'elastique' | 'evasion' | 'plafond' | 'faille' | 'carrousel' | 'depliante' | 'convoyeur';
 
 export interface SceneDef {
   readonly id: SceneId;
@@ -28,6 +29,8 @@ export interface SceneDef {
 /** Le serpentin de sa scène : il commence au sommet de la chaîne de démonstration et couvre trois stades de quinze mètres. */
 export const SERPENTIN_SCENE_AT = 20;
 export const SERPENTIN_SCENE_LENGTH = 45;
+/** Le plafond de sa scène : il commence juste au-dessus de la chaîne de démonstration, pour que la suite soit engendrée sous lui. */
+export const PLAFOND_SCENE_AT = 24;
 
 export const SCENES: readonly SceneDef[] = [
   { id: 'rebond', name: 'Le ricochet', intro: 'La chicane barre le trou : tire sous elle vers le mur violet, il te renvoie dedans.' },
@@ -48,6 +51,11 @@ export const SCENES: readonly SceneDef[] = [
   { id: 'rail', name: 'Le rail', intro: 'Sur le rail, glisse le doigt pour choisir ta position : chaque endroit lance dans sa direction.' },
   { id: 'elastique', name: 'Le lien élastique', intro: 'Attrape le lien en passant : ta chute l\'étire, il te rappelle vers le haut, lâche pendant la remontée.' },
   { id: 'evasion', name: 'Le passage qui se referme', intro: 'Dès que tu entres dans le couloir, sa sortie se referme : monte avant qu\'elle soit close.' },
+  { id: 'plafond', name: 'Le plafond', intro: 'La gravité s\'inverse : tu tombes vers le haut. Attrape une prise en passant chaque trou, balance-toi au-dessus d\'elle, lâche vers le trou suivant.', events: [{ kind: 'plafond', at: PLAFOND_SCENE_AT, length: PLAFOND_LENGTH, side: 1 }] },
+  { id: 'faille', name: 'La faille', intro: 'Dès que tu entres, les deux côtés s\'écartent et le vide s\'ouvre : traverse vite, ou grimpe ton côté.' },
+  { id: 'carrousel', name: 'Le carrousel', intro: 'La couronne tourne sous sa coque : entre par le bas quand elle est ouverte, laisse-toi porter, sors par le haut.' },
+  { id: 'depliante', name: 'La structure dépliante', intro: 'Tenir la prise fait pivoter le panneau du mur : il s\'ouvre sous tes yeux, lâche et passe avant qu\'il se referme.' },
+  { id: 'convoyeur', name: 'Le convoyeur', intro: 'Les plateformes vont et viennent : laisse-toi porter, change de support quand il s\'approche, et tire du lanceur quand le trou est au-dessus.' },
 ];
 
 /** Les événements d'une scène, ou aucun. */
@@ -322,6 +330,62 @@ export function buildScene(id: SceneId, ids: IdCounters, origin: Vec2): Segment 
       b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
       b.ids.anchor += 1;
       anchor(b, { x: -2.2, y: exit.y - FIRST_ANCHOR_OFFSET.y - b.origin.y + 3.6 });
+      break;
+    }
+    case 'plafond':
+      // La chaîne de démonstration, droite ; le plafond de la scène (`events`) commence à son sommet, et la course engendrée sous lui pose ses plafonds à trou.
+      anchor(b, { x: 0, y: 0 });
+      for (const p of CHAIN) anchor(b, p);
+      break;
+    case 'faille': {
+      // Deux points, puis la faille du générateur : ses deux ensembles s'écartent dès que l'on passe au-dessus du second point.
+      anchor(b, { x: 0, y: 0 });
+      const from = anchor(b, CHAIN[0]!);
+      const { anchors: sides, walls, exit } = fault(b.ids, from.pos, HALF_WIDTH);
+      b.anchors.push(...sides);
+      b.obstacles.push(...walls);
+      b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
+      b.ids.anchor += 1;
+      anchor(b, { x: 2.2, y: exit.y - FIRST_ANCHOR_OFFSET.y - b.origin.y + 3.6 });
+      break;
+    }
+    case 'carrousel': {
+      // Deux points, puis le carrousel du générateur, qui tourne dans le sens où l'on arrive (venant de la gauche : sens trigonométrique).
+      anchor(b, { x: 0, y: 0 });
+      const from = anchor(b, CHAIN[0]!);
+      const { anchors: ring, shell, exit } = carousel(b.ids, from.pos, HALF_WIDTH, 1);
+      b.anchors.push(...ring);
+      b.obstacles.push(...shell);
+      b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
+      b.ids.anchor += 1;
+      anchor(b, { x: 2, y: exit.y - FIRST_ANCHOR_OFFSET.y - b.origin.y + 3.6 });
+      break;
+    }
+    case 'depliante': {
+      // Une prise interrupteur, et sur le vol vers la prise suivante un panneau à charnière qu'elle fait pivoter : tenir, le voir s'ouvrir, lâcher, passer.
+      anchor(b, { x: 0, y: 0 });
+      anchor(b, CHAIN[0]!);
+      const at = { x: b.origin.x + FIRST_ANCHOR_OFFSET.x + 0.8, y: b.origin.y + FIRST_ANCHOR_OFFSET.y + 7.2 };
+      const next = { x: at.x - 2.6, y: at.y + SWITCH_NEXT_RISE };
+      const { anchor: lever, panel } = unfolding(b.ids, at, next);
+      b.anchors.push(lever);
+      b.obstacles.push(panel);
+      b.anchors.push({ id: b.ids.anchor, pos: next, kind: 'normal', broken: false });
+      b.ids.anchor += 1;
+      anchor(b, { x: 1.4, y: 7.2 + SWITCH_NEXT_RISE + 3.6 });
+      anchor(b, { x: -1.8, y: 7.2 + SWITCH_NEXT_RISE + 7.2 });
+      break;
+    }
+    case 'convoyeur': {
+      // Deux points, puis les plateformes du convoyeur du générateur, le lanceur de la dernière sous son mur à trou, et la chaîne qui reprend au-dessus.
+      anchor(b, { x: 0, y: 0 });
+      const from = anchor(b, CHAIN[0]!);
+      const { anchors: belt, slabs, walls, exit } = conveyor(b.ids, from.pos, HALF_WIDTH);
+      b.anchors.push(...belt);
+      b.obstacles.push(...slabs, ...walls);
+      b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
+      b.ids.anchor += 1;
+      anchor(b, { x: -2, y: exit.y - FIRST_ANCHOR_OFFSET.y - b.origin.y + 3.6 });
       break;
     }
   }

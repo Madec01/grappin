@@ -201,7 +201,8 @@ export class Camera {
 
   /** Rapproche zoom et centre de leur cible d'une fraction `blend`, puis impose les bornes dures. */
   private follow(blend: number, heroPos: Vec2, heroVel: Vec2, env: Environment, extent: number): void {
-    this.angle = worldAngle(env.gravityDir);
+    // Sous un plafond, la gravité s'inverse et le monde ne tourne pas : on tombe vers le haut de l'écran (brief, T2).
+    this.angle = env.inverted ? 0 : worldAngle(env.gravityDir);
     const speed = Math.hypot(heroVel.x, heroVel.y);
     const speedZoom = clamp(1 / (1 + speed / ZOOM_SPEED_SCALE), ZOOM_MIN, 1);
     // Des prises écartées demandent de voir plus large : le zoom descend jusqu'à les montrer, borné comme les autres.

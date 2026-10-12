@@ -4,7 +4,7 @@ import { FREE_RUN, type CoursePlan } from './course';
 import { flightStep, startFlight } from './flight';
 import { PULL_MAX, launchVelocity, pulledPosition } from './launcher';
 import { provableObstacles } from './obstacles';
-import { zoneAt, type Body } from './physics';
+import { constrainVelocity, swingStep, zoneAt, type Body } from './physics';
 import { bestLaunch, bestRail } from './pilot';
 import { railParam, railPoint, railPull, railVelocity } from './holds';
 import { WORLD_HALF_WIDTH, releaseVelocity } from './rules';
@@ -49,6 +49,10 @@ const RISING_BELOW = 0.5;
 const ZONE_AHEAD_SECONDS = 0.4;
 /** Avant de lâcher, le robot regarde ce temps de vol devant lui : s'il heurte un obstacle solide, il garde la corde et attend la suite du balancement. Partagé avec le pilote des scènes. */
 export const LOOK_AHEAD_SECONDS = 0.5;
+/** Avant d'attraper, le robot regarde ce temps de balancement sous la prise, contre ce qui bouge (la coque d'un carrousel). */
+export const CATCH_LOOK_SECONDS = 1.5;
+/** Avant de lâcher, le robot regarde ce qui bouge plus loin que les solides : une coque qui arrive se voit venir. */
+export const MOVING_LOOK_AHEAD_SECONDS = 1.2;
 
 /** Sous un mur à ouverture mobile, le robot attend que le trou passe, jamais plus longtemps que ceci (secondes) : la brume monte. */
 export const LAUNCH_WAIT_MAX_SECONDS = 6;
@@ -59,6 +63,8 @@ const WHEEL_HOLD_MAX_SECONDS = 8;
 /** Sur un aimant, le robot lâche dès que le vol attrape une prise au-dessus de lui, et jamais plus de ce temps attiré. Sur un lien élastique, dès qu'il remonte et que le vol attrape. Partagés avec le pilote des scènes. */
 export const MAGNET_HOLD_MAX_SECONDS = 4;
 export const ELASTIC_HOLD_MAX_SECONDS = 7;
+/** Sur une prise de carrousel, le robot se laisse porter jusqu'à un tour entier (`CAROUSEL_PERIOD`) : la sortie passe une fois par tour. */
+export const ORBIT_HOLD_MAX_SECONDS = 9;
 /** Un lien élastique ne vaut que pris en passant vite (sa puissance vient du mouvement d'arrivée) : sous cette vitesse, le robot le laisse, s'il a autre chose à portée. */
 export const ELASTIC_CATCH_SPEED = 6;
 
@@ -71,6 +77,27 @@ function clearOfMoving(state: SimState, body: Body, seconds: number, tuning: Tun
   for (let k = 0; k < steps; k += 1) {
     flightStep(flight, [], state.rings, state.zones, tuning, state.env);
     if (moving.some((box) => obstacleGap(flight.body.pos, tuning.heroRadius, box, state.step + k + 1, tuning) <= 0)) return false;
+  }
+  return true;
+}
+
+/**
+ * Vrai si, attrapé maintenant, le balancement sous `target` pendant `seconds` ne
+ * rencontre aucun obstacle qui bouge, regardé là où il sera : la coque d'un
+ * carrousel balaie ce qui pend trop long sous sa couronne, on attrape quand
+ * elle est passée. Partagé avec le pilote des scènes.
+ */
+export function catchIsClearOfMoving(state: SimState, target: Anchor, seconds: number, tuning: Tuning): boolean {
+  const moving = state.obstacles.filter((box) => !box.broken && isMoving(box));
+  if (moving.length === 0) return true;
+  let ropeLength = Math.max(tuning.ropeMin, Math.min(tuning.ropeMax * tuning.coyoteReach, Math.hypot(target.pos.x - state.hero.pos.x, target.pos.y - state.hero.pos.y)));
+  let body: Body = { pos: state.hero.pos, vel: constrainVelocity(state.hero.pos, state.hero.vel, target.pos, ropeLength) };
+  const steps = Math.round(seconds / tuning.stepSeconds);
+  for (let k = 0; k < steps; k += 1) {
+    const swung = swingStep(body, target.pos, ropeLength, tuning, state.env, state.zones, target.motor ?? null);
+    body = swung.body;
+    ropeLength = swung.ropeLength;
+    if (moving.some((box) => obstacleGap(body.pos, tuning.heroRadius, box, state.step + k + 1, tuning) <= 0)) return false;
   }
   return true;
 }
@@ -88,8 +115,8 @@ export function launchIsClear(state: SimState, pull: Vec2, tuning: Tuning): bool
 
 /** Avant de lâcher, le robot regarde aussi si le vol sort du monde dans ce temps (secondes) : un lâcher vers le bord, c'est une chute. Le temps pendant lequel, après un lâcher, il ne rattrape rien plus bas. */
 export const EDGE_AHEAD_SECONDS = 1.5;
-/** En vol, un robot qui file vers le bord du monde (là où il sera dans ce temps) attrape tout ce qui vient, même plus bas. */
-export const EDGE_SOON_SECONDS = 0.5;
+/** En vol, un robot qui file vers le bord du monde (là où il sera dans ce temps) attrape tout ce qui vient, même plus bas. Une seconde : à 7 m/s, une demi-seconde ne laissait plus rien à portée. */
+export const EDGE_SOON_SECONDS = 1;
 /** Le robot n'examine le vol d'un lâcher (`flightCatches`) qu'un pas sur ce nombre. */
 export const RELEASE_EVERY = 4;
 /** Le bord du monde se tient à cette marge en deçà de sa demi-largeur. */
@@ -103,10 +130,11 @@ function releaseIsClear(state: SimState, tuning: Tuning): boolean {
   // Ce qui bouge (tournants, panneaux qui glissent) n'est pas dans la preuve : le robot le regarde là où il sera, pas à pas.
   const moving = state.obstacles.filter((box) => !box.broken && isMoving(box));
   const steps = Math.round(LOOK_AHEAD_SECONDS / tuning.stepSeconds);
-  for (let k = 0; k < steps; k += 1) {
+  const movingSteps = moving.length > 0 ? Math.round(MOVING_LOOK_AHEAD_SECONDS / tuning.stepSeconds) : 0;
+  for (let k = 0; k < Math.max(steps, movingSteps); k += 1) {
     flightStep(flight, obstacles, state.rings, state.zones, tuning, state.env);
-    if (flight.ended) return false;
-    if (moving.some((box) => obstacleGap(flight.body.pos, tuning.heroRadius, box, state.step + k + 1, tuning) <= 0)) return false;
+    if (flight.ended) return k < steps ? false : true;
+    if (k < movingSteps && moving.some((box) => obstacleGap(flight.body.pos, tuning.heroRadius, box, state.step + k + 1, tuning) <= 0)) return false;
   }
   // Un vol qui file vers le bord du monde (propulseur de côté, par exemple) : on garde la corde.
   const edgeX = state.hero.pos.x + vel.x * EDGE_AHEAD_SECONDS;
@@ -179,7 +207,7 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
       // qui suivrait, comme le vérificateur, et attend un meilleur moment si un autre point est à portée ; mais un choc vaut mieux
       // qu'une sortie du monde : s'il tombe, ou si ce point est le dernier à portée, il attrape quand même.
       const others = target ? s.anchors.filter((a) => a.id !== target.id && !a.broken && Math.hypot(a.pos.x - s.hero.pos.x, a.pos.y - s.hero.pos.y) <= tuning.ropeMax).length : 0;
-      const safe = target !== null && target !== undefined && (s.hero.vel.y < 0 || others === 0 || swingIsClear(target, { pos: s.hero.pos, vel: s.hero.vel }, s.anchors, provableObstacles(s.obstacles), tuning, s.env, s.zones));
+      const safe = target !== null && target !== undefined && (s.hero.vel.y < 0 || others === 0 || (swingIsClear(target, { pos: s.hero.pos, vel: s.hero.vel }, s.anchors, provableObstacles(s.obstacles), tuning, s.env, s.zones) && catchIsClearOfMoving(s, target, CATCH_LOOK_SECONDS, tuning)));
       const slowForElastic = target?.kind === 'elastique' && others > 0 && Math.hypot(s.hero.vel.x, s.hero.vel.y) < ELASTIC_CATCH_SPEED;
       if (target && climbing && !rising && safe && !slowForElastic && plannedPress < 0) plannedPress = s.step + reactionSteps;
       if (plannedPress >= 0 && s.step >= plannedPress) {
@@ -204,11 +232,15 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
         }
         const dir = target ? { x: target.pos.x - launcher.pos.x, y: target.pos.y - launcher.pos.y } : { x: 0, y: 1 };
         const len = Math.hypot(dir.x, dir.y) || 1;
-        const pull = launcher.kind === 'rail' ? (bestRail(s, tuning) ?? railPull(0.5)) : (bestLaunch(s, tuning) ?? { x: (-dir.x / len) * PULL_MAX * 0.7, y: (-dir.y / len) * PULL_MAX * 0.7 });
+        const proven = launcher.kind === 'rail' ? bestRail(s, tuning) : bestLaunch(s, tuning);
+        const pull = proven ?? (launcher.kind === 'rail' ? railPull(0.5) : { x: (-dir.x / len) * PULL_MAX * 0.7, y: (-dir.y / len) * PULL_MAX * 0.7 });
         // Sous un mur dont le trou va et vient, le robot regarde où sera le trou pendant son tir, et attend qu'il passe (jamais trop longtemps).
+        // Sur un lanceur qui bouge (une plateforme de convoyeur), il attend de même qu'un tir prouvé existe d'où il est, un pas sur quatre.
         const waited = (s.step - attachStep) * tuning.stepSeconds;
         if (waited < LAUNCH_WAIT_MAX_SECONDS && !launchIsClear(s, pull, tuning)) {
           plannedRelease = s.step + 1;
+        } else if (waited < LAUNCH_WAIT_MAX_SECONDS && !proven && launcher.cable) {
+          plannedRelease = s.step + RELEASE_EVERY;
         } else {
           sim.release(pull);
           launchedStep = s.step;
@@ -224,24 +256,35 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
       const onWheel = held_?.kind === 'roue';
       const onMagnet = held_?.kind === 'aimant';
       const onElastic = held_?.kind === 'elastique';
+      // Sur une prise de carrousel, le robot se laisse porter : il ne lâche que pour une prise hors de la couronne (la sortie), jamais
+      // pour une autre prise de la couronne, plus haute un instant, qui le ferait tourner en rond.
+      const onOrbit = held_?.orbit !== undefined;
+      // Sur une prise interrupteur dont un panneau s'ouvre encore, il tient : on voit la structure se déplier avant de s'y engager.
+      const unfolding = held_?.kind === 'interrupteur' && s.obstacles.some((box) => box.switchedBy === held_.id && box.hinge !== undefined && (box.hingeProgress ?? 0) < 1);
       const risingNow = rise({ x: 0, y: 0 }, s.hero.vel) > 0;
-      const ready = onWheel ? speed >= tuning.wheelSpeed * WHEEL_READY_RATIO : onMagnet || onElastic ? risingNow : speed >= profile.speedTarget || s.rope.length <= tuning.ropeMin + 1e-9;
+      const ready = onWheel ? speed >= tuning.wheelSpeed * WHEEL_READY_RATIO : onMagnet || onElastic ? risingNow : onOrbit ? true : speed >= profile.speedTarget || s.rope.length <= tuning.ropeMin + 1e-9;
       const ax = Math.abs(s.hero.vel.x);
       const slope = ax > 0 ? s.hero.vel.y / ax : Infinity;
       // Sur une roue ou un aimant, le robot lâche au premier instant où le vol qui suivrait attrape un point au-dessus de la prise (ce que le vérificateur a prouvé).
-      const catchesAbove = (): boolean => held_ !== undefined && flightCatches(held_, { pos: s.hero.pos, vel: s.hero.vel }, s.anchors, s.obstacles, tuning, s.env, s.zones, s.rings).some((id) => (s.anchors.find((a) => a.id === id)?.pos.y ?? -Infinity) > held_.pos.y + 1);
+      const exitsOrbit = (id: number): boolean => !onOrbit || s.anchors.find((a) => a.id === id)?.orbit === undefined;
+      const catchesAbove = (): boolean => held_ !== undefined && flightCatches(held_, { pos: s.hero.pos, vel: s.hero.vel }, s.anchors, s.obstacles, tuning, s.env, s.zones, s.rings).some((id) => exitsOrbit(id) && (s.anchors.find((a) => a.id === id)?.pos.y ?? -Infinity) > held_.pos.y + 1);
       const inWindow = onWheel
         ? s.hero.vel.y >= tuning.wheelSpeed * WHEEL_UP_RATIO && catchesAbove()
-        : onMagnet || onElastic
+        : onMagnet || onElastic || onOrbit
           ? s.step % RELEASE_EVERY === 0 && catchesAbove()
           : s.hero.vel.y > 1 && slope > profile.minSlope && slope < profile.maxSlope;
-      const maxHold = onWheel ? WHEEL_HOLD_MAX_SECONDS : onMagnet ? MAGNET_HOLD_MAX_SECONDS : onElastic ? ELASTIC_HOLD_MAX_SECONDS : profile.maxHoldSeconds;
-      const wants = (ready && inWindow) || held > maxHold;
+      const maxHold = onWheel ? WHEEL_HOLD_MAX_SECONDS : onMagnet ? MAGNET_HOLD_MAX_SECONDS : onElastic ? ELASTIC_HOLD_MAX_SECONDS : onOrbit ? ORBIT_HOLD_MAX_SECONDS : profile.maxHoldSeconds;
+      const wants = !unfolding && ((ready && inWindow) || held > maxHold);
       // Un lâcher droit dans un mur n'est pas un lâcher, ni un lâcher dont le vol n'attrape rien au-dessus (ce que le vérificateur regarde,
       // `flightCatches`) : le robot attend le prochain moment, sauf s'il pend depuis trop longtemps.
       // Le vol se regarde tous les `RELEASE_EVERY` pas, comme le vérificateur : il coûte cher.
-      const catches = (): boolean => onWheel || held_ === undefined || flightCatches(held_, { pos: s.hero.pos, vel: releaseVelocity(s, tuning) }, s.anchors, s.obstacles, tuning, s.env, s.zones, s.rings).length > 0;
-      if (wants && plannedRelease < 0 && (held > 2 * profile.maxHoldSeconds || (s.step % RELEASE_EVERY === 0 && releaseIsClear(s, tuning) && catches()))) plannedRelease = s.step + reactionSteps;
+      // Un vol qui n'attrape rien de plus d'un mètre au-dessus de la prise tenue ne vaut pas un lâcher : lâché, le robot refuse de
+      // rattraper plus bas tant qu'il monte (voir `climbing`), et il filait hors du monde faute de point.
+      const catches = (): boolean => onWheel || held_ === undefined || flightCatches(held_, { pos: s.hero.pos, vel: releaseVelocity(s, tuning) }, s.anchors, s.obstacles, tuning, s.env, s.zones, s.rings).some((id) => exitsOrbit(id) && (s.anchors.find((a) => a.id === id)?.pos.y ?? -Infinity) > held_.pos.y + 1);
+      // Pendu depuis trop longtemps, le robot lâche sans rien attraper, mais jamais droit dans ce qui bouge (la coque d'un carrousel qui
+      // passe) tant qu'il reste un peu de patience ; passé le double, il lâche quoi qu'il arrive.
+      const overdue = held > 2 * profile.maxHoldSeconds && (held > 4 * profile.maxHoldSeconds || releaseIsClear(s, tuning));
+      if (wants && plannedRelease < 0 && (overdue || (s.step % RELEASE_EVERY === 0 && releaseIsClear(s, tuning) && catches()))) plannedRelease = s.step + reactionSteps;
       if (plannedRelease >= 0 && s.step >= plannedRelease) {
         plannedRelease = -1;
         sim.release();

@@ -99,6 +99,7 @@ const EVENT_NAMES: Record<EventKind, string> = {
   cable: 'câbles',
   traversiere: 'traversières',
   serpentin: 'serpentin',
+  plafond: 'plafond',
 };
 
 /** « bascule 25 m · panne 55 m » : les événements du niveau et la hauteur où ils commencent, ou une chaîne vide sans événement. */
@@ -135,6 +136,8 @@ export interface Announcement {
 
 /** L'annonce d'un passage qui se referme (O6), dite quand le personnage y entre : la sortie va se fermer. */
 export const ESCAPE_ANNOUNCEMENT: Announcement = { title: 'Le passage se referme !', detail: 'Monte avant qu\'il soit clos' };
+/** L'annonce d'une faille (lot 5 B, T4) qui se déclenche : ses deux ensembles s'écartent. */
+export const FAULT_ANNOUNCEMENT: Announcement = { title: 'La faille s\'ouvre !', detail: 'Traverse vite, ou grimpe ton côté' };
 
 /** Annonce du début des événements, hors le vent, dont la phrase dépend du côté. */
 const STARTS: Record<Exclude<EventKind, 'vent'>, Announcement> = {
@@ -145,10 +148,11 @@ const STARTS: Record<Exclude<EventKind, 'vent'>, Announcement> = {
   cable: { title: 'Câbles', detail: 'Les accroches glissent' },
   traversiere: { title: 'Traversières !', detail: 'Les prises balaient toute la largeur' },
   serpentin: { title: 'Serpentin', detail: 'Le monde s\'incline peu à peu' },
+  plafond: { title: 'Plafond !', detail: 'La gravité s\'inverse : tu tombes vers le haut' },
 };
 
 /** Les événements dont la fin se remarque : ceux qui ont changé la façon de jouer. */
-const CALM_AFTER: ReadonlySet<EventKind> = new Set(['bascule', 'vent', 'alerte', 'serpentin']);
+const CALM_AFTER: ReadonlySet<EventKind> = new Set(['bascule', 'vent', 'alerte', 'serpentin', 'plafond']);
 
 /**
  * Annonce d'un événement de niveau qui commence ou finit, ou null quand sa fin

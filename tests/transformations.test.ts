@@ -257,8 +257,8 @@ describe('les scènes et l\'atelier du lot 3', () => {
     }
   });
 
-  it('l\'atelier connaît les trois transformations, et une partie n\'engendre qu\'elles', () => {
-    expect(ATELIER_ELEMENTS.filter((e) => e.group === 'transformations').map((e) => e.id)).toEqual(['serpentin', 'accordeon', 'poche']);
+  it('l\'atelier connaît les trois transformations (et celles du lot 5 B après elles), et une partie n\'engendre qu\'elles', () => {
+    expect(ATELIER_ELEMENTS.filter((e) => e.group === 'transformations').map((e) => e.id)).toEqual(['serpentin', 'accordeon', 'poche', 'plafond', 'faille', 'carrousel', 'depliante', 'convoyeur']);
     expect(atelierEvents(['serpentin', 'vent'])).toEqual(['serpentin', 'vent']);
     expect(atelierProfile(['accordeon', 'poche']).archetypes).toEqual(['accordeon', 'poche']);
     const pouches = new Simulation(2, T, { kind: 'atelier', startY: 0, selection: ['poche'] });
