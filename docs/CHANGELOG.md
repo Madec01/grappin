@@ -2,6 +2,15 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.12.2] — 2026-10-12 — La lumière colorée change de couleur
+
+Retour du propriétaire sur la 0.12.1 : « le but de la lumière colorée, c'est que ça change de couleur aussi ». Cause : les trois couleurs d'effet de chaque ambiance étaient trois bleus voisins (ou trois verts, trois crèmes), et la teinte du fond ne durait que le coup du temps : l'œil voyait battre la lumière, pas changer sa couleur.
+
+### Modifié
+
+- **Trois teintes franches par ambiance** (`render/palette.ts`), à peu près un tiers de cercle entre elles, la première restant celle de la famille : Cyan nuit en cyan, rose et lime ; Indigo en pervenche, magenta-rose et lime-jaune ; Glace en bleu glace, rose-rouge et violet ; Lime en lime, bleu et rose ; Braise en saumon, bleu et jaune. Toujours à plus de 40 de toute couleur d'espèce et des teintes chaudes du lâcher parfait (les tests le gardent) : les prises se lisent à leur cœur et à leur forme, jamais à la seule teinte du halo.
+- **La lumière reste colorée pendant tout le temps**, pas seulement sur le coup : tant que la musique bat, le fond (20 %), la nappe de brume (50 %), la dalle du toit (20 %) et les structures du décor (30 %) gardent une part de la couleur d'effet, qui change à chaque temps (A sur le temps fort, puis B, C, B, en 15 % du temps) ; sur le coup, le fond, la brume et la dalle se teintent davantage. Au silence et avant le premier temps, rien ne change, comme avant.
+
 ## [0.12.1] — 2026-10-11 — Les nouveautés comptent : des mécaniques exigées, pas décoratives
 
 Retour du propriétaire sur 0.11.0 : « tout fonctionne, mais les cassables ne servent à rien dans le gameplay en l'état, pareil pour le reste. Il faut que ça rajoute des éléments de difficulté. » Cause : le parcours était prouvé *sans* les nouveautés, qui restaient facultatives. Désormais le vérificateur joue les mécaniques dans ses vols, et le générateur peut les exiger : un passage n'est prouvé qu'avec elles.

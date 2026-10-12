@@ -37,6 +37,13 @@ import { mixColor } from './sling';
  * De même, les graves des pistes ne descendent presque jamais sous 0,2 : ce qui
  * les suit restait allumé en continu ; ils ne comptent qu'au-dessus d'un seuil.
  *
+ * Second retour (0.12.2) : « le but de la lumière colorée, c'est que ça change de
+ * couleur aussi ». Les trois couleurs d'effet de chaque palette étaient trois
+ * bleus voisins : elles sont maintenant trois teintes franchement différentes
+ * (palette.ts), et tant que la musique bat, le fond, la nappe de brume, la dalle
+ * et le décor en gardent une part (`hold`) pendant tout le temps, pas seulement
+ * sur le coup : la lumière est colorée, et change de couleur à chaque temps.
+ *
  * Règle absolue : au silence (`SILENT_PULSE`, ou tout pouls sans temps ni graves),
  * rien ne change. Chaque multiplicateur y vaut exactement 1, chaque ajout
  * exactement 0, et `pulsedPalette` rend la palette reçue elle-même : le rendu
@@ -54,16 +61,16 @@ export const PULSE = {
   beat: { downbeat: 0.5, floor: 0.3 },
   /** Les graves : rien en dessous de `from`, puis de 0 à 1 jusqu'à fond. Sans ce seuil, ce qu'ils mènent resterait allumé en continu. */
   bass: { from: 0.3 },
-  /** Fond : il monte vers la brume de cette part sur le temps (× coup) et avec les graves, sans jamais dépasser `max` ; et il se teinte de la couleur d'effet de `tint` sur le temps. */
-  background: { beat: 0.3, bass: 0.1, max: 0.4, tint: 0.12 },
+  /** Fond : il monte vers la brume de cette part sur le temps (× coup) et avec les graves, sans jamais dépasser `max` ; et il se teinte de la couleur d'effet, de `hold` tout le temps que la musique bat et de `tint` en plus sur le temps. */
+  background: { beat: 0.3, bass: 0.1, max: 0.4, tint: 0.12, hold: 0.2 },
   /** Crête de la brume : part de couleur d'effet prise sur le temps (× coup), puis part de blanc ajoutée. */
   fogEdge: { tint: 0.8, beat: 0.9 },
-  /** Nappe de la brume : opacité ajoutée avec les graves. */
-  fogSheet: { bass: 0.15 },
-  /** Dalle du toit de départ et plateformes : part de couleur d'effet prise sur le temps (× coup). */
-  roof: { beat: 0.35 },
-  /** Structures du décor (`city`) : part de la couleur d'effet mélangée aux traits avec les graves ; sur celles qui dansent, part de la couleur d'effet sur le temps (× coup) ; et sur le temps (× coup), de combien leurs traits s'épaississent et s'opacifient. */
-  city: { bass: 0.8, dance: 1, width: 0.8, alpha: 0.6 },
+  /** Nappe de la brume : opacité ajoutée avec les graves ; et sa couleur prend celle de l'effet, de `hold` tant que la musique bat et de `beat` en plus sur le temps (× coup) : la lumière colorée, qui change à chaque temps. */
+  fogSheet: { bass: 0.15, hold: 0.5, beat: 0.2 },
+  /** Dalle du toit de départ et plateformes : part de couleur d'effet prise tant que la musique bat (`hold`), et en plus sur le temps (× coup). */
+  roof: { beat: 0.35, hold: 0.2 },
+  /** Structures du décor (`city`) : part de la couleur d'effet mélangée aux traits tant que la musique bat (`hold`) et avec les graves ; sur celles qui dansent, part de la couleur d'effet sur le temps (× coup) ; et sur le temps (× coup), de combien leurs traits s'épaississent et s'opacifient. */
+  city: { hold: 0.3, bass: 0.6, dance: 1, width: 0.8, alpha: 0.6 },
   /** Halo des tubes ambiants : de combien la portée et l'intensité grandissent sur le temps (× coup). */
   halo: { spread: 0.8, strength: 1 },
   /** Halo des espèces de prises : intensité ajoutée sur le temps (× coup). Leurs couleurs ne bougent pas. */
@@ -152,29 +159,35 @@ export function effectColor(palette: Palette, pulse: Pulse): number {
 }
 
 /**
- * La palette dans laquelle le pouls la plonge : le fond monte vers la brume sur
- * le temps et avec les graves (jamais de plus de `PULSE.background.max`) et se
- * teinte de la couleur d'effet, la crête de brume prend la couleur d'effet et
- * s'éclaire sur le temps, la dalle du toit se teinte sur le temps, les structures
- * du décor se teintent vers la couleur d'effet avec les graves, et le halo ambiant est la
- * couleur d'effet. Le reste (lignes d'altitude, cœur du tube, accent) ne bouge
- * pas. Au silence, la palette reçue elle-même (`===`), si bien que le rendu la
- * reconnaît à son identité.
+ * La palette dans laquelle le pouls la plonge. Tant que la musique bat, la
+ * lumière est colorée : le fond, la nappe de brume, la dalle du toit et les
+ * structures du décor prennent une part (`hold`) de la couleur d'effet, qui
+ * change à chaque temps ; c'est ce que le propriétaire appelle « la lumière
+ * colorée qui change de couleur ». Par-dessus, sur le temps : le fond monte vers
+ * la brume (jamais de plus de `PULSE.background.max`) et se teinte davantage, la
+ * crête de brume prend la couleur d'effet et s'éclaire, la dalle et la nappe se
+ * teintent davantage ; avec les graves, les structures du décor se teintent
+ * davantage. Le halo ambiant est la couleur d'effet. Le reste (lignes
+ * d'altitude, cœur du tube, accent) ne bouge pas. Au silence, la palette reçue
+ * elle-même (`===`), si bien que le rendu la reconnaît à son identité.
  */
 export function pulsedPalette(palette: Palette, pulse: Pulse): Palette {
+  // La musique marque les temps : la lumière colorée est là, même au creux du temps. Avant le premier temps ou au silence, rien.
+  const beating = pulse.count >= 0 ? 1 : 0;
   const hit = punch(pulse);
   const bass = bassKick(pulse);
   const lift = Math.min(PULSE.background.max, PULSE.background.beat * hit + PULSE.background.bass * bass);
   const edge = Math.min(1, PULSE.fogEdge.beat * hit);
-  const tint = Math.min(1, PULSE.city.bass * bass);
+  const tint = Math.min(1, PULSE.city.hold * beating + PULSE.city.bass * bass);
   const effect = effectColor(palette, pulse);
-  if (lift === 0 && edge === 0 && tint === 0 && effect === palette.halo) return palette;
-  const background = mixColor(mixColor(palette.background, palette.fog, lift), effect, Math.min(1, PULSE.background.tint * hit));
+  if (beating === 0 && lift === 0 && edge === 0 && tint === 0 && effect === palette.halo) return palette;
+  const background = mixColor(mixColor(palette.background, palette.fog, lift), effect, Math.min(1, PULSE.background.hold * beating + PULSE.background.tint * hit));
   const crest = mixColor(palette.fogEdge, effect, Math.min(1, PULSE.fogEdge.tint * hit));
   return {
     ...palette,
     background,
-    roofFill: mixColor(palette.roofFill, effect, Math.min(1, PULSE.roof.beat * hit)),
+    roofFill: mixColor(palette.roofFill, effect, Math.min(1, PULSE.roof.hold * beating + PULSE.roof.beat * hit)),
+    fog: mixColor(palette.fog, effect, Math.min(1, PULSE.fogSheet.hold * beating + PULSE.fogSheet.beat * hit)),
     fogEdge: mixColor(crest, WHITE, edge),
     city: mixColor(palette.city, effect, tint),
     halo: effect,

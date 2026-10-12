@@ -46,9 +46,11 @@ export interface Palette {
   readonly accent: number;
   /**
    * Les trois couleurs d'effet du pouls (voir `render/pulse.ts`) : A sur le temps
-   * fort de la mesure, puis B, C, B. Franchement distinctes entre elles, et hors
-   * des couleurs d'espèce : ce sont des couleurs d'ambiance, qui changent à
-   * chaque temps de la musique.
+   * fort de la mesure, puis B, C, B. Trois teintes franchement différentes (à
+   * peu près un tiers de cercle entre elles, la première étant celle de la
+   * famille), car le propriétaire veut une lumière colorée « qui change de
+   * couleur » à chaque temps, pas trois bleus ; et toujours hors des couleurs
+   * d'espèce (un test le garde) : ce sont des couleurs d'ambiance.
    */
   readonly effectA: number;
   readonly effectB: number;
@@ -69,8 +71,8 @@ const CYAN_NIGHT: Palette = {
   fogEdge: 0x8c9cff,
   accent: 0x38e8ff,
   effectA: 0x22c8ff,
-  effectB: 0x5a7bff,
-  effectC: 0xd8fbff,
+  effectB: 0xeb7099,
+  effectC: 0xadeb70,
 };
 
 /** Une palette par famille de musique : cinq ambiances distinctes, et le menu qui reprend la première. */
@@ -90,8 +92,8 @@ export const PALETTES: Record<MusicFamily, Palette> = {
     fogEdge: 0xa89cff,
     accent: 0x9aa6ff,
     effectA: 0x7b8cff,
-    effectB: 0x3f6cff,
-    effectC: 0xd8dcff,
+    effectB: 0xf04c9e,
+    effectC: 0xc2eb70,
   },
   /** « Glace » : un halo blanc-bleu. */
   biome3: {
@@ -107,8 +109,8 @@ export const PALETTES: Record<MusicFamily, Palette> = {
     fogEdge: 0xa8d8ff,
     accent: 0xdff7ff,
     effectA: 0xb8f0ff,
-    effectB: 0x6ab8ff,
-    effectC: 0xf4fdff,
+    effectB: 0xeb7085,
+    effectC: 0xd670eb,
   },
   /** « Lime ». */
   biome4: {
@@ -124,8 +126,8 @@ export const PALETTES: Record<MusicFamily, Palette> = {
     fogEdge: 0xb8ff9c,
     accent: 0xd9ff7a,
     effectA: 0xc8ff5a,
-    effectB: 0x9cffb0,
-    effectC: 0xf4ffd0,
+    effectB: 0x4c9ef0,
+    effectC: 0xeb70ad,
   },
   /** « Braise » : un halo blanc chaud sur un fond rouge sombre. */
   boss: {
@@ -140,9 +142,9 @@ export const PALETTES: Record<MusicFamily, Palette> = {
     fog: 0x5a2a3a,
     fogEdge: 0xffb8c8,
     accent: 0xffe0b0,
-    effectA: 0xfff0c8,
-    effectB: 0xffa8c0,
-    effectC: 0xff8ca0,
+    effectA: 0xff8ca0,
+    effectB: 0x4c83f0,
+    effectC: 0xf4f425,
   },
   /** Le menu et les écrans hors partie reprennent l'ambiance d'origine. */
   menu: CYAN_NIGHT,

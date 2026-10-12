@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BEAT_DECAY, SILENT_PULSE, pulseAt, syntheticRhythm, type Pulse } from '../src/audio/rhythm';
 import type { MusicFamily } from '../src/data/musique';
 import { PULSE, PUNCH_MAX, ambientHalo, cityLots, cityStroke, effectColor, fogSheetAlpha, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow } from '../src/render/pulse';
+import { mixColor } from '../src/render/sling';
 import { COLOR, PALETTES, type Palette } from '../src/render/style';
 
 /** Les cinq ambiances ; le menu reprend la première. */
@@ -107,24 +108,27 @@ describe('bornes', () => {
           // Vers la brume d'au plus le plafond du chemin, puis vers la couleur d'effet d'au plus sa part (un cran d'arrondi près à chaque mélange).
           expect(now, `${family} canal ${index}`).toBeGreaterThanOrEqual(Math.min(from, to, effect[index]!));
           const towardFog = Math.abs(to - from) * PULSE.background.max + 0.5;
-          const towardEffect = Math.abs(effect[index]! - from) * PULSE.background.tint * PUNCH_MAX + 0.5;
+          const towardEffect = Math.abs(effect[index]! - from) * (PULSE.background.tint * PUNCH_MAX + PULSE.background.hold) + 0.5;
           expect(Math.abs(now - from), `${family} canal ${index}`).toBeLessThanOrEqual(towardFog + towardEffect);
         });
       }
     }
   });
 
-  it('ne touche que le fond, la crête de brume, la dalle du toit, la ville et le halo : tout le reste est celui de la palette', () => {
+  it('ne touche que le fond, la brume et sa crête, la dalle du toit, la ville et le halo : tout le reste est celui de la palette', () => {
     for (const family of FAMILIES) {
       const palette = PALETTES[family];
       for (const sample of grid()) {
         const lit = pulsedPalette(palette, sample);
         expect(Object.keys(lit).sort()).toEqual([...FIELDS].sort());
-        for (const field of ['altitudeLine', 'altitudeLabel', 'tube', 'pale', 'fog', 'accent', 'effectA', 'effectB', 'effectC'] as const) expect(lit[field], `${family}.${field}`).toBe(palette[field]);
-        // La dalle du toit ne va vers la couleur d'effet que de sa part, sur le temps.
+        for (const field of ['altitudeLine', 'altitudeLabel', 'tube', 'pale', 'accent', 'effectA', 'effectB', 'effectC'] as const) expect(lit[field], `${family}.${field}`).toBe(palette[field]);
+        // La dalle du toit et la nappe de brume ne vont vers la couleur d'effet que de leur part tenue, plus leur part sur le temps.
         const effect = channels(effectColor(palette, sample));
         channels(palette.roofFill).forEach((from, index) => {
-          expect(Math.abs(channels(lit.roofFill)[index]! - from), `${family} dalle canal ${index}`).toBeLessThanOrEqual(Math.abs(effect[index]! - from) * PULSE.roof.beat * PUNCH_MAX + 0.5);
+          expect(Math.abs(channels(lit.roofFill)[index]! - from), `${family} dalle canal ${index}`).toBeLessThanOrEqual(Math.abs(effect[index]! - from) * (PULSE.roof.beat * PUNCH_MAX + PULSE.roof.hold) + 0.5);
+        });
+        channels(palette.fog).forEach((from, index) => {
+          expect(Math.abs(channels(lit.fog)[index]! - from), `${family} brume canal ${index}`).toBeLessThanOrEqual(Math.abs(effect[index]! - from) * (PULSE.fogSheet.beat * PUNCH_MAX + PULSE.fogSheet.hold) + 0.5);
         });
       }
     }
@@ -342,17 +346,37 @@ describe('le pouls dans la palette', () => {
     expect(sum(onBeat.background)).toBeGreaterThan(sum(palette.background));
     expect(sum(onBeat.fogEdge)).toBeGreaterThan(sum(palette.fogEdge));
     expect(sum(onBeat.background)).toBeGreaterThan(sum(trough.background));
-    expect(gap(trough.background, palette.background)).toBeLessThanOrEqual(2);
+    // Au creux, il ne reste que la part tenue de la couleur d'effet : la lumière colorée, sans le coup.
+    expect(gap(trough.background, mixColor(palette.background, effectColor(palette, beatAt(1.49)), PULSE.background.hold))).toBeLessThanOrEqual(2);
+    expect(gap(trough.fog, mixColor(palette.fog, effectColor(palette, beatAt(1.49)), PULSE.fogSheet.hold))).toBeLessThanOrEqual(2);
     expect(onBeat.halo).toBe(effectColor(palette, beatAt(1)));
+  });
+
+  it('la lumière est colorée et change de couleur à chaque temps : fond, brume, dalle, ville et halo diffèrent d\'un temps au suivant', () => {
+    for (const family of FAMILIES) {
+      const palette = PALETTES[family];
+      // Le même instant dans trois temps de suite (A, B, C), le coup retombé : seule la couleur tenue distingue les temps.
+      const at = (inBar: number): Palette => pulsedPalette(palette, pulse({ beat: 0.05, strength: 1, count: 4 + inBar, inBar, bars: 1, bpm: 120 }));
+      const [a, b, c] = [at(0), at(1), at(2)];
+      for (const [first, second] of [[a, b], [b, c], [a, c]] as const) {
+        expect(gap(first.halo, second.halo), family).toBeGreaterThan(40);
+        expect(gap(first.fog, second.fog), family).toBeGreaterThan(12);
+        expect(gap(first.background, second.background), family).toBeGreaterThan(6);
+        expect(gap(first.roofFill, second.roofFill), family).toBeGreaterThan(6);
+        expect(gap(first.city, second.city), family).toBeGreaterThan(10);
+      }
+      // Avant le premier temps, rien de tenu : la palette elle-même.
+      expect(pulsedPalette(palette, pulse({ beat: 0, strength: 1, count: -1, bpm: 120 }))).toBe(palette);
+    }
   });
 
   it('les graves teintent la ville même hors du temps', () => {
     const palette = PALETTES.biome4;
     const quiet = pulsedPalette(palette, pulse({ count: 4, inBar: 0, bpm: 120 }));
     const bassy = pulsedPalette(palette, pulse({ count: 4, inBar: 0, bass: 0.8, bpm: 120 }));
-    expect(quiet).toBe(palette);
-    expect(gap(bassy.city, palette.city)).toBeGreaterThan(0);
-    expect(gap(bassy.city, palette.halo)).toBeLessThan(gap(palette.city, palette.halo));
+    // La musique bat : la ville garde sa part tenue de couleur d'effet (ici A, le halo de la famille) ; les graves l'en rapprochent encore.
+    expect(gap(quiet.city, palette.city)).toBeGreaterThan(0);
+    expect(gap(bassy.city, palette.halo)).toBeLessThan(gap(quiet.city, palette.halo));
   });
 
   it('ne touche jamais les couleurs du langage du jeu, ni ne produit l\'une d\'elles', () => {
