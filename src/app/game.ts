@@ -891,11 +891,17 @@ export class Game {
     if (level) {
       this.run.result = { won: cause === null, pickupsTaken: stats.requiredPickups, pickupsTotal: sim.state.course.pickupsTotal, perfectStreak: stats.perfectStreak };
       outcome = endLevel(this.profile, level, stats, sim.state.score, this.run.result);
+    } else if (sim.state.course.plan.kind === 'atelier') {
+      // Une partie d'atelier ne compte pas : ni record, ni mission, ni expérience. L'écran de fin montre le bilan, rien ne s'y ajoute.
+      const plain = endRun(this.profile, stats, sim.state.score);
+      outcome = { ...plain, profile: this.profile, xpGained: 0, missionsCompleted: [], levelAfter: plain.levelBefore, unlocked: [], newBestHeight: false };
     } else {
       outcome = endRun(this.profile, stats, sim.state.score);
     }
-    this.profile = outcome.profile;
-    saveProfile(this.storage, this.profile);
+    if (outcome.profile !== this.profile) {
+      this.profile = outcome.profile;
+      saveProfile(this.storage, this.profile);
+    }
     this.run.outcome = outcome;
     this.run.deathCause = cause;
     this.screen = cause === null ? 'won' : 'dead';

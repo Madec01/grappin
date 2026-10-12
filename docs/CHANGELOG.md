@@ -2,6 +2,16 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.13.1] — 2026-10-12 — L'atelier dans le jeu principal
+
+Retour du propriétaire : « mets-le dans le jeu principal ! Arrête de faire des versions en plus ». L'atelier ne demande plus le mode test.
+
+### Modifié
+
+- **Le bouton « Atelier : choisis ce que tu affrontes » est sur le titre du jeu principal**, sous les trois accès, pour tout le monde et dans l'application installée. Le choix se garde dans le profil ordinaire.
+- **Une partie d'atelier ne compte pas** : ni record de hauteur ou de score, ni mission, ni expérience ; l'écran de l'atelier le dit. L'écran de fin montre le bilan de la partie, sans rien y ajouter.
+- `?test=1` reste ce qu'il était : tous les niveaux ouverts, un profil à part. Il ne sert plus à ouvrir l'atelier.
+
 ## [0.13.0] — 2026-10-12 — Fin du lot 2 : la roue, le tournant, la glissière ; et l'atelier
 
 Demande du propriétaire : « finis le lot 2 », et « un vrai mode test dans le jeu où je peux choisir à quelles prises ou autres éléments je veux être confronté ».

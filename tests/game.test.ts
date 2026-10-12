@@ -2151,6 +2151,23 @@ describe('sons et départ', () => {
     expect(direct.game.debugState().atelier).toEqual(['roue']);
   });
 
+  it('une partie d\'atelier ne compte pas : à sa fin, ni expérience, ni mission, ni record, ni partie de plus au profil', () => {
+    const { game, storage } = makeGame('?graine=3&fogBaseSpeed=6', clearedProfile(2));
+    const before = game.currentProfile();
+    game.playAtelier(['porte', 'tournant']);
+    game.frame(0.016);
+    expect(game.debugState()).toMatchObject({ screen: 'playing', atelier: ['porte', 'tournant'] });
+    game.press();
+    game.release();
+    for (let frames = 0; frames < 400 && game.debugState().screen !== 'dead'; frames += 1) game.frame(0.05);
+    expect(game.debugState().screen).toBe('dead');
+    // Seuls les conseils du tutoriel, notés pendant la partie, peuvent avoir changé : ce n'est pas un gain de partie.
+    const after = game.currentProfile();
+    expect({ ...after, tips: [] }).toEqual({ ...before, tips: [] });
+    expect({ ...loadSavedProfile(storage), tips: [] }).toEqual({ ...before, tips: [] });
+    expect(game.debugState()).toMatchObject({ xp: before.xp, xpGained: 0 });
+  });
+
   it('le départ de la course libre se bascule entre avancé et du sol, et se garde', () => {
     const { game, seen, storage } = makeGame('', clearedProfile(2));
     game.frame(0.016);

@@ -530,8 +530,10 @@ function buildTitle(profile: Profile, width: number, testMode: boolean, install:
     lower.line(HINT, 16, COLOR.textDim);
   }
   lower.gap(BUTTON_GAP);
-  // En mode test, l'atelier : choisir ce que l'on veut affronter.
-  lower.buttonRow(weighted(testMode ? [['levels', 'Niveaux'], ['free', 'Course libre'], ['talismans', 'Talismans'], ['atelier', 'Atelier']] : [['levels', 'Niveaux'], ['free', 'Course libre'], ['talismans', 'Talismans']]), 'access');
+  lower.buttonRow(weighted([['levels', 'Niveaux'], ['free', 'Course libre'], ['talismans', 'Talismans']]), 'access');
+  // L'atelier, dans le jeu principal (décision du propriétaire : « mets-le dans le jeu principal, arrête de faire des versions en plus ») : choisir ce que l'on veut affronter.
+  lower.gap(10);
+  lower.button('atelier', 'Atelier : choisis ce que tu affrontes', 'quiet');
   // L'installation sur l'écran d'accueil : le bouton quand le navigateur sait installer en un geste, le rappel du chemin sur iPhone, rien sinon.
   if (install === 'prompt') {
     lower.gap(14);
@@ -556,6 +558,8 @@ function buildAtelier(selection: readonly AtelierId[], width: number): Layout {
   upper.line('Atelier', 28, COLOR.text, true);
   upper.gap(6);
   upper.line('Choisis ce que tu veux affronter : la course n\'engendre que cela.', 14, COLOR.textDim);
+  upper.gap(4);
+  upper.line('Une partie d\'atelier ne compte pas : ni record, ni mission, ni expérience.', 13, COLOR.textFaint);
   for (const group of ATELIER_GROUPS) {
     upper.gap(10);
     upper.line(group.label, 14, COLOR.textFaint, true);

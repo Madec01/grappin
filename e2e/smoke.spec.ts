@@ -708,7 +708,7 @@ test('les boutons répondent au toucher : Talismans, une ligne, Retour, puis un 
 
   await tapButton(page, 'back');
   await expect.poll(async () => (await state(page)).screen).toBe('title');
-  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual(['continue', 'levels', 'free', 'talismans', 'music', 'sfx', 'start']);
+  await expect.poll(async () => (await buttons(page)).map((button) => button.id)).toEqual(['continue', 'levels', 'free', 'talismans', 'atelier', 'music', 'sfx', 'start']);
 
   await page.touchscreen.tap(CENTER.x, CENTER.y);
   await expect.poll(async () => (await state(page)).screen).toBe('playing');
@@ -754,9 +754,9 @@ test('titre : Sons et Départ se basculent et survivent au rechargement', async 
   expect(errors).toEqual([]);
 });
 
-test('atelier : en mode test, on coche des éléments, le choix se garde, et la partie n\'engendre que ces éléments', async ({ page }) => {
+test('atelier : depuis le titre du jeu principal, on coche des éléments, le choix se garde, et la partie n\'engendre que ces éléments', async ({ page }) => {
   const errors = watchErrors(page);
-  await open(page, '/?test=1&graine=3');
+  await open(page, '/?graine=3');
   await page.evaluate(() => window.__grappin!.resetProfile());
   expect((await buttons(page)).some((button) => button.id === 'atelier')).toBe(true);
   await tapButton(page, 'atelier');
