@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { defineConfig } from 'vite';
 import { serviceWorker } from './scripts/pwa.ts';
 
@@ -19,7 +19,8 @@ export default defineConfig({
     serviceWorker({
       entry: 'src/sw/sw.ts',
       version: pkg.version,
-      extras: ['manifest.webmanifest', 'icones/icone.svg', 'icones/icone-192.png', 'icones/icone-512.png', 'icones/icone-maskable-512.png', 'icones/icone-180.png'],
+      // Les bruitages (`public/sons/`) font partie de la coquille : ils jouent hors-ligne.
+      extras: ['manifest.webmanifest', 'icones/icone.svg', 'icones/icone-192.png', 'icones/icone-512.png', 'icones/icone-maskable-512.png', 'icones/icone-180.png', ...readdirSync('public/sons').filter((name) => name.endsWith('.mp3')).sort().map((name) => `sons/${name}`)],
     }),
   ],
   define: {

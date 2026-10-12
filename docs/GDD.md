@@ -162,7 +162,7 @@ Répartition dans les niveaux : pluie au 3, panne au 4, bascule au 5, vent au 6,
 - **Pause et reprise [livrées en 0.9.0].** Un bouton de pause pendant la partie, et la pause automatique quand l'application passe en arrière-plan ou que le système annule le geste. « Reprendre » ne lâche jamais une corde tenue ni ne déclenche un tir : le joueur reprend la corde en main en appuyant de nouveau.
 
 
-**Musique.** Décision du propriétaire du 10 octobre 2026 : ses propres pistes (dépôt Way), une par niveau, en boucle ; la piste du menu sur le titre ; la course libre prend celle du niveau qui couvre sa hauteur. Un réglage « Musique » la coupe. Les bruitages viennent plus tard. Depuis la 0.8.0, la musique se voit : l'ambiance et les éléments du jeu pulsent sur ses temps (voir la section 2).
+**Musique.** Décision du propriétaire du 10 octobre 2026 : ses propres pistes (dépôt Way), une par niveau, en boucle ; la piste du menu sur le titre ; la course libre prend celle du niveau qui couvre sa hauteur. Un réglage « Musique » la coupe. Les bruitages (0.9.x) sont, depuis la 0.12.5, des échantillons libres (Kenney, CC0) plutôt que des sons de synthèse, que le propriétaire a refusés : « je n'aime pas les sons générés par oscillateur ». Depuis la 0.8.0, la musique se voit : l'ambiance et les éléments du jeu pulsent sur ses temps (voir la section 2).
 ## 13. Options tranchées le 9 octobre 2026 [VALIDÉ]
 
 | Option | Décision |

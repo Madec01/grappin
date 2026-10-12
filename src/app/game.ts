@@ -325,8 +325,8 @@ export class Game {
    * des talismans, seuls les boutons agissent.
    */
   press(x?: number, y?: number): void {
-    // Le premier geste du joueur : le navigateur permet enfin le son.
-    this.music.unlock();
+    // Le premier geste du joueur : le navigateur permet enfin le son ; et chaque geste relance une musique restée muette (B-014).
+    this.music.nudge();
     this.sfx.unlock();
     this.finger = x === undefined || y === undefined ? null : { from: { x, y }, at: { x, y } };
     if (this.screen === 'playing') {

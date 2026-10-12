@@ -9,9 +9,15 @@ import { type TrackId, trackFile } from '../data/musique';
  * jeu, pas ici.
  */
 
-/** Ce qu'il faut du navigateur : de quoi fabriquer un lecteur. Injecté, pour les tests. */
+/**
+ * Ce qu'il faut du navigateur : de quoi fabriquer un lecteur. Injecté, pour
+ * les tests. `unlock`, facultatif, est appelé dans le premier geste du joueur :
+ * de quoi permettre aux lecteurs de jouer plus tard hors d'un geste (voir
+ * `browserAudio`).
+ */
 export interface AudioFactory {
   (src: string): AudioPlayer;
+  readonly unlock?: () => void;
 }
 
 export interface AudioPlayer {
@@ -30,10 +36,39 @@ export interface AudioPlayer {
 export const FADE_SECONDS = 0.6;
 export const MUSIC_VOLUME = 0.55;
 
+/** Lecteurs tenus prêts et bénis au premier geste : une piste qui joue, une qui s'éteint en fondu, une de réserve. */
+const PLAYER_POOL = 3;
+/** Un fichier WAV vide (quelques octets) : de quoi « jouer » un lecteur dans le geste sans rien faire entendre. */
+const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+
+/**
+ * Les lecteurs du navigateur. Safari, sur iPhone, n'accepte `play()` que dans
+ * un geste du joueur, sauf sur un élément audio qui a déjà joué dans un geste :
+ * celui-là peut ensuite changer de piste et rejouer n'importe quand. Le jeu
+ * change de piste hors de tout geste (le titre lance un niveau, la course
+ * libre monte d'un biome) : avant la 0.12.5, la piste du niveau restait muette
+ * jusqu'à ce qu'un geste la relance, la pause par exemple (B-014). D'où une
+ * petite réserve d'éléments, tous « joués » sur un silence dans le premier
+ * geste (`unlock`), puis réutilisés piste après piste.
+ */
 export function browserAudio(base: string): AudioFactory {
-  return (src) => {
-    const element = new Audio(base + src);
+  const pool: HTMLAudioElement[] = [];
+  const busy = new Set<HTMLAudioElement>();
+  const create = (): HTMLAudioElement => {
+    const element = new Audio();
     element.preload = 'auto';
+    pool.push(element);
+    return element;
+  };
+  /** Un lecteur libre de la réserve, ou un neuf. */
+  const spare = (): HTMLAudioElement => pool.find((element) => !busy.has(element)) ?? create();
+  const factory = ((src: string): AudioPlayer => {
+    const element = spare();
+    busy.add(element);
+    element.loop = false;
+    element.volume = 1;
+    element.src = base + src;
+    element.load();
     return {
       get loop() {
         return element.loop;
@@ -59,9 +94,21 @@ export function browserAudio(base: string): AudioFactory {
         element.pause();
         element.removeAttribute('src');
         element.load();
+        busy.delete(element);
       },
     };
+  }) as AudioFactory & { unlock: () => void };
+  factory.unlock = () => {
+    while (pool.length < PLAYER_POOL) create();
+    for (const element of pool) {
+      if (busy.has(element)) continue;
+      element.src = SILENT_WAV;
+      const started = element.play();
+      // Joué dans le geste, l'élément est béni ; on le rend aussitôt au repos, prêt pour une vraie piste.
+      if (started) started.then(() => element.pause()).catch(() => undefined);
+    }
   };
+  return factory;
 }
 
 /** Un lecteur muet : les tests, et le jeu quand aucun son n'est branché. */
@@ -82,11 +129,23 @@ export class Music {
     this.factory = factory;
   }
 
-  /** Le premier geste du joueur : à partir de là, le son est permis. */
+  /** Le premier geste du joueur : à partir de là, le son est permis ; les lecteurs du navigateur sont bénis dans ce geste. */
   unlock(): void {
     if (this.unlocked) return;
     this.unlocked = true;
+    this.factory.unlock?.();
     this.apply();
+  }
+
+  /**
+   * Un geste du joueur, n'importe lequel : si la piste voulue est là sans jouer
+   * (le navigateur a refusé un `play()` hors geste), on la relance dans ce
+   * geste. Un filet sous `browserAudio` : au pire, la musique part au premier
+   * appui qui suit, pas à la première pause.
+   */
+  nudge(): void {
+    this.unlock();
+    if (this.current?.player.paused) void this.current.player.play();
   }
 
   /** La piste à jouer en ce moment, ou null pour le silence. Sans effet tant que le son n'est pas permis. */

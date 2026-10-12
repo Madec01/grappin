@@ -2,6 +2,18 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.12.5] — 2026-10-12 — La musique part au premier geste, des vrais bruitages
+
+Deux retours du propriétaire : « la musique ne se lance pas systématiquement tant qu'on ne fait pas pause une première fois », et « les sons sont horribles, je n'aime pas les sons générés par oscillateur ».
+
+### Corrigé
+
+- **La musique restait muette jusqu'à la première pause (B-014).** Safari, sur iPhone, n'accepte de jouer un son que dans un geste du joueur, sauf sur un élément audio qui a déjà joué dans un geste. Le jeu changeait de piste hors de tout geste (le titre lance un niveau, la course libre monte d'un biome) sur un élément neuf : refusé, en silence. La pause, elle, relançait la piste dans un geste. Désormais une petite réserve de lecteurs est « jouée » sur un silence dans le premier geste, puis réutilisée piste après piste ; et chaque appui relance une piste voulue qui ne jouerait pas (`Music.nudge`) : au pire, la musique part au premier appui qui suit, jamais plus tard.
+
+### Modifié
+
+- **Les bruitages sont des échantillons**, plus des recettes de synthèse : dix-sept sons courts (`public/sons/`, MP3 mono, 132 Ko en tout), tirés des packs de Kenney (www.kenney.nl, domaine public, CC0), coupés et normalisés : clic métallique à l'accroche, souffle d'étoffe au lâcher, pincement au parfait (toujours un demi-ton plus haut par parfait d'affilée), poussée au lancer et à la propulsion, tintement de verre à l'étoile, tic au frôlé, coup au choc, champ de force au rebond, verre brisé au fracas, cloche à l'anneau (une quinte plus haut au centre), grésillement à la décharge, craquement à la casse, grondement dans la brume, descente à la chute, confirmation à l'arrivée, montée au palier. Joués par Web Audio avec leur hauteur et leur volume, chargés au démarrage sans bloquer, gardés hors-ligne avec la coquille. Chaque son se remplace en changeant un fichier (`SAMPLES`, audio/sfx.ts).
+
 ## [0.12.4] — 2026-10-12 — Le titre propose d'installer le jeu
 
 Retour du propriétaire : « le jeu ne me propose toujours pas de l'installer ». Le jeu est installable depuis la 0.7.0, mais aucun navigateur ne le propose de lui-même de façon sûre : Chrome, sur Android, n'offre l'installation qu'après un temps d'usage, par une petite barre qu'on ferme sans la voir ; Safari, sur iPhone et iPad, ne la propose jamais, il faut passer par le menu Partager.

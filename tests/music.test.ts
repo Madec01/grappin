@@ -1,12 +1,12 @@
-import { describe, expect, it } from 'vitest';
-import { FADE_SECONDS, MUSIC_VOLUME, Music, type AudioPlayer } from '../src/audio/music';
+import { describe, expect, it, vi } from 'vitest';
+import { FADE_SECONDS, MUSIC_VOLUME, Music, browserAudio, type AudioFactory, type AudioPlayer } from '../src/audio/music';
 import { LEVELS } from '../src/data/levels';
 import { TITLE_TRACK, levelTrack, trackFamily, trackFile, type MusicFamily, type TrackId } from '../src/data/musique';
 
-/** Un faux lecteur qui note ce qu'on lui fait. */
-function fakeFactory(): { factory: (src: string) => AudioPlayer; players: (AudioPlayer & { src: string; played: number; released: boolean })[] } {
+/** Un faux lecteur qui note ce qu'on lui fait ; `refuse` imite Safari, qui refuse de jouer hors d'un geste. */
+function fakeFactory(refuse = false): { factory: AudioFactory & { unlocked: number }; players: (AudioPlayer & { src: string; played: number; released: boolean })[] } {
   const players: (AudioPlayer & { src: string; played: number; released: boolean })[] = [];
-  const factory = (src: string): AudioPlayer => {
+  const factory = ((src: string): AudioPlayer => {
     const player = {
       src,
       loop: false,
@@ -16,8 +16,8 @@ function fakeFactory(): { factory: (src: string) => AudioPlayer; players: (Audio
       played: 0,
       released: false,
       play() {
-        this.paused = false;
         this.played += 1;
+        if (!refuse || this.played > 1) this.paused = false;
       },
       pause() {
         this.paused = true;
@@ -29,7 +29,13 @@ function fakeFactory(): { factory: (src: string) => AudioPlayer; players: (Audio
     };
     players.push(player);
     return player;
-  };
+  }) as AudioFactory & { unlocked: number };
+  factory.unlocked = 0;
+  Object.assign(factory, {
+    unlock: () => {
+      factory.unlocked += 1;
+    },
+  });
   return { factory, players };
 }
 
@@ -100,6 +106,95 @@ describe('musiques', () => {
     music.update(FADE_SECONDS);
     expect(players[0]!.released).toBe(true);
     expect(players[1]!.paused).toBe(false);
+  });
+
+  it('le premier geste bénit les lecteurs du navigateur, une fois ; un appui relance une piste que le navigateur a refusée hors geste (B-014)', () => {
+    const { factory, players } = fakeFactory(true);
+    const music = new Music(factory);
+    music.play('menu');
+    expect(factory.unlocked).toBe(0);
+    music.nudge();
+    expect(factory.unlocked).toBe(1);
+    // Le titre a joué dans le geste ; le niveau, demandé hors geste, est refusé : il reste en pause.
+    expect(players[0]!.paused).toBe(false);
+    music.play('biome1-1');
+    expect(players[1]).toMatchObject({ src: 'musique/biome1-1.mp3', played: 1, paused: true });
+    // L'appui suivant la relance dans le geste, sans rebénir les lecteurs ni créer de lecteur.
+    music.nudge();
+    expect(factory.unlocked).toBe(1);
+    expect(players).toHaveLength(2);
+    expect(players[1]).toMatchObject({ played: 2, paused: false });
+    // Une piste qui joue déjà n'est pas relancée.
+    music.nudge();
+    expect(players[1]!.played).toBe(2);
+    // Une fabrique sans `unlock` (les tests, un navigateur sans rien à bénir) va aussi.
+    const plain = new Music((src) => fakeFactory().factory(src));
+    plain.play('menu');
+    plain.nudge();
+    expect(plain.playing).toBe('menu');
+  });
+
+  it('les lecteurs du navigateur : une réserve de trois, bénis sur un silence dans le premier geste, réutilisés piste après piste', async () => {
+    const elements: FakeAudio[] = [];
+    class FakeAudio {
+      src = '';
+      preload = '';
+      loop = false;
+      volume = 1;
+      paused = true;
+      currentTime = 0;
+      readonly played: string[] = [];
+      constructor() {
+        elements.push(this);
+      }
+      play(): Promise<void> {
+        this.played.push(this.src);
+        this.paused = false;
+        return Promise.resolve();
+      }
+      pause(): void {
+        this.paused = true;
+      }
+      load(): void {
+        this.currentTime = 0;
+      }
+      removeAttribute(): void {
+        this.src = '';
+      }
+    }
+    vi.stubGlobal('Audio', FakeAudio);
+    try {
+      const factory = browserAudio('/jeu/');
+      expect(elements).toHaveLength(0);
+      // Le premier geste : trois éléments, tous joués sur le silence, puis rendus au repos.
+      factory.unlock!();
+      expect(elements).toHaveLength(3);
+      for (const element of elements) expect(element.played).toEqual([expect.stringMatching(/^data:audio\/wav/)]);
+      await Promise.resolve();
+      expect(elements.every((element) => element.paused)).toBe(true);
+      // Un second geste n'en crée pas d'autres.
+      factory.unlock!();
+      expect(elements).toHaveLength(3);
+      // Les pistes prennent les éléments de la réserve, et les rendent à l'arrêt ; une quatrième piste à la fois en crée un.
+      const a = factory('musique/menu.mp3');
+      const b = factory('musique/biome1-1.mp3');
+      expect(elements[0]!.src).toBe('/jeu/musique/menu.mp3');
+      expect(elements[1]!.src).toBe('/jeu/musique/biome1-1.mp3');
+      a.release();
+      expect(elements[0]!.src).toBe('');
+      const c = factory('musique/boss1.mp3');
+      expect(elements[0]!.src).toBe('/jeu/musique/boss1.mp3');
+      const d = factory('musique/biome2-1.mp3');
+      expect(elements[2]!.src).toBe('/jeu/musique/biome2-1.mp3');
+      factory('musique/biome3-1.mp3');
+      expect(elements).toHaveLength(4);
+      void b.play();
+      expect(elements[1]!.played.at(-1)).toBe('/jeu/musique/biome1-1.mp3');
+      c.release();
+      d.release();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('couper la musique arrête la piste en fondu et la remettre la rejoue ; le silence demandé est respecté', () => {
