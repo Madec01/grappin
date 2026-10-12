@@ -1,3 +1,4 @@
+import type { InstallState, Installer } from '../src/app/install';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_PULSE_BPM, Game, PALETTE_FADE_SECONDS, readSettings, visibleExtent } from '../src/app/game';
 import { Music, type AudioPlayer } from '../src/audio/music';
@@ -49,6 +50,7 @@ interface Seen {
   /** L'ambiance que la dernière image a reçue. */
   lastPalette: Palette | null;
   lastPulse: Pulse | null;
+  lastInstall: InstallState;
 }
 
 /** Profil d'un joueur déjà avancé : de l'expérience et des talismans équipés. */
@@ -57,7 +59,7 @@ function profileWith(xp: number, equipped: TalismanId[] = []): Profile {
 }
 
 /** Jeu relié à un faux rendu qui note ce qu'on lui demande de dessiner, et à un stockage mémoire, vide ou garni d'un profil. */
-function makeGame(search = '', saved?: Profile, music?: Music, rhythms?: RhythmSource, sfx?: SoundPlayer): { game: Game; seen: Seen; storage: ProfileStorage } {
+function makeGame(search = '', saved?: Profile, music?: Music, rhythms?: RhythmSource, sfx?: SoundPlayer, installer?: Installer): { game: Game; seen: Seen; storage: ProfileStorage } {
   const seen: Seen = {
     screens: [],
     lastCause: null,
@@ -79,6 +81,7 @@ function makeGame(search = '', saved?: Profile, music?: Music, rhythms?: RhythmS
     lastLevelsPage: 0,
     lastPalette: null,
     lastPulse: null,
+    lastInstall: null,
   };
   const view = {
     width: 390,
@@ -98,6 +101,7 @@ function makeGame(search = '', saved?: Profile, music?: Music, rhythms?: RhythmS
       seen.lastLevelsPage = frame.levelsPage;
       seen.lastPalette = frame.palette;
       seen.lastPulse = frame.pulse;
+      seen.lastInstall = frame.install;
       seen.lastProfile = frame.profile;
       seen.lastOutcome = frame.outcome;
       seen.lastResult = frame.result;
@@ -108,7 +112,7 @@ function makeGame(search = '', saved?: Profile, music?: Music, rhythms?: RhythmS
   };
   const storage = memoryStorage();
   if (saved) saveProfile(storage, saved);
-  return { game: new Game(view, readSettings(search), storage, music, rhythms, sfx), seen, storage };
+  return { game: new Game(view, readSettings(search), storage, music, rhythms, sfx, installer), seen, storage };
 }
 
 /** Comme `makeGame`, mais la course libre est déjà lancée, sans appui d'accroche : l'URL (brume, hauteur des paliers, graine) y règne, ce qu'un niveau ne permet pas. */
@@ -324,7 +328,7 @@ describe('jeu', () => {
         'fogFactor',
         'fogY',
         'freeRunStartY',
-        'freeStart',
+        'freeStart', 'install',
         'goal',
         'gravityX',
         'gravityY',
@@ -2063,6 +2067,37 @@ describe('sons et départ', () => {
     expect(game.debugState().sfxOn).toBe(false);
     expect(rec.enabled.at(-1)).toBe(false);
     expect(loadSavedProfile(storage).sfx).toBe(false);
+  });
+
+  it('le titre propose d\'installer le jeu quand le navigateur le peut, l\'appui lance l\'invite, et le bouton s\'efface ensuite', () => {
+    let invited = 0;
+    let state: InstallState = 'prompt';
+    const installer: Installer = {
+      state: () => state,
+      prompt: () => {
+        invited += 1;
+        state = null;
+        return Promise.resolve();
+      },
+    };
+    const { game, seen } = makeGame('', undefined, undefined, undefined, undefined, installer);
+    game.frame(0.016);
+    expect(seen.lastInstall).toBe('prompt');
+    expect(game.debugState().install).toBe('prompt');
+    seen.hit = () => 'install';
+    game.press(1, 1);
+    game.frame(0.016);
+    expect(invited).toBe(1);
+    expect(game.debugState()).toMatchObject({ screen: 'title', install: null });
+    expect(seen.lastInstall).toBeNull();
+    // Sur iPhone, le titre porte le rappel ; sans installateur, rien.
+    state = 'ios';
+    game.frame(0.016);
+    expect(seen.lastInstall).toBe('ios');
+    const plain = makeGame();
+    plain.game.frame(0.016);
+    expect(plain.seen.lastInstall).toBeNull();
+    expect(plain.game.debugState().install).toBeNull();
   });
 
   it('le départ de la course libre se bascule entre avancé et du sol, et se garde', () => {

@@ -3,6 +3,7 @@ import { LEVELS, levelById, type LevelDef } from '../data/levels';
 import { levelFor, levelProgress } from '../meta/levels';
 import { missionById, type MissionDef } from '../meta/missions';
 import { showsHint, type LevelOutcome, type Profile, type RunOutcome } from '../meta/profile';
+import type { InstallState } from '../app/install';
 import { TALISMANS, slotsFor, type Talisman } from '../meta/talismans';
 import { starsOf, unlockedLevel, type LevelResult } from '../meta/traversee';
 import { levelButton, levelPageCount, levelsOfPage, type ButtonId, type ButtonRect } from './buttons';
@@ -37,7 +38,8 @@ const TEST_MODE_LINE = 'Mode test · tous les niveaux ouverts';
 
 export type OverlayView =
   | { readonly kind: 'none' }
-  | { readonly kind: 'title'; readonly profile: Profile; readonly testMode: boolean }
+  /** `install` : ce que le titre dit de l'installation sur l'écran d'accueil (voir app/install.ts). */
+  | { readonly kind: 'title'; readonly profile: Profile; readonly testMode: boolean; readonly install: InstallState }
   /** `page` : la page montrée de la liste des niveaux (dix par page), à partir de 0. */
   | { readonly kind: 'levels'; readonly profile: Profile; readonly testMode: boolean; readonly page: number }
   | {
@@ -55,6 +57,9 @@ export type OverlayView =
   | { readonly kind: 'paused' };
 
 /** Marges et mise en page, en pixels CSS. */
+/** Sur iPhone et iPad, pas d'invite : le chemin par le menu Partager, en une ligne sous les accès du titre. */
+export const IOS_INSTALL_HINT = 'Pour installer : Partager, puis « Sur l\'écran d\'accueil »';
+
 const SIDE_MARGIN = 20;
 const EDGE_MARGIN = 32;
 const SAFE_GAP = 16;
@@ -478,7 +483,7 @@ interface Layout {
   readonly align: 'center' | 'top';
 }
 
-function buildTitle(profile: Profile, width: number, testMode: boolean): Layout {
+function buildTitle(profile: Profile, width: number, testMode: boolean, install: InstallState): Layout {
   const upper = new Column(width);
   const progress = levelProgress(profile.xp);
   upper.line('GRAPPIN', 56, COLOR.text, true, 'accent');
@@ -523,6 +528,14 @@ function buildTitle(profile: Profile, width: number, testMode: boolean): Layout 
   }
   lower.gap(BUTTON_GAP);
   lower.buttonRow(weighted([['levels', 'Niveaux'], ['free', 'Course libre'], ['talismans', 'Talismans']]), 'access');
+  // L'installation sur l'écran d'accueil : le bouton quand le navigateur sait installer en un geste, le rappel du chemin sur iPhone, rien sinon.
+  if (install === 'prompt') {
+    lower.gap(14);
+    lower.button('install', 'Installer le jeu', 'quiet');
+  } else if (install === 'ios') {
+    lower.gap(12);
+    lower.line(IOS_INSTALL_HINT, 14, COLOR.textDim);
+  }
   lower.gap(18);
   lower.buttonRow(weighted([['music', musicLabel(profile.music)], ['sfx', sfxLabel(profile.sfx)], ['start', startLabel(profile.freeStart)]], 2), 'quiet', SETTINGS_GAP);
   return { upper, lower, align: 'center' };
@@ -678,7 +691,7 @@ function buildPaused(width: number): Layout {
 function buildLayout(view: Exclude<OverlayView, { kind: 'none' }>, width: number): Layout {
   switch (view.kind) {
     case 'title':
-      return buildTitle(view.profile, width, view.testMode);
+      return buildTitle(view.profile, width, view.testMode, view.install);
     case 'levels':
       return buildLevels(view.profile, width, view.testMode, view.page);
     case 'dead':

@@ -18,7 +18,7 @@ export type LevelButtonId = `niveau-${number}`;
  * réglages ; « pause » est le seul bouton de la partie, « resume » et « quit »
  * ceux du voile de pause.
  */
-export type ButtonId = 'continue' | 'talismans' | 'levels' | 'free' | 'music' | 'sfx' | 'start' | 'pause' | 'resume' | 'quit' | 'next' | 'replay' | 'back' | 'suite' | 'precedents' | LevelButtonId | TalismanId;
+export type ButtonId = 'continue' | 'talismans' | 'levels' | 'free' | 'music' | 'sfx' | 'start' | 'install' | 'pause' | 'resume' | 'quit' | 'next' | 'replay' | 'back' | 'suite' | 'precedents' | LevelButtonId | TalismanId;
 
 /** Rectangle d'un bouton, en pixels CSS de l'écran. */
 export interface ButtonRect {

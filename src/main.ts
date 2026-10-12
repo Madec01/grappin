@@ -1,4 +1,5 @@
 import { Game, readSettings, type DebugAnchor, type DebugState } from './app/game';
+import { browserInstaller, hostOf } from './app/install';
 import { Music, browserAudio } from './audio/music';
 import { browserRhythms } from './audio/rhythms';
 import { browserSfx } from './audio/sfx';
@@ -52,7 +53,7 @@ async function start(): Promise<void> {
   const renderer = await Renderer.create();
   // Le mode test joue sur son propre profil : la vraie progression n'en sait rien.
   // La musique vit dans public/musique, servie sous la base du site.
-  const game = new Game(renderer, settings, browserStorage(settings.testMode ? TEST_STORAGE_KEY : STORAGE_KEY), new Music(browserAudio(import.meta.env.BASE_URL)), browserRhythms(import.meta.env.BASE_URL), browserSfx());
+  const game = new Game(renderer, settings, browserStorage(settings.testMode ? TEST_STORAGE_KEY : STORAGE_KEY), new Music(browserAudio(import.meta.env.BASE_URL)), browserRhythms(import.meta.env.BASE_URL), browserSfx(), browserInstaller(hostOf(window, navigator)));
 
   renderer.onFrame((elapsedSeconds) => game.frame(elapsedSeconds));
   trackPointer(renderer.canvas, { onPress: (x, y) => game.press(x, y), onMove: (x, y) => game.move(x, y), onRelease: () => game.release(), onCancel: () => game.pause() });

@@ -647,6 +647,32 @@ test('titre : Sons et Départ se basculent et survivent au rechargement', async 
   expect(errors).toEqual([]);
 });
 
+test('titre : quand le navigateur sait installer, un bouton « Installer le jeu » le propose, l\'appui lance l\'invite, et l\'installation le retire', async ({ page }) => {
+  const errors = watchErrors(page);
+  await open(page, '/?graine=3');
+  expect(await state(page)).toMatchObject({ screen: 'title', install: null });
+  expect((await buttons(page)).some((button) => button.id === 'install')).toBe(false);
+  // Chrome, sur Android, annonce qu'il sait installer : on imite son événement, avec une invite qui compte ses déclenchements.
+  await page.evaluate(() => {
+    const event = new Event('beforeinstallprompt', { cancelable: true }) as Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
+    const counter = window as unknown as { __invites?: number };
+    event.prompt = () => {
+      counter.__invites = (counter.__invites ?? 0) + 1;
+      return Promise.resolve();
+    };
+    event.userChoice = Promise.resolve({ outcome: 'accepted' });
+    window.dispatchEvent(event);
+  });
+  await expect.poll(async () => (await state(page)).install).toBe('prompt');
+  await tapButton(page, 'install');
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __invites?: number }).__invites ?? 0)).toBe(1);
+  await expect.poll(async () => (await state(page)).install).toBeNull();
+  await page.evaluate(() => window.dispatchEvent(new Event('appinstalled')));
+  await expect.poll(async () => (await buttons(page)).some((button) => button.id === 'install')).toBe(false);
+  expect(await state(page)).toMatchObject({ screen: 'title', install: null });
+  expect(errors).toEqual([]);
+});
+
 test('pause : le bouton met en pause, le pas de simulation ne bouge plus, Reprendre reprend, et le lever du doigt qui finit l\'appui sur Reprendre ne lâche pas la corde', async ({ page }) => {
   const errors = watchErrors(page);
   await open(page, '/?graine=3');

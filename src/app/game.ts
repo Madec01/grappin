@@ -1,3 +1,4 @@
+import { NO_INSTALLER, type InstallState, type Installer } from './install';
 import type { Vec2 } from '../core/math/vec2';
 import { Music, silentAudio } from '../audio/music';
 import { SILENT_PULSE, pulseAt, syntheticRhythm, type Pulse, type Rhythm } from '../audio/rhythm';
@@ -144,6 +145,8 @@ export interface DebugState {
   /** Réglage « Sons » et départ de la course libre. */
   readonly sfxOn: boolean;
   readonly freeStart: FreeStart;
+  /** L'installation sur l'écran d'accueil : `prompt` (bouton « Installer le jeu »), `ios` (rappel du menu Partager) ou null. */
+  readonly install: InstallState;
   /** Famille de la musique voulue en ce moment, donc l'ambiance visée : la palette y arrive en fondu si elle vient de changer. */
   readonly palette: MusicFamily;
   /** Le pouls du moment : 1 sur un temps de la musique, retombe vers 0 ; et le tempo de la piste, 0 sans rythme. */
@@ -297,10 +300,13 @@ export class Game {
   private pulse: Pulse = SILENT_PULSE;
   /** Le métronome de `?pouls=`, et le temps réel écoulé qui le fait battre. */
   private readonly metronome: Rhythm | null;
+  /** L'installation sur l'écran d'accueil : ce que le titre en montre, et l'invite à déclencher au bouton. */
+  private readonly installer: Installer;
   private clock = 0;
 
-  constructor(view: GameView, settings: GameSettings, storage: ProfileStorage, music: Music = new Music(silentAudio()), rhythms: RhythmSource = silentRhythms(), sfx: SoundPlayer = silentSfx()) {
+  constructor(view: GameView, settings: GameSettings, storage: ProfileStorage, music: Music = new Music(silentAudio()), rhythms: RhythmSource = silentRhythms(), sfx: SoundPlayer = silentSfx(), installer: Installer = NO_INSTALLER) {
     this.view = view;
+    this.installer = installer;
     this.settings = settings;
     this.storage = storage;
     this.music = music;
@@ -526,6 +532,7 @@ export class Game {
       levelsPage: this.levelsPage,
       palette: this.palette,
       pulse: this.pulse,
+      install: this.installer.state(),
     });
   }
 
@@ -609,6 +616,7 @@ export class Game {
       track: this.music.playing,
       sfxOn: this.profile.sfx,
       freeStart: this.profile.freeStart,
+      install: this.installer.state(),
       palette: trackFamily(this.wantedTrack()),
       pulse: this.pulse.beat,
       bpm: this.pulse.bpm,
@@ -724,6 +732,7 @@ export class Game {
     else if (button === 'music') this.toggleMusic();
     else if (button === 'sfx') this.toggleSfx();
     else if (button === 'start') this.toggleFreeStart();
+    else if (button === 'install') void this.installer.prompt();
     else this.startLevel(unlockedLevel(this.profile), true);
   }
 

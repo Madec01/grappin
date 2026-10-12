@@ -25,8 +25,8 @@ Le jeu se joue aussi à la souris, avec le même geste : clic maintenu, puis rel
 
 Le jeu s'installe depuis le navigateur, sans magasin d'applications : une icône sur l'écran d'accueil, le plein écran sans barre d'adresse, et il se lance même sans réseau (la page, le code et les icônes sont gardés sur le téléphone ; une musique déjà entendue joue hors-ligne, une musique jamais entendue reste muette).
 
-- **Android (Chrome)** : ouvrir https://madec01.github.io/grappin/, puis le menu ⋮ en haut à droite → « Installer l'application » (ou « Ajouter à l'écran d'accueil »). Chrome propose parfois lui-même l'installation en bas de l'écran.
-- **iPhone (Safari)** : ouvrir la même adresse, toucher le bouton Partager (le carré avec une flèche vers le haut) → « Sur l'écran d'accueil » → « Ajouter ».
+- **Android (Chrome)** : ouvrir https://madec01.github.io/grappin/ ; dès que Chrome sait installer, le titre montre un bouton « Installer le jeu », qui ouvre l'invite d'installation. Sinon, le menu ⋮ en haut à droite → « Installer l'application » (ou « Ajouter à l'écran d'accueil »).
+- **iPhone (Safari)** : ouvrir la même adresse (le titre le rappelle), toucher le bouton Partager (le carré avec une flèche vers le haut) → « Sur l'écran d'accueil » → « Ajouter ».
 
 Une nouvelle version se prend toute seule à l'ouverture suivante, quand il y a du réseau. Pour désinstaller, retirer l'icône comme pour n'importe quelle application.
 

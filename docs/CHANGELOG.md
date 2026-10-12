@@ -2,6 +2,16 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.12.4] — 2026-10-12 — Le titre propose d'installer le jeu
+
+Retour du propriétaire : « le jeu ne me propose toujours pas de l'installer ». Le jeu est installable depuis la 0.7.0, mais aucun navigateur ne le propose de lui-même de façon sûre : Chrome, sur Android, n'offre l'installation qu'après un temps d'usage, par une petite barre qu'on ferme sans la voir ; Safari, sur iPhone et iPad, ne la propose jamais, il faut passer par le menu Partager.
+
+### Ajouté
+
+- **Bouton « Installer le jeu » sur le titre** (`app/install.ts`), sous les accès, dès que le navigateur annonce qu'il sait installer en un geste (`beforeinstallprompt`, que le jeu garde pour lui au lieu de laisser Chrome l'afficher à sa guise) : l'appui ouvre l'invite d'installation du navigateur. Acceptée ou refusée, l'invite ne sert qu'une fois : le bouton s'efface jusqu'à ce que le navigateur en redonne une.
+- **Sur iPhone et iPad**, hors application, le titre rappelle le chemin en une ligne : « Pour installer : Partager, puis « Sur l'écran d'accueil » ».
+- Ouvert depuis l'écran d'accueil, ou une fois installé, le titre ne dit plus rien. `debugState().install` dit ce que le titre montre ; un test de bout en bout imite l'annonce de Chrome, appuie sur le bouton et vérifie l'invite.
+
 ## [0.12.3] — 2026-10-12 — Comme en discothèque : trois lampes
 
 Retour du propriétaire sur la 0.12.2 : « tous les éléments ne doivent pas forcément avoir la même couleur, un peu comme en discothèque ». Cause : toute la scène prenait la couleur du temps, une seule à la fois.

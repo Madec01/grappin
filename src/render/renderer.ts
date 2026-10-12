@@ -1,3 +1,4 @@
+import type { InstallState } from '../app/install';
 import { Application, Container, Graphics, type Text } from 'pixi.js';
 import { SILENT_PULSE, type Pulse } from '../audio/rhythm';
 import type { Vec2 } from '../core/math/vec2';
@@ -141,6 +142,8 @@ export interface GameFrame {
   readonly palette: Palette;
   /** Le pouls de la musique à cet instant ; `SILENT_PULSE` quand rien ne joue ou que le rythme de la piste est inconnu. */
   readonly pulse: Pulse;
+  /** L'installation sur l'écran d'accueil : le titre en montre le bouton ou le rappel (voir app/install.ts). */
+  readonly install: InstallState;
 }
 
 const TAU = Math.PI * 2;
@@ -2199,7 +2202,7 @@ export class Renderer {
   private overlayView(state: SimState, frame: GameFrame): OverlayView {
     switch (frame.screen) {
       case 'title':
-        return { kind: 'title', profile: frame.profile, testMode: frame.testMode };
+        return { kind: 'title', profile: frame.profile, testMode: frame.testMode, install: frame.install };
       case 'levels':
         return { kind: 'levels', profile: frame.profile, testMode: frame.testMode, page: frame.levelsPage };
       case 'talismans':
