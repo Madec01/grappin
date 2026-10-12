@@ -2,8 +2,9 @@ import { chooseTarget } from './aim';
 import type { Vec2 } from '../core/math/vec2';
 import { clampPull, pulledPosition } from './launcher';
 import { FREE_RUN, createCourse, extendCourse, pruneCourse, type CoursePlan } from './course';
+import { sceneEvents } from '../data/scenes';
 import { STILL } from './environment';
-import { applyEvents } from './events';
+import { applyEvents, type ScheduledEvent } from './events';
 import { integrate, swingStep } from './physics';
 import { applyBufferedPress, applyFall, applyFinish, applyFog, applyCycles, applyFragile, applyGround, applyHang, applyObstacles, applyPickups, applyRings, applyScore, applyTier, press, release } from './rules';
 import type { RuleEvent, SimState } from './state';
@@ -18,6 +19,8 @@ import { DEFAULT_TUNING, type Tuning } from './tuning';
  */
 
 export function createState(seed: number, tuning: Tuning, plan: CoursePlan = FREE_RUN): SimState {
+  // Un niveau a ses événements ; une scène peut en porter un (le serpentin) ; la course libre et l'atelier tirent les leurs en montant.
+  const scheduled: readonly ScheduledEvent[] = plan.kind === 'level' ? plan.events : plan.kind === 'scene' ? sceneEvents(plan.sceneId) : [];
   const state: SimState = {
     step: 0,
     hero: { pos: { x: 0, y: plan.startY + tuning.heroRadius }, vel: { x: 0, y: 0 }, grounded: true },
@@ -45,8 +48,8 @@ export function createState(seed: number, tuning: Tuning, plan: CoursePlan = FRE
     fogY: plan.startY + tuning.fogStart,
     groundY: plan.startY,
     finishY: plan.kind === 'level' ? plan.endY : null,
-    schedule: plan.kind === 'level' ? [...plan.events] : [],
-    eventRuntimes: plan.kind === 'level' ? plan.events.map(() => ({ startStep: null, endStep: null })) : [],
+    schedule: [...scheduled],
+    eventRuntimes: scheduled.map(() => ({ startStep: null, endStep: null })),
     env: STILL,
     fogFactor: 1,
     lightsOff: false,

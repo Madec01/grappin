@@ -7,6 +7,7 @@ import { provableObstacles } from './obstacles';
 import { zoneAt, type Body } from './physics';
 import { bestLaunch } from './pilot';
 import { WORLD_HALF_WIDTH, releaseVelocity } from './rules';
+import { upOf } from './environment';
 import type { Anchor, RuleEvent, SimState } from './state';
 import { Simulation } from './simulation';
 import type { Tuning } from './tuning';
@@ -75,8 +76,12 @@ export function launchIsClear(state: SimState, pull: Vec2, tuning: Tuning): bool
   return clearOfMoving(state, { pos: pulledPosition(launcher.pos, pull), vel: launchVelocity(pull, state.env) }, tuning.verifyFlightSeconds, tuning);
 }
 
-/** Avant de lâcher, le robot regarde aussi si le vol sort du monde dans ce temps (secondes) : un lâcher vers le bord, c'est une chute. */
-const EDGE_AHEAD_SECONDS = 1;
+/** Avant de lâcher, le robot regarde aussi si le vol sort du monde dans ce temps (secondes) : un lâcher vers le bord, c'est une chute. Le temps pendant lequel, après un lâcher, il ne rattrape rien plus bas. */
+const EDGE_AHEAD_SECONDS = 1.5;
+/** En vol, un robot qui file vers le bord du monde (là où il sera dans ce temps) attrape tout ce qui vient, même plus bas. */
+const EDGE_SOON_SECONDS = 0.5;
+/** Le robot n'examine le vol d'un lâcher (`flightCatches`) qu'un pas sur ce nombre. */
+const RELEASE_EVERY = 4;
 const EDGE_MARGIN = 1;
 
 /** Vrai si le vol qui suivrait un lâcher maintenant ne heurte rien pendant `LOOK_AHEAD_SECONDS` (rebonds, fracas et anneaux joués), ni ne sort du monde pendant `EDGE_AHEAD_SECONDS`. */
@@ -127,10 +132,21 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
   /** Pas où le robot a décidé d'agir, exécuté après son temps de réaction. */
   let plannedPress = -1;
   let plannedRelease = -1;
-  /** Après un lancer, on ne rattrape rien sous le lanceur pendant un moment : on monte. */
+  /**
+   * Après un lancer (lanceur, roue), on ne rattrape rien sous le point lâché pendant un moment, même en retombant : on monte. Après un
+   * lâcher ordinaire, rien sous le point lâché tant que l'on monte encore (le lâcher n'est parti que parce qu'un vol attrape plus haut,
+   * voir `catches`) ; en retombant, on attrape ce qui vient. Sans cela, le robot fait du surplace entre des prises voisines (les deux
+   * bandes d'un accordéon, un lanceur sous la prise qu'il a attrapée) au lieu de viser plus haut.
+   */
   let launchedStep = -1_000_000;
-  let launchedY = -Infinity;
+  let launchedPos: Vec2 | null = null;
+  let launched = false;
   const launchWaitSteps = Math.round(1.5 / tuning.stepSeconds);
+  /** « Plus haut » et « monter » s'entendent à l'opposé de la gravité du moment : sous un serpentin ou une bascule, le monde penche. */
+  const rise = (from: Vec2, to: Vec2): number => {
+    const up = upOf(sim.state.env);
+    return (to.x - from.x) * up.x + (to.y - from.y) * up.y;
+  };
   /** Sur un lanceur, le robot prend le temps de bander la fronde : le personnage doit d'abord être tiré jusqu'au lanceur, et un pouce ne vise pas en moins d'un tiers de seconde. */
   const aimSteps = Math.max(reactionSteps, Math.round(LAUNCH_AIM_SECONDS / tuning.stepSeconds));
   const limit = Math.round(seconds / tuning.stepSeconds);
@@ -138,7 +154,11 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
     const s = sim.state;
     if (!s.rope) {
       const target = s.targetId === null ? null : s.anchors.find((a) => a.id === s.targetId);
-      const climbing = s.step - launchedStep > launchWaitSteps || (target !== null && target !== undefined && target.pos.y > launchedY + 1);
+      const launchedRecently = s.step - launchedStep <= launchWaitSteps;
+      const aboveLaunch = target !== null && target !== undefined && launchedPos !== null && rise(launchedPos, target.pos) > 1;
+      const risingStill = rise({ x: 0, y: 0 }, s.hero.vel) > 0;
+      const edgeSoon = Math.abs(s.hero.pos.x + s.hero.vel.x * EDGE_SOON_SECONDS) > WORLD_HALF_WIDTH - EDGE_MARGIN;
+      const climbing = launched ? !launchedRecently || aboveLaunch : !(launchedRecently && !aboveLaunch && risingStill && !edgeSoon);
       // Porté vers le haut par une zone (un courant, une fusée), le robot ne rattrape pas un point sous lui : il monte d'abord, comme un
       // joueur. Hors zone, il attrape ce qu'il vise : refuser un point plus bas en plein vol rapide, c'est finir hors du monde.
       const ahead = (seconds: number): boolean => zoneAt(s.zones, { x: s.hero.pos.x + s.hero.vel.x * seconds, y: s.hero.pos.y + s.hero.vel.y * seconds }) !== null;
@@ -179,7 +199,8 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
         } else {
           sim.release(pull);
           launchedStep = s.step;
-          launchedY = launcher.pos.y;
+          launchedPos = launcher.pos;
+          launched = true;
         }
       }
     } else if (s.step - attachStep > 10) {
@@ -196,17 +217,19 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
         ? s.hero.vel.y >= tuning.wheelSpeed * WHEEL_UP_RATIO && flightCatches(held_, { pos: s.hero.pos, vel: s.hero.vel }, s.anchors, s.obstacles, tuning, s.env, s.zones, s.rings).some((id) => (s.anchors.find((a) => a.id === id)?.pos.y ?? -Infinity) > held_.pos.y + 1)
         : s.hero.vel.y > 1 && slope > profile.minSlope && slope < profile.maxSlope;
       const wants = (ready && inWindow) || held > (onWheel ? WHEEL_HOLD_MAX_SECONDS : profile.maxHoldSeconds);
-      // Un lâcher droit dans un mur n'est pas un lâcher : le robot attend le prochain moment, sauf s'il pend depuis trop longtemps.
-      if (wants && plannedRelease < 0 && (held > 2 * profile.maxHoldSeconds || releaseIsClear(s, tuning))) plannedRelease = s.step + reactionSteps;
+      // Un lâcher droit dans un mur n'est pas un lâcher, ni un lâcher dont le vol n'attrape rien au-dessus (ce que le vérificateur regarde,
+      // `flightCatches`) : le robot attend le prochain moment, sauf s'il pend depuis trop longtemps.
+      // Le vol se regarde tous les `RELEASE_EVERY` pas, comme le vérificateur : il coûte cher.
+      const catches = (): boolean => onWheel || held_ === undefined || flightCatches(held_, { pos: s.hero.pos, vel: releaseVelocity(s, tuning) }, s.anchors, s.obstacles, tuning, s.env, s.zones, s.rings).length > 0;
+      if (wants && plannedRelease < 0 && (held > 2 * profile.maxHoldSeconds || (s.step % RELEASE_EVERY === 0 && releaseIsClear(s, tuning) && catches()))) plannedRelease = s.step + reactionSteps;
       if (plannedRelease >= 0 && s.step >= plannedRelease) {
         plannedRelease = -1;
         sim.release();
         holdTotal += held;
-        // Lancé par une roue, comme par un lanceur : le robot ne rattrape rien sous elle pendant un moment, il monte.
-        if (onWheel && held_) {
-          launchedStep = s.step;
-          launchedY = held_.pos.y;
-        }
+        // Lancé par une roue, comme par un lanceur, ou simplement lâché : le robot ne rattrape rien sous le point pendant un moment, il monte.
+        launchedStep = s.step;
+        launchedPos = held_ ? { ...held_.pos } : null;
+        launched = onWheel;
       }
     }
     sim.step();

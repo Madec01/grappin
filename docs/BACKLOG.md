@@ -54,7 +54,7 @@ Le brief complet du propriétaire (synthèse des échanges du 11 octobre 2026) e
 | O6 Passage qui se referme | 9 | à faire (lot 5) |
 | H1 Puits de chute, H2 tunnel descendant, règles de la brume en descente | 10 | à faire (lot 5) |
 | D1 Duo alterné, D2 bille écho | 11 | prototype (lot 6) |
-| T1 Serpentin, T3 accordéon, T6 faible gravité | 12 | à faire (lot 3) |
+| T1 Serpentin, T3 accordéon, T6 faible gravité | 12 | fait (0.14.0 : serpentin en trois stades sur 45 m, accordéon de deux bandes prouvé dans ses trois états, poche à 30 % de gravité ; à revoir sur ressenti : la lenteur de la rotation, l'amplitude et la période des bandes, la part de gravité de la poche) |
 | T2 Plafond, T4 faille, T5 carrousel | 12 | à faire (lot 5) |
 | T8 Structure dépliante, T9 convoyeur, T7 descente contrôlée | 12 | à faire (lot 5) |
 | Combinaisons du catalogue (section 13) | 13 | à faire après apprentissage de chaque élément |

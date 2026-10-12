@@ -2119,7 +2119,7 @@ describe('sons et départ', () => {
     expect(game.debugState().atelierChoice).toEqual(['roue']);
     seen.hit = () => 'atelierAll';
     game.press(1, 1);
-    expect(game.debugState().atelierChoice).toHaveLength(28);
+    expect(game.debugState().atelierChoice).toHaveLength(31);
     seen.hit = () => 'atelierNone';
     game.press(1, 1);
     expect(game.debugState().atelierChoice).toEqual([]);

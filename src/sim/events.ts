@@ -5,7 +5,7 @@ import type { Tuning } from './tuning';
 
 /**
  * Événements des niveaux : la bascule, le coup de vent, la panne, la pluie
- * d'étoiles, l'alerte et le câble.
+ * d'étoiles, l'alerte, le câble, la traversière et le serpentin.
  *
  * Un événement est planifié à une hauteur au-dessus du toit de départ et
  * dure une longueur de progression. Il commence quand la hauteur maximale
@@ -15,7 +15,7 @@ import type { Tuning } from './tuning';
  * part, le câble glisse selon le temps simulé.
  */
 
-export type EventKind = 'bascule' | 'vent' | 'panne' | 'pluie' | 'alerte' | 'cable' | 'traversiere';
+export type EventKind = 'bascule' | 'vent' | 'panne' | 'pluie' | 'alerte' | 'cable' | 'traversiere' | 'serpentin';
 
 export interface ScheduledEvent {
   readonly kind: EventKind;
@@ -33,10 +33,48 @@ export interface ScheduledEvent {
 export interface EventRuntime {
   startStep: number | null;
   endStep: number | null;
+  /** Serpentin : l'inclinaison du moment, de 0 (gravité vers le bas) à 1 (un quart de tour), qui suit son stade en douceur. */
+  tilt?: number;
 }
 
 /** Durée de la rotation de la bascule, aller comme retour, en secondes. */
 export const TURN_SECONDS = 2;
+/**
+ * Serpentin (brief du 11 octobre 2026, T1 : « le parcours s'incline
+ * progressivement : vertical, oblique, horizontal, retour vertical », première
+ * extension de la bascule). Sur sa longueur, trois stades d'égale hauteur :
+ * oblique (un huitième de tour), horizontal (un quart), oblique à nouveau ; puis
+ * la gravité revient au bas. D'un stade à l'autre, la gravité tourne en douceur :
+ * `SERPENTIN_TURN_SECONDS` pour un quart de tour entier, soit deux secondes par
+ * stade, deux fois plus lentement que la bascule. Un serpentin de course libre
+ * couvre `SERPENTIN_LENGTH` mètres : chaque stade tient un segment entier.
+ */
+export const SERPENTIN_STAGES: readonly number[] = [0.5, 1, 0.5];
+export const SERPENTIN_TURN_SECONDS = 4;
+export const SERPENTIN_LENGTH = 45;
+
+/** L'inclinaison visée par un serpentin à cette part de sa longueur (0 avant, 0 après). */
+export function serpentinTilt(progress: number): number {
+  if (progress < 0 || progress >= 1) return 0;
+  return SERPENTIN_STAGES[Math.min(SERPENTIN_STAGES.length - 1, Math.floor(progress * SERPENTIN_STAGES.length))]!;
+}
+
+/** Longueur d'un événement de course libre ou d'atelier : un segment, sauf le serpentin, qui en couvre trois. */
+export function eventLength(kind: EventKind): number {
+  return kind === 'serpentin' ? SERPENTIN_LENGTH : 20;
+}
+
+/**
+ * Les hauteurs, au-dessus du toit de départ, où les conditions d'un événement
+ * changent : son début et sa fin, et pour un serpentin chacun de ses stades. Le
+ * générateur coupe ses segments à ces frontières, pour prouver chacun dans un
+ * seul jeu de conditions.
+ */
+export function eventBoundaries(event: ScheduledEvent): number[] {
+  const bounds = [event.at, event.at + event.length];
+  if (event.kind === 'serpentin') for (let stage = 1; stage < SERPENTIN_STAGES.length; stage += 1) bounds.push(event.at + (event.length * stage) / SERPENTIN_STAGES.length);
+  return bounds;
+}
 /** Montée en puissance du vent, en secondes. */
 const WIND_RISE_SECONDS = 1;
 /** Alerte : facteur de vitesse de la brume. */
@@ -63,12 +101,20 @@ export function eventsAt(schedule: readonly ScheduledEvent[], startY: number, y:
   return schedule.filter((e) => y >= startY + e.at && y < startY + e.at + e.length);
 }
 
-/** Conditions physiques pleines d'un ensemble d'événements, sans rampe : sert au vérificateur. */
-export function environmentOf(events: readonly ScheduledEvent[]): Environment {
+/**
+ * Conditions physiques pleines d'un ensemble d'événements, sans rampe : sert au
+ * vérificateur. Un serpentin incline selon son stade à la hauteur `y` (absolue,
+ * avec `startY` le toit de départ) ; sans hauteur, à plein, comme une bascule.
+ */
+export function environmentOf(events: readonly ScheduledEvent[], startY = 0, y?: number): Environment {
   let gravityDir = STILL.gravityDir;
   let wind = STILL.wind;
   for (const e of events) {
     if (e.kind === 'bascule') gravityDir = turnedGravity(e.side ?? 1, 1);
+    if (e.kind === 'serpentin') {
+      const tilt = y === undefined ? 1 : serpentinTilt((y - startY - e.at) / e.length);
+      if (tilt > 0) gravityDir = turnedGravity(e.side ?? 1, tilt);
+    }
     if (e.kind === 'vent') wind = { x: (e.side ?? 1) * (e.strength ?? 3), y: 0 };
   }
   return { gravityDir, wind };
@@ -125,6 +171,16 @@ export function applyEvents(state: SimState, tuning: Tuning, events: RuleEvent[]
         // Rotation en un temps fixe, aller puis retour ; entre les deux, un quart de tour plein.
         const t = sinceEnd === null ? Math.min(1, sinceStart / turnSteps) : Math.max(0, 1 - sinceEnd / turnSteps);
         if (t > 0) gravityDir = turnedGravity(scheduled.side ?? 1, t);
+        break;
+      }
+      case 'serpentin': {
+        // L'inclinaison suit le stade de la hauteur atteinte, en douceur : un quart de tour en `SERPENTIN_TURN_SECONDS`.
+        const target = sinceEnd === null ? serpentinTilt((state.height - startY) / scheduled.length) : 0;
+        const rate = dt / SERPENTIN_TURN_SECONDS;
+        const current = runtime.tilt ?? 0;
+        const tilt = current < target ? Math.min(target, current + rate) : Math.max(target, current - rate);
+        runtime.tilt = tilt;
+        if (tilt > 0) gravityDir = turnedGravity(scheduled.side ?? 1, tilt);
         break;
       }
       case 'vent': {

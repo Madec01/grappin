@@ -469,9 +469,9 @@ describe('chevronShape : un chevron pointe dans le sens de la poussée', () => {
 
 describe('teintes des zones', () => {
   it('chaque espèce a sa teinte, et un cœur plus clair (vers le blanc) pour ses traits les plus vifs', () => {
-    expect(ZONE_TONE).toEqual({ ascendant: COLOR.updraft, lateral: COLOR.drift, acceleration: COLOR.rocket, freinage: COLOR.brake });
+    expect(ZONE_TONE).toEqual({ ascendant: COLOR.updraft, lateral: COLOR.drift, acceleration: COLOR.rocket, freinage: COLOR.brake, poche: COLOR.pocket });
     const light = (color: number): number => ((color >> 16) & 0xff) + ((color >> 8) & 0xff) + (color & 0xff);
-    for (const kind of ['ascendant', 'lateral', 'acceleration', 'freinage'] as const) expect(light(ZONE_CORE[kind]), kind).toBeGreaterThan(light(ZONE_TONE[kind]));
+    for (const kind of ['ascendant', 'lateral', 'acceleration', 'freinage', 'poche'] as const) expect(light(ZONE_CORE[kind]), kind).toBeGreaterThan(light(ZONE_TONE[kind]));
   });
 
   it('dans une zone, les traits sont d\'un cran plus vifs, sans passer du simple au double', () => {

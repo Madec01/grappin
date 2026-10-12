@@ -28,6 +28,26 @@ export const NO_ZONES: readonly Zone[] = [];
 export const ZONE_RAMP = 0.6;
 /** Une zone de freinage ne ralentit jamais sous cette vitesse, en m/s : lisible, jamais brutal, jamais arrêté. */
 export const BRAKE_FLOOR = 2;
+/** Poche de faible gravité : la gravité descend vers sa part sur cette distance depuis le bord de la poche, et remonte de même à la sortie (brief : « entrée et sortie progressives »). */
+export const POCKET_RAMP = 1.5;
+
+/**
+ * La part de gravité qui s'applique en ce point : 1 d'ordinaire, la part de la
+ * poche (`strength`) en son cœur, entre les deux sur `POCKET_RAMP` depuis ses
+ * bords. Deux poches qui se recouvrent : la plus légère l'emporte.
+ */
+export function gravityScale(zones: readonly Zone[], pos: Vec2): number {
+  let scale = 1;
+  for (const zone of zones) {
+    if (zone.kind !== 'poche') continue;
+    const edge = Math.min(pos.x - zone.x0, zone.x1 - pos.x, pos.y - zone.y0, zone.y1 - pos.y);
+    if (edge <= 0) continue;
+    // Au cœur, la part de la poche telle quelle : pas d'arrondi flottant qui ferait deux empreintes d'état d'une même valeur.
+    const here = edge >= POCKET_RAMP ? zone.strength : 1 + (zone.strength - 1) * (edge / POCKET_RAMP);
+    if (here < scale) scale = here;
+  }
+  return scale;
+}
 
 /**
  * Accélération que les zones ajoutent en ce point, à cette vitesse. Un courant
@@ -42,6 +62,8 @@ export function zoneAcceleration(zones: readonly Zone[], pos: Vec2, vel: Vec2): 
   let y = 0;
   for (const zone of zones) {
     if (pos.x < zone.x0 || pos.x > zone.x1 || pos.y < zone.y0 || pos.y > zone.y1) continue;
+    // Une poche ne pousse pas : elle allège la gravité (voir `gravityScale`).
+    if (zone.kind === 'poche') continue;
     if (zone.kind === 'freinage') {
       if (length(vel) <= BRAKE_FLOOR) continue;
       x -= vel.x * zone.strength;
@@ -92,7 +114,7 @@ export function constrainVelocity(pos: Vec2, vel: Vec2, anchor: Vec2, ropeLength
  */
 export function integrate(body: Body, anchor: Vec2 | null, ropeLength: number, tuning: Tuning, env: Environment = STILL, zones: readonly Zone[] = NO_ZONES): Body {
   const dt = tuning.stepSeconds;
-  const a = acceleration(env, tuning);
+  const a = acceleration(env, tuning, zones.length > 0 ? gravityScale(zones, body.pos) : 1);
   const z = zones.length > 0 ? zoneAcceleration(zones, body.pos, body.vel) : { x: 0, y: 0 };
   let vel: Vec2 = { x: body.vel.x + (a.x + z.x) * dt, y: body.vel.y + (a.y + z.y) * dt };
   if (anchor) vel = constrainVelocity(body.pos, vel, anchor, ropeLength);
@@ -146,12 +168,12 @@ export function reelIn(body: Body, anchor: Vec2, oldLength: number, newLength: n
  * vitesse plancher reste bien sous ce qu'un joueur obtient par ses lâchers :
  * le jeu ne joue pas à sa place.
  */
-export function swingAssist(body: Body, anchor: Vec2, ropeLength: number, tuning: Tuning, env: Environment = STILL): Body {
+export function swingAssist(body: Body, anchor: Vec2, ropeLength: number, tuning: Tuning, env: Environment = STILL, gravity = tuning.gravity): Body {
   if (tuning.swingAssistAccel <= 0) return body;
-  // Le point bas du cercle est du côté où tire la gravité ; l'élan se mesure par rapport à lui.
+  // Le point bas du cercle est du côté où tire la gravité ; l'élan se mesure par rapport à lui, avec la gravité du lieu (moindre dans une poche).
   const bottom = add(anchor, scale(env.gravityDir, ropeLength));
   const lift = -dot(sub(body.pos, bottom), env.gravityDir);
-  const bottomSpeedSq = lengthSq(body.vel) + 2 * tuning.gravity * lift;
+  const bottomSpeedSq = lengthSq(body.vel) + 2 * gravity * lift;
   if (bottomSpeedSq >= tuning.swingAssistSpeed * tuning.swingAssistSpeed) return body;
   const n = normalize(sub(body.pos, anchor));
   if (n.x === 0 && n.y === 0) return body;
@@ -190,7 +212,7 @@ export function motorStep(body: Body, anchor: Vec2, ropeLength: number, motor: M
  */
 export function swingStep(body: Body, anchor: Vec2, ropeLength: number, tuning: Tuning, env: Environment = STILL, zones: readonly Zone[] = NO_ZONES, motor: Motor | null = null): { body: Body; ropeLength: number } {
   if (motor) return { body: integrate(motorStep(body, anchor, ropeLength, motor, tuning), anchor, ropeLength, tuning, env, zones), ropeLength };
-  const assisted = swingAssist(body, anchor, ropeLength, tuning, env);
+  const assisted = swingAssist(body, anchor, ropeLength, tuning, env, tuning.gravity * (zones.length > 0 ? gravityScale(zones, body.pos) : 1));
   const shorter = Math.max(tuning.ropeMin, ropeLength - tuning.reelSpeed * tuning.stepSeconds);
   const pulled = reelIn(assisted, anchor, ropeLength, shorter, tuning.reelSpin, tuning.stepSeconds, tuning.reelMaxSpeed);
   return { body: integrate(pulled, anchor, shorter, tuning, env, zones), ropeLength: shorter };

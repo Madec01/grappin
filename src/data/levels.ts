@@ -172,12 +172,12 @@ export const LEVELS: readonly LevelDef[] = [
   {
     id: 14,
     name: 'La décharge',
-    intro: 'Des prises électriques partout : attrape-les calmes, lâche avant la charge. Et une panne.',
+    intro: 'Des prises électriques partout : attrape-les calmes, lâche avant la charge. Une panne, et une poche de faible gravité pour souffler.',
     seed: 1014,
     startY: 2020,
     endY: 2220,
     fogBaseSpeed: 1.35,
-    profile: { spacing: 4.5, obstacles: 2, split: true, fragileChance: 0.2, boosters: 1, archetypes: ['lanceur', 'chaine', 'fragiles', 'dalles'], spread: 1.3, electric: 2, eclipse: 0 },
+    profile: { spacing: 4.5, obstacles: 2, split: true, fragileChance: 0.2, boosters: 1, archetypes: ['lanceur', 'chaine', 'fragiles', 'dalles', 'poche', 'poche'], spread: 1.3, electric: 2, eclipse: 0 },
     events: [{ kind: 'panne', at: 40, length: 30 }, { kind: 'panne', at: 130, length: 30 }],
   },
   {
@@ -205,12 +205,12 @@ export const LEVELS: readonly LevelDef[] = [
   {
     id: 17,
     name: 'L\'orage',
-    intro: 'Le vent tourne, les prises électriques crépitent, et un mur sans trou qu\'il faut percer à pleine puissance.',
+    intro: 'Le vent tourne, les prises électriques crépitent, un mur sans trou à percer à pleine puissance, et un accordéon dont les bandes se rapprochent.',
     seed: 1017,
     startY: 2650,
     endY: 2870,
     fogBaseSpeed: 1.45,
-    profile: { spacing: 4.8, obstacles: 2, split: true, fragileChance: 0.35, boosters: 1, archetypes: ['chaine', 'lanceur', 'rafale', 'fragiles', 'brise'], spread: 1.4, electric: 2, eclipse: 1, breakables: 1 },
+    profile: { spacing: 4.8, obstacles: 2, split: true, fragileChance: 0.35, boosters: 1, archetypes: ['chaine', 'lanceur', 'rafale', 'fragiles', 'brise', 'accordeon', 'accordeon'], spread: 1.4, electric: 2, eclipse: 1, breakables: 1 },
     events: [{ kind: 'vent', at: 10, length: 30, side: -1, strength: 3.5 }, { kind: 'vent', at: 60, length: 30, side: 1, strength: 3.5 }, { kind: 'vent', at: 120, length: 30, side: -1, strength: 3.5 }, { kind: 'vent', at: 170, length: 30, side: 1, strength: 3.5 }],
   },
   {
@@ -227,13 +227,13 @@ export const LEVELS: readonly LevelDef[] = [
   {
     id: 19,
     name: 'Le vertige',
-    intro: 'Bascules, alertes, pluie, et des bandes de dérive qui te poussent de côté : vise avant d\'entrer.',
+    intro: 'Un serpentin qui incline le monde, une bascule, des alertes, de la pluie, et des bandes de dérive qui te poussent de côté.',
     seed: 1019,
     startY: 3100,
     endY: 3340,
     fogBaseSpeed: 1.5,
     profile: { spacing: 5, obstacles: 3, split: true, fragileChance: 0.35, boosters: 1, archetypes: ['chaine', 'lanceur', 'escalier', 'saut', 'fragiles', 'derive', 'derive'], spread: 1.5, electric: 2, eclipse: 2 },
-    events: [{ kind: 'bascule', at: 20, length: 30, side: 1 }, { kind: 'alerte', at: 65, length: 25 }, { kind: 'pluie', at: 95, length: 25 }, { kind: 'bascule', at: 140, length: 30, side: -1 }, { kind: 'alerte', at: 190, length: 25 }],
+    events: [{ kind: 'serpentin', at: 15, length: 45, side: 1 }, { kind: 'alerte', at: 65, length: 25 }, { kind: 'pluie', at: 95, length: 25 }, { kind: 'bascule', at: 140, length: 30, side: -1 }, { kind: 'alerte', at: 190, length: 25 }],
   },
   {
     id: 20,
@@ -243,8 +243,8 @@ export const LEVELS: readonly LevelDef[] = [
     startY: 3340,
     endY: 3600,
     fogBaseSpeed: 1.55,
-    profile: { spacing: 5, obstacles: 3, split: true, fragileChance: 0.4, boosters: 1, archetypes: ['lanceur', 'chaine', 'rafale', 'dalles', 'couloir', 'fragiles', 'saut', 'roue', 'tournant', 'glissiere'], spread: 1.5, electric: 2, eclipse: 2, rotors: 1 },
-    events: [{ kind: 'vent', at: 15, length: 30, side: -1, strength: 3.5 }, { kind: 'bascule', at: 55, length: 35, side: -1 }, { kind: 'traversiere', at: 100, length: 30 }, { kind: 'alerte', at: 130, length: 15 }, { kind: 'bascule', at: 170, length: 35, side: 1 }, { kind: 'traversiere', at: 215, length: 30 }],
+    profile: { spacing: 5, obstacles: 3, split: true, fragileChance: 0.4, boosters: 1, archetypes: ['lanceur', 'chaine', 'rafale', 'dalles', 'couloir', 'fragiles', 'saut', 'roue', 'tournant', 'glissiere', 'accordeon', 'poche'], spread: 1.5, electric: 2, eclipse: 2, rotors: 1 },
+    events: [{ kind: 'vent', at: 15, length: 30, side: -1, strength: 3.5 }, { kind: 'serpentin', at: 50, length: 45, side: -1 }, { kind: 'traversiere', at: 100, length: 30 }, { kind: 'alerte', at: 130, length: 15 }, { kind: 'bascule', at: 170, length: 35, side: 1 }, { kind: 'traversiere', at: 215, length: 30 }],
   },
 ];
 

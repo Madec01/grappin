@@ -25,7 +25,7 @@ import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from './state
  * d'accélération puis une zone de freinage avant le point suivant
  * (« accélération, envolée, freinage, rattrapage »).
  */
-export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' | 'fragiles' | 'saut' | 'lanceur' | 'courant' | 'derive' | 'fusee' | 'brise' | 'sas' | 'cerceau' | 'ricochet' | 'percee' | 'roue' | 'tournant' | 'glissiere';
+export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' | 'fragiles' | 'saut' | 'lanceur' | 'courant' | 'derive' | 'fusee' | 'brise' | 'sas' | 'cerceau' | 'ricochet' | 'percee' | 'roue' | 'tournant' | 'glissiere' | 'accordeon' | 'poche';
 
 /**
  * Les cinq derniers motifs EXIGENT une mécanique du lot 2 (retour du
@@ -39,7 +39,10 @@ export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' 
  * cassable que seule sa vitesse perce. Le vérificateur joue ces mécaniques
  * dans ses vols (`flight.ts`) : le passage n'est prouvé qu'avec elles. Un
  * rebond ne peut pas s'exiger ailleurs qu'au tir : il ne redonne jamais plus
- * de hauteur qu'un vol direct, et la visée attrape à 5,6 m.
+ * de hauteur qu'un vol direct, et la visée attrape à 5,6 m. Lot 3, les
+ * transformations du terrain : « accordeon », deux bandes de prises qui se
+ * rapprochent et s'écartent ; « poche », une poche de faible gravité aux prises
+ * plus espacées. (Le serpentin, lui, est un événement : voir `events.ts`.)
  */
 export const ARCHETYPES: readonly Archetype[] = ['chaine', 'escalier', 'couloir', 'dalles', 'rafale', 'fragiles', 'saut', 'lanceur', 'courant', 'derive', 'fusee', 'brise', 'sas', 'cerceau', 'ricochet', 'percee'];
 
@@ -137,7 +140,8 @@ const GRACE_ABOVE_ORIGIN = 8;
 /**
  * Vrai si la boîte empiète sur la zone de pendaison d'un point : là où tire la
  * gravité, sur `HANG_DEPTH`, large de deux fois `HANG_HALF_WIDTH`. Sous
- * gravité tournée, la zone est de côté.
+ * gravité tournée, la zone est de côté ; sous gravité oblique (un stade de
+ * serpentin), elle est penchée, et c'est le rectangle penché que l'on teste.
  */
 function underAnchor(anchor: Vec2, box: Obstacle, env: Environment): boolean {
   const g = env.gravityDir;
@@ -146,9 +150,49 @@ function underAnchor(anchor: Vec2, box: Obstacle, env: Environment): boolean {
     const high = g.y < 0 ? anchor.y : anchor.y + HANG_DEPTH;
     return box.y1 > low && box.y0 < high && box.x1 > anchor.x - HANG_HALF_WIDTH && box.x0 < anchor.x + HANG_HALF_WIDTH;
   }
-  const left = g.x > 0 ? anchor.x : anchor.x - HANG_DEPTH;
-  const right = g.x > 0 ? anchor.x + HANG_DEPTH : anchor.x;
-  return box.x1 > left && box.x0 < right && box.y1 > anchor.y - HANG_HALF_WIDTH && box.y0 < anchor.y + HANG_HALF_WIDTH;
+  if (g.y === 0) {
+    const left = g.x > 0 ? anchor.x : anchor.x - HANG_DEPTH;
+    const right = g.x > 0 ? anchor.x + HANG_DEPTH : anchor.x;
+    return box.x1 > left && box.x0 < right && box.y1 > anchor.y - HANG_HALF_WIDTH && box.y0 < anchor.y + HANG_HALF_WIDTH;
+  }
+  return tiltedHangZoneMeets(anchor, box, g);
+}
+
+/**
+ * La zone de pendaison penchée le long de la gravité `g` rencontre-t-elle la
+ * boîte ? Axes séparateurs : ceux de la boîte et ceux de la zone ; dès qu'un
+ * axe les sépare (ou les fait seulement se toucher), non. Quatre opérations.
+ */
+function tiltedHangZoneMeets(anchor: Vec2, box: Obstacle, g: Vec2): boolean {
+  const u = { x: -g.y, y: g.x };
+  const zone: Vec2[] = [
+    { x: anchor.x - u.x * HANG_HALF_WIDTH, y: anchor.y - u.y * HANG_HALF_WIDTH },
+    { x: anchor.x + u.x * HANG_HALF_WIDTH, y: anchor.y + u.y * HANG_HALF_WIDTH },
+    { x: anchor.x + u.x * HANG_HALF_WIDTH + g.x * HANG_DEPTH, y: anchor.y + u.y * HANG_HALF_WIDTH + g.y * HANG_DEPTH },
+    { x: anchor.x - u.x * HANG_HALF_WIDTH + g.x * HANG_DEPTH, y: anchor.y - u.y * HANG_HALF_WIDTH + g.y * HANG_DEPTH },
+  ];
+  const corners: Vec2[] = [
+    { x: box.x0, y: box.y0 },
+    { x: box.x1, y: box.y0 },
+    { x: box.x1, y: box.y1 },
+    { x: box.x0, y: box.y1 },
+  ];
+  const span = (points: readonly Vec2[], axis: Vec2): [number, number] => {
+    let low = Infinity;
+    let high = -Infinity;
+    for (const p of points) {
+      const d = p.x * axis.x + p.y * axis.y;
+      if (d < low) low = d;
+      if (d > high) high = d;
+    }
+    return [low, high];
+  };
+  for (const axis of [{ x: 1, y: 0 }, { x: 0, y: 1 }, u, g]) {
+    const [a0, a1] = span(zone, axis);
+    const [b0, b1] = span(corners, axis);
+    if (a1 <= b0 || b1 <= a0) return false;
+  }
+  return true;
 }
 
 /** Profil de la course libre selon le palier : les motifs s'ouvrent avec les contraintes. */
@@ -169,6 +213,9 @@ export function tierProfile(tier: number): TierProfile {
   // Fin du lot 2 : la roue et le tournant au palier 3, la glissière avec les lanceurs du palier 5.
   if (tier >= 3) archetypes.push('roue', 'tournant');
   if (tier >= 5) archetypes.push('glissiere');
+  // Lot 3 : la poche de faible gravité, une respiration, dès le palier 2 ; l'accordéon, qui demande du timing, au palier 4.
+  if (tier >= 2) archetypes.push('poche');
+  if (tier >= 4) archetypes.push('accordeon');
   return {
     spacing: Math.min(5, 3 + 0.4 * tier),
     obstacles: tier === 0 ? 0 : Math.min(3, 1 + Math.floor(tier / 2)),
@@ -239,6 +286,8 @@ const SHAPES: Record<Archetype, { dy: readonly [number, number]; dx: readonly [n
   roue: { dy: [0.55, 0.9], dx: [0.4, 1] },
   tournant: { dy: [0.55, 0.9], dx: [0.4, 1] },
   glissiere: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  accordeon: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  poche: { dy: [0.55, 0.9], dx: [0.4, 1] },
 };
 
 /**
@@ -462,6 +511,78 @@ export function rocket(ids: IdCounters, from: Vec2, halfWidth: number): { boost:
   };
 }
 
+/**
+ * Lot 3 (0.14.0), les transformations du terrain, en mètres. Poche de faible
+ * gravité (T6) : une poche de toute la largeur, haute de `POCKET_HEIGHT`, qui
+ * commence un mètre au-dessus du point d'entrée, où la gravité tombe à
+ * `POCKET_GRAVITY` de sa valeur (en douceur sur `POCKET_RAMP`, voir
+ * `physics.ts`) ; dedans, des prises plus espacées (`POCKET_STEP` de montée,
+ * `POCKET_SIDE` de part et d'autre de l'axe), que seuls les longs vols de la
+ * poche relient ; la chaîne reprend `POCKET_EXIT_RISE` au-dessus de la poche.
+ * Accordéon (T3) : deux bandes de prises, gauche et droite, au repos à
+ * `ACCORDION_REST_RATIO` de la demi-largeur jouable, qui vont et viennent de
+ * `ACCORDION_SWAY_RATIO` de celle-ci en miroir (sur câble, période
+ * `ACCORDION_PERIOD`) : écartées, resserrées, écartées. Chaque bande est une
+ * petite chaîne en zigzag de `ACCORDION_LEVELS` prises, `ACCORDION_STEP` de
+ * montée, la bande droite décalée d'un demi-pas ; au resserrement on traverse
+ * d'une bande à l'autre, écartées on grimpe la sienne. Le vérificateur prouve
+ * les trois états. La chaîne reprend au milieu, `ACCORDION_EXIT_RISE` au-dessus
+ * de la dernière prise.
+ */
+export const POCKET_HEIGHT = 12;
+export const POCKET_GRAVITY = 0.3;
+const POCKET_STEP = 4.2;
+const POCKET_SIDE = 1.9;
+const POCKET_FIRST_RISE = 2.4;
+const POCKET_EXIT_RISE = 2.6;
+export const ACCORDION_PERIOD = 6;
+const ACCORDION_LEVELS = 3;
+const ACCORDION_STEP = 3;
+const ACCORDION_RISE = 3.2;
+const ACCORDION_EXIT_RISE = 3.5;
+const ACCORDION_ZIG = 0.4;
+const ACCORDION_REST_RATIO = 0.55;
+const ACCORDION_SWAY_RATIO = 0.3;
+/** Hauteur d'un accordéon, de son point d'entrée à la prise où la chaîne reprend. */
+export const ACCORDION_HEIGHT = ACCORDION_RISE + ACCORDION_STEP / 2 + (ACCORDION_LEVELS - 1) * ACCORDION_STEP + ACCORDION_EXIT_RISE;
+/** Hauteur d'une poche, de son point d'entrée à la prise où la chaîne reprend. */
+export const POCKET_RISE = ZONE_ABOVE_ENTRY + POCKET_HEIGHT + POCKET_EXIT_RISE;
+
+/** La poche de faible gravité au-dessus du point `from`, ses prises espacées, et où la chaîne reprend. Partagé avec les scènes. */
+export function pocket(ids: IdCounters, from: Vec2, halfWidth: number): { zone: Zone; anchors: Anchor[]; exit: Vec2 } {
+  const y0 = from.y + ZONE_ABOVE_ENTRY;
+  const y1 = y0 + POCKET_HEIGHT;
+  // De bord à bord du monde : pas de rampe de côté, la gravité n'y varie qu'en entrant et en sortant.
+  const zone = makeZone(ids, 'poche', -WALL_EDGE, y0, WALL_EDGE, y1, POCKET_GRAVITY, { x: 0, y: 0 });
+  const anchors: Anchor[] = [];
+  let side = from.x > 0 ? -1 : 1;
+  for (let y = y0 + POCKET_FIRST_RISE; y < y1 - 1; y += POCKET_STEP) {
+    anchors.push(makeAnchor(ids, { x: clampX(side * POCKET_SIDE, halfWidth), y }));
+    side = -side;
+  }
+  return { zone, anchors, exit: { x: clampX(side * 1.2, halfWidth), y: y1 + POCKET_EXIT_RISE } };
+}
+
+/** Les deux bandes d'un accordéon au-dessus du point `from`, dans l'ordre des hauteurs, et où la chaîne reprend. Partagé avec les scènes. */
+export function accordion(ids: IdCounters, from: Vec2, halfWidth: number): { anchors: Anchor[]; exit: Vec2 } {
+  const rest = halfWidth * ACCORDION_REST_RATIO;
+  const sway = halfWidth * ACCORDION_SWAY_RATIO;
+  const anchors: Anchor[] = [];
+  let top = from.y;
+  for (let level = 0; level < ACCORDION_LEVELS; level += 1) {
+    // Un niveau sur deux est rentré vers le milieu, l'autre sorti : chaque bande zigzague.
+    const zig = level % 2 === 0 ? -ACCORDION_ZIG : ACCORDION_ZIG;
+    for (const band of [-1, 1] as const) {
+      const x = band * (rest + zig);
+      const y = from.y + ACCORDION_RISE + level * ACCORDION_STEP + (band > 0 ? ACCORDION_STEP / 2 : 0);
+      // À l'instant zéro, les bandes sont écartées (`from`, vers l'extérieur) et se rapprochent (`to`), en miroir.
+      anchors.push({ ...makeAnchor(ids, { x, y }), cable: { from: { x: x + band * sway, y }, to: { x: x - band * sway, y }, period: ACCORDION_PERIOD }, band });
+      top = y;
+    }
+  }
+  return { anchors, exit: { x: clampX(from.x * 0.3, halfWidth), y: top + ACCORDION_EXIT_RISE } };
+}
+
 /** Vrai si la boîte s'approche d'une zone à moins de `ZONE_CLEARANCE`. */
 function nearZone(box: Obstacle, zones: readonly Zone[]): boolean {
   return zones.some((z) => box.x1 > z.x0 - ZONE_CLEARANCE && box.x0 < z.x1 + ZONE_CLEARANCE && box.y1 > z.y0 - ZONE_CLEARANCE && box.y0 < z.y1 + ZONE_CLEARANCE);
@@ -514,9 +635,10 @@ export interface SegmentContext {
 
 export const PLAIN_CONTEXT: SegmentContext = { env: STILL, entryEnv: STILL, cable: 'none', maxY: Infinity };
 
-/** Longueur visée d'un segment : de 16 à 24 m, ou jusqu'à la frontière proche d'un événement, à 28 m au plus. */
-function targetHeight(rng: Rng, startY: number, maxY: number): number {
-  const natural = startY + 16 + 8 * rng.next();
+/** Longueur visée d'un segment : de 16 à 24 m (de 22 à 26 pour un motif qui demande de la place), ou jusqu'à la frontière proche d'un événement, à 28 m au plus. */
+function targetHeight(rng: Rng, startY: number, maxY: number, archetype: Archetype): number {
+  const roomy = archetype === 'accordeon' || archetype === 'poche';
+  const natural = roomy ? startY + 22 + 4 * rng.next() : startY + 16 + 8 * rng.next();
   return maxY - 2 <= natural + 4 ? maxY - 2 : natural;
 }
 
@@ -529,7 +651,7 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
   const spacing = archetype === 'escalier' ? Math.max(2.6, profile.spacing * 0.85) : profile.spacing;
   const halfWidth = playableHalfWidth(profile.spread);
   const startY = from?.y ?? origin.y;
-  const targetY = targetHeight(rng, startY, context.maxY);
+  const targetY = targetHeight(rng, startY, context.maxY, archetype);
   let cur: Vec2 = from ?? { x: origin.x + FIRST_ANCHOR_OFFSET.x, y: origin.y + FIRST_ANCHOR_OFFSET.y };
   if (!from) anchors.push(makeAnchor(ids, cur));
   const wantsSplit = archetype === 'chaine' && profile.split && rng.next() < 0.8;
@@ -667,6 +789,27 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
       cur = exit;
       anchors.push(makeAnchor(ids, cur));
       featureDone = true;
+      continue;
+    }
+    if (archetype === 'accordeon' && !featureDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > ACCORDION_HEIGHT + 1) {
+      // Accordéon : deux bandes de prises qui se rapprochent et s'écartent. Une fois sur deux, quand les lanceurs sont permis, on y entre
+      // par un lanceur (brief : « très bonne association avec le lanceur : la distance cible évolue »).
+      if (profile.archetypes.includes('lanceur') && rng.next() < 0.5) anchors[anchors.length - 1] = makeAnchor(ids, cur, 'lanceur');
+      const { anchors: bands, exit } = accordion(ids, cur, halfWidth);
+      anchors.push(...bands);
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      featureDone = true;
+      continue;
+    }
+    if (archetype === 'poche' && !zoneDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > POCKET_RISE + 2) {
+      // Poche de faible gravité : la chaîne entre dans la poche, où ses prises sont plus espacées, et reprend au-dessus.
+      const { zone, anchors: inside, exit } = pocket(ids, cur, halfWidth);
+      zones.push(zone);
+      anchors.push(...inside);
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      zoneDone = true;
       continue;
     }
     if (archetype === 'courant' && !zoneDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > UPDRAFT_RISE + 2) {
@@ -857,7 +1000,8 @@ const TRAVERSIERE_INSET = 0.3;
  */
 function hangCables(anchors: Anchor[], junctionId: number | null, branchIds: readonly number[], halfWidth: number, kind: 'cable' | 'traversiere'): void {
   const protectedIds = new Set<number>([...branchIds, junctionId ?? -1, anchors.at(-1)?.id ?? -1, anchors[0]?.id ?? -1]);
-  const candidates = anchors.map((a, i) => ({ a, i })).filter(({ a }) => !protectedIds.has(a.id) && a.kind === 'normal');
+  // Jamais une prise qui glisse déjà (une bande d'accordéon).
+  const candidates = anchors.map((a, i) => ({ a, i })).filter(({ a }) => !protectedIds.has(a.id) && a.kind === 'normal' && !a.cable);
   const slots = kind === 'cable' ? [1 / 3, 2 / 3] : [1 / 4, 1 / 2, 3 / 4];
   const picked = new Set<number>();
   for (const slot of slots) {
@@ -884,7 +1028,8 @@ export function buildPlainSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, 
  */
 function assignKinds(rng: Rng, anchors: Anchor[], profile: TierProfile, archetype: Archetype, junctionId: number | null, branchIds: readonly number[]): void {
   const protectedIds = new Set<number>([...branchIds, junctionId ?? -1, anchors.at(-1)?.id ?? -1, anchors[0]?.id ?? -1]);
-  const eligible = anchors.filter((a) => !protectedIds.has(a.id) && a.kind === 'normal');
+  // Les prises d'une bande d'accordéon glissent déjà : ni fragiles ni propulseurs.
+  const eligible = anchors.filter((a) => !protectedIds.has(a.id) && a.kind === 'normal' && !a.cable);
   const fragile = new Set<number>();
   const boosters = new Set<number>();
   const runOf = (count: number, into: Set<number>): void => {

@@ -1,6 +1,6 @@
 import { createRng, type Rng } from '../core/math/rng';
 import type { Vec2 } from '../core/math/vec2';
-import { environmentOf, eventsAt, type EventKind, type ScheduledEvent } from './events';
+import { environmentOf, eventBoundaries, eventLength, eventsAt, type EventKind, type ScheduledEvent } from './events';
 import { buildPlainSegment, buildSegment, tierProfile, type IdCounters, type Segment, type SegmentContext, type TierProfile } from './generator';
 import { atelierEvents, atelierProfile, type AtelierId } from '../data/atelier';
 import { buildScene, type SceneId } from '../data/scenes';
@@ -66,47 +66,51 @@ const PRUNE_BEHIND = 10;
 const BEYOND_FINISH = 6;
 /**
  * Course libre : chance qu'un segment porte un événement, et événements permis
- * par palier. Décision du propriétaire : les six dès que la zone d'apprentissage
- * du palier 0 est passée, pour que la grimpe sans fin ait toutes les nouveautés.
+ * par palier. Décision du propriétaire : tous dès que la zone d'apprentissage
+ * du palier 0 est passée, pour que la grimpe sans fin ait toutes les nouveautés ;
+ * le serpentin (lot 3), qui incline le monde sur trois segments, au palier 2.
  */
 const FREE_EVENT_CHANCE = 0.5;
 const FREE_EVENT_KINDS: readonly EventKind[] = ['bascule', 'vent', 'panne', 'pluie', 'alerte', 'cable', 'traversiere'];
 function freeEventsFor(tier: number): readonly EventKind[] {
-  return tier >= 1 ? FREE_EVENT_KINDS : [];
+  if (tier < 1) return [];
+  return tier >= 2 ? [...FREE_EVENT_KINDS, 'serpentin'] : FREE_EVENT_KINDS;
 }
-
-/** Longueur d'un événement de course libre : un segment, puisque les segments s'arrêtent à ses bords. */
-const FREE_EVENT_LENGTH = 20;
 
 /**
  * Course libre : tire éventuellement un événement qui commence deux mètres
- * au-dessus du segment qui débute à `segmentY`, pendant le premier vol.
+ * au-dessus du segment qui débute à `segmentY`, pendant le premier vol. Il
+ * couvre un segment (`eventLength`), puisque les segments s'arrêtent à ses bords ;
+ * un serpentin en couvre trois, un par stade.
  */
 function scheduleFreeEvent(state: SimState, rng: Rng, kinds: readonly EventKind[], chance: number, segmentY: number): void {
   if (kinds.length === 0 || rng.next() >= chance) return;
   // Jamais deux événements qui se chevauchent : le précédent doit être fini avant ce segment. Et jamais deux fois le même de suite.
   const last = state.schedule.at(-1);
   if (last && state.groundY + last.at + last.length + 6 > segmentY) return;
-  const kind = rng.pick(kinds.filter((k) => k !== last?.kind));
+  // Un seul événement choisi (atelier) : il revient quand même.
+  const others = kinds.filter((k) => k !== last?.kind);
+  const kind = rng.pick(others.length > 0 ? others : kinds);
   const side: -1 | 1 = rng.next() < 0.5 ? -1 : 1;
-  state.schedule.push({ kind, at: segmentY - state.groundY + 2, length: FREE_EVENT_LENGTH, side, strength: 3 });
+  state.schedule.push({ kind, at: segmentY - state.groundY + 2, length: eventLength(kind), side, strength: 3 });
   state.eventRuntimes.push({ startStep: null, endStep: null });
 }
 
 /**
  * Les conditions d'un segment sont celles en vigueur trois mètres au-dessus de
- * son point d'entrée, et aucun de ses points ne dépasse la frontière suivante :
- * ainsi chaque segment est engendré et prouvé entièrement dans un seul jeu de
- * conditions, et l'on en change pendant le vol qui quitte un point d'entrée.
+ * son point d'entrée, et aucun de ses points ne dépasse la frontière suivante
+ * (début ou fin d'un événement, stade d'un serpentin) : ainsi chaque segment
+ * est engendré et prouvé entièrement dans un seul jeu de conditions, et l'on en
+ * change pendant le vol qui quitte un point d'entrée.
  */
 const LOOKAHEAD = 3;
 function segmentContext(state: SimState, segmentY: number): SegmentContext {
   const referenceY = segmentY + LOOKAHEAD;
   const active = eventsAt(state.schedule, state.groundY, referenceY);
-  const boundaries = state.schedule.flatMap((e) => [state.groundY + e.at, state.groundY + e.at + e.length]).filter((b) => b > referenceY);
+  const boundaries = state.schedule.flatMap((e) => eventBoundaries(e).map((b) => state.groundY + b)).filter((b) => b > referenceY);
   return {
-    env: environmentOf(active),
-    entryEnv: environmentOf(eventsAt(state.schedule, state.groundY, segmentY)),
+    env: environmentOf(active, state.groundY, referenceY),
+    entryEnv: environmentOf(eventsAt(state.schedule, state.groundY, segmentY), state.groundY, segmentY),
     cable: active.some((e) => e.kind === 'traversiere') ? 'traversiere' : active.some((e) => e.kind === 'cable') ? 'cable' : 'none',
     maxY: boundaries.length > 0 ? Math.min(...boundaries) - 1 : Infinity,
   };
@@ -117,7 +121,9 @@ function segmentContext(state: SimState, segmentY: number): SegmentContext {
  * bout de leur course et au milieu. Un câble court doit passer dans les trois
  * positions : on l'attrape où il est. Une traversière balaie toute la largeur,
  * on peut l'attendre en pendant au point d'avant : il suffit qu'une des trois
- * positions fasse passer le segment.
+ * positions fasse passer le segment. Les bandes d'un accordéon se prouvent dans
+ * leurs trois états, écartées, à mi-course et resserrées : on grimpe sa bande ou
+ * l'on traverse, quel que soit le moment.
  */
 function verifyWithCables(context: readonly Anchor[], contextObstacles: readonly Obstacle[], contextZones: readonly Zone[], contextRings: readonly Ring[], segment: Segment, tuning: Tuning, conditions: SegmentContext): boolean {
   const { env, entryEnv } = conditions;
@@ -127,7 +133,8 @@ function verifyWithCables(context: readonly Anchor[], contextObstacles: readonly
     const anchors = segment.anchors.map((a) => (a.cable ? { ...a, pos: place(a) } : a));
     return verifySegment(context, contextObstacles, { ...segment, anchors }, tuning, env, entryEnv, contextZones, contextRings);
   };
-  return conditions.cable === 'traversiere' ? placements.some(passes) : placements.every(passes);
+  const strict = conditions.cable !== 'traversiere' || segment.anchors.some((a) => a.band !== undefined);
+  return strict ? placements.every(passes) : placements.some(passes);
 }
 
 export function createCourse(seed: number, plan: CoursePlan): CourseState {

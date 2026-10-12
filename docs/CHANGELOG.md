@@ -2,6 +2,24 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.14.0] — 2026-10-12 — Lot 3 : le serpentin, l'accordéon, la poche de faible gravité
+
+Demande du propriétaire : « go pour le lot 3 ». Les trois transformations du terrain du brief (section 12, priorité suggérée : serpentin, accordéon, faible gravité), chacune avec sa scène, son entrée dans l'atelier, sa place dans les niveaux et la course libre, prouvée par le vérificateur et jouée par les robots.
+
+### Ajouté
+
+- **Le serpentin (T1)**, événement `serpentin`, « première extension de la bascule » : sur 45 m, la gravité s'incline par stades d'égale hauteur, un huitième de tour (oblique), un quart (horizontal), un huitième, puis revient ; d'un stade à l'autre elle tourne en douceur, deux fois plus lentement que la bascule (un quart de tour en quatre secondes). Le monde tourne à l'écran avec elle : le parcours apparaît vertical, oblique, horizontal, oblique, vertical. Le générateur coupe ses segments à chaque stade et prouve chacun dans la gravité de son stade (`eventBoundaries`, `environmentOf` à une hauteur), la zone de pendaison des obstacles étant penchée avec elle. Dès le palier 2 en course libre, au niveau 19 (à la place d'une bascule) et au 20 ; scène `?scene=serpentin`, qui commence au sommet de sa chaîne.
+- **L'accordéon (T3)**, motif `accordeon` : deux bandes de trois prises, gauche et droite, qui se rapprochent et s'écartent en miroir (sur câble, un aller-retour en six secondes, écartées de ± 2,2 m au repos et de ± 1,2 m de course à l'écartement 1). Resserrées, on traverse d'une bande à l'autre ; écartées, elles sont hors de portée l'une de l'autre, on grimpe la sienne. Le vérificateur prouve le segment dans les trois états (écarté, à mi-course, resserré) : 58 segments sur 60 construits. Une fois sur deux, quand les lanceurs sont permis, on y entre par un lanceur, « la distance de la cible évolue ». Les prises de bande (`Anchor.band`) ne deviennent ni fragiles ni câbles d'événement. Dès le palier 4, aux niveaux 17 et 20 ; scène `?scene=accordeon` (avec lanceur).
+- **La poche de faible gravité (T6)**, zone `poche` et motif `poche` : une poche de toute la largeur, haute de 12 m, où la gravité tombe à 30 % de sa valeur, en douceur sur 1,5 m à l'entrée et à la sortie (`gravityScale`, `POCKET_RAMP`) ; les vols s'allongent, le grappin sert à courber et à freiner, les prises y sont plus espacées (4,2 m de montée, ± 1,9 m de côté), et rien d'autre ne s'y pose : une respiration. Le balancement aussi se joue avec la gravité du lieu. 57 segments sur 60 construits, tous prouvés. Dès le palier 2, aux niveaux 14 et 20 ; scène `?scene=poche`.
+- **Atelier** : un groupe « Transformations du terrain » (serpentin, accordeon, poche), trente et un éléments en six groupes ; un seul événement choisi revient segment après segment (avant, l'atelier plantait sur un seul événement choisi : `rng.pick` sur une liste vide).
+- Robots : avant de lâcher, le robot vérifie, un pas sur quatre, que le vol qui suivrait attrape une prise plus haute (`flightCatches`, ce que le vérificateur prouve) ; après un lâcher il ne rattrape rien plus bas tant qu'il monte, « plus haut » s'entendant à l'opposé de la gravité du moment, sauf s'il file vers le bord du monde ; et il garde la corde si le vol sort du monde en une seconde et demie. Sans cela, il faisait du surplace entre les deux bandes d'un accordéon ou entre un lanceur et la prise d'au-dessus. Mesuré : le robot raisonnable survit 60 s sur les trois scènes et sur huit parties d'atelier de chaque transformation.
+- Rendu : voir les choix d'habillage ci-dessous.
+
+### Modifié
+
+- Niveau 14 « La décharge » porte une poche de faible gravité pour souffler ; niveau 17 « L'orage » un accordéon ; niveau 19 « Le vertige » un serpentin à la place de sa première bascule ; niveau 20 « Le ciel » tout, dont un serpentin.
+- `environmentOf(events, startY, y)` prend la hauteur pour dire la gravité d'un stade de serpentin ; sans hauteur, un quart de tour, comme une bascule. Les événements de course libre ont une longueur par espèce (`eventLength`) ; une scène peut porter des événements (`SceneDef.events`).
+
 ## [0.13.1] — 2026-10-12 — L'atelier dans le jeu principal
 
 Retour du propriétaire : « mets-le dans le jeu principal ! Arrête de faire des versions en plus ». L'atelier ne demande plus le mode test.

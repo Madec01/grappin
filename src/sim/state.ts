@@ -35,6 +35,8 @@ export interface Anchor {
   readonly cable?: { readonly from: Vec2; readonly to: Vec2; /** Durée d'un aller-retour, en secondes. */ readonly period: number };
   /** Roue motorisée : son moteur. */
   readonly motor?: Motor;
+  /** Prise d'une bande d'accordéon (lot 3, T3) : la bande gauche (-1) ou droite (1) ; la prise glisse avec elle (`cable`). */
+  readonly band?: -1 | 1;
 }
 
 /**
@@ -93,8 +95,10 @@ export interface Obstacle {
  * poussée de côté, localisée, à anticiper. Accélération : un couloir qui
  * accélère le long de son axe seulement, jusqu'à un plafond. Freinage : une
  * zone qui retire progressivement de la vitesse, jamais sous un plancher.
+ * Poche (lot 3, T6) : la gravité y est faible, en douceur à l'entrée et à la
+ * sortie ; les vols s'allongent, le grappin sert à courber et à freiner.
  */
-export type ZoneKind = 'ascendant' | 'lateral' | 'acceleration' | 'freinage';
+export type ZoneKind = 'ascendant' | 'lateral' | 'acceleration' | 'freinage' | 'poche';
 
 export interface Zone {
   readonly id: number;
@@ -103,9 +107,9 @@ export interface Zone {
   readonly x1: number;
   readonly y1: number;
   readonly kind: ZoneKind;
-  /** Poussée en m/s² (ascendant, latéral, accélération) ou part de vitesse retirée par seconde (freinage). */
+  /** Poussée en m/s² (ascendant, latéral, accélération), part de vitesse retirée par seconde (freinage), ou part de gravité gardée (poche). */
   readonly strength: number;
-  /** Direction unitaire de la poussée ; nulle pour le freinage. */
+  /** Direction unitaire de la poussée ; nulle pour le freinage et la poche. */
   readonly dir: Vec2;
   /** Couloir d'accélération : vitesse le long de l'axe au-delà de laquelle il n'accélère plus, en m/s. */
   readonly cap?: number;

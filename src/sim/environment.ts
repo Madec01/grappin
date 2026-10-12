@@ -19,9 +19,10 @@ export interface Environment {
 
 export const STILL: Environment = { gravityDir: { x: 0, y: -1 }, wind: { x: 0, y: 0 } };
 
-/** Accélération totale subie en vol : gravité et vent. */
-export function acceleration(env: Environment, tuning: Tuning): Vec2 {
-  return { x: env.gravityDir.x * tuning.gravity + env.wind.x, y: env.gravityDir.y * tuning.gravity + env.wind.y };
+/** Accélération totale subie en vol : gravité (multipliée par `gravityScale`, moins que 1 dans une poche de faible gravité) et vent. */
+export function acceleration(env: Environment, tuning: Tuning, gravityScale = 1): Vec2 {
+  const g = tuning.gravity * gravityScale;
+  return { x: env.gravityDir.x * g + env.wind.x, y: env.gravityDir.y * g + env.wind.y };
 }
 
 /** Le « haut » : à l'opposé de la gravité. */

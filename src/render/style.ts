@@ -76,6 +76,14 @@ export const COLOR = {
   drift: 0x7de12d,
   rocket: 0xffc800,
   brake: 0xeb9bff,
+  /** Poche de faible gravité : un lavande froid, lent, qui flotte. */
+  pocket: 0x9b8cff,
+  /**
+   * Bandes de l'accordéon (version 0.14.0) : un bleu électrique, le seul coin de la roue chromatique que ni une espèce de prise, ni une zone, ni
+   * une couleur d'effet n'occupe à moins d'une quarantaine d'unités. Les panneaux qui vont et viennent derrière les prises sont une structure
+   * qui bouge, pas une zone : ils n'ont rien du lavande de la poche ni de l'indigo de la porte, et se lisent sur toutes les musiques.
+   */
+  accordion: 0x3a5bff,
 
   /** Interface : textes blancs. */
   text: 0xf4f8ff,

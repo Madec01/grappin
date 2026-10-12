@@ -12,13 +12,14 @@ import type { Archetype, TierProfile } from '../sim/generator';
  * ouvre une partie d'atelier directement.
  */
 
-export type AtelierGroup = 'prises' | 'obstacles' | 'lanceurs' | 'zones' | 'evenements';
+export type AtelierGroup = 'prises' | 'obstacles' | 'lanceurs' | 'zones' | 'transformations' | 'evenements';
 
 export type AtelierId =
   | 'fragile' | 'propulseur' | 'electrique' | 'eclipse' | 'lanceur' | 'roue'
   | 'dalles' | 'rebond' | 'cassable' | 'porte' | 'anneau' | 'tournant'
   | 'brise' | 'sas' | 'cerceau' | 'ricochet' | 'percee' | 'glissiere'
   | 'courant' | 'derive' | 'fusee'
+  | 'serpentin' | 'accordeon' | 'poche'
   | 'bascule' | 'vent' | 'panne' | 'pluie' | 'alerte' | 'cable' | 'traversiere';
 
 export interface AtelierElement {
@@ -32,6 +33,7 @@ export const ATELIER_GROUPS: readonly { readonly id: AtelierGroup; readonly labe
   { id: 'obstacles', label: 'Obstacles' },
   { id: 'lanceurs', label: 'Lanceurs à usage exigé' },
   { id: 'zones', label: 'Zones' },
+  { id: 'transformations', label: 'Transformations du terrain' },
   { id: 'evenements', label: 'Événements' },
 ];
 
@@ -57,6 +59,9 @@ export const ATELIER_ELEMENTS: readonly AtelierElement[] = [
   { id: 'courant', label: 'Courant', group: 'zones' },
   { id: 'derive', label: 'Dérive', group: 'zones' },
   { id: 'fusee', label: 'Fusée', group: 'zones' },
+  { id: 'serpentin', label: 'Serpentin', group: 'transformations' },
+  { id: 'accordeon', label: 'Accordéon', group: 'transformations' },
+  { id: 'poche', label: 'Poche de faible gravité', group: 'transformations' },
   { id: 'bascule', label: 'Bascule', group: 'evenements' },
   { id: 'vent', label: 'Vent', group: 'evenements' },
   { id: 'panne', label: 'Panne', group: 'evenements' },
@@ -86,9 +91,9 @@ export function toggleAtelier(selection: readonly AtelierId[], id: AtelierId): A
   return ATELIER_ELEMENTS.map((element) => element.id).filter((candidate) => next.has(candidate));
 }
 
-/** Les événements choisis, dans l'ordre du catalogue. */
+/** Les événements choisis, dans l'ordre du catalogue ; le serpentin, transformation du terrain, en est un. */
 export function atelierEvents(selection: readonly AtelierId[]): EventKind[] {
-  const events: EventKind[] = ['bascule', 'vent', 'panne', 'pluie', 'alerte', 'cable', 'traversiere'];
+  const events: EventKind[] = ['serpentin', 'bascule', 'vent', 'panne', 'pluie', 'alerte', 'cable', 'traversiere'];
   return events.filter((kind) => selection.includes(kind));
 }
 
@@ -108,7 +113,7 @@ export function atelierProfile(selection: readonly AtelierId[]): TierProfile {
   if (has('lanceur')) archetypes.push('lanceur');
   if (has('roue')) archetypes.push('roue');
   if (has('tournant')) archetypes.push('tournant');
-  for (const id of ['brise', 'sas', 'cerceau', 'ricochet', 'percee', 'glissiere', 'courant', 'derive', 'fusee'] as const) if (has(id)) archetypes.push(id);
+  for (const id of ['brise', 'sas', 'cerceau', 'ricochet', 'percee', 'glissiere', 'courant', 'derive', 'fusee', 'accordeon', 'poche'] as const) if (has(id)) archetypes.push(id);
   if (archetypes.length === 0) archetypes.push('chaine', 'couloir');
   return {
     spacing: 4,

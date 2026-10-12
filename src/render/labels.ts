@@ -98,6 +98,7 @@ const EVENT_NAMES: Record<EventKind, string> = {
   alerte: 'alerte',
   cable: 'câbles',
   traversiere: 'traversières',
+  serpentin: 'serpentin',
 };
 
 /** « bascule 25 m · panne 55 m » : les événements du niveau et la hauteur où ils commencent, ou une chaîne vide sans événement. */
@@ -140,10 +141,11 @@ const STARTS: Record<Exclude<EventKind, 'vent'>, Announcement> = {
   alerte: { title: 'Alerte !', detail: 'La brume accélère' },
   cable: { title: 'Câbles', detail: 'Les accroches glissent' },
   traversiere: { title: 'Traversières !', detail: 'Les prises balaient toute la largeur' },
+  serpentin: { title: 'Serpentin', detail: 'Le monde s\'incline peu à peu' },
 };
 
 /** Les événements dont la fin se remarque : ceux qui ont changé la façon de jouer. */
-const CALM_AFTER: ReadonlySet<EventKind> = new Set(['bascule', 'vent', 'alerte']);
+const CALM_AFTER: ReadonlySet<EventKind> = new Set(['bascule', 'vent', 'alerte', 'serpentin']);
 
 /**
  * Annonce d'un événement de niveau qui commence ou finit, ou null quand sa fin

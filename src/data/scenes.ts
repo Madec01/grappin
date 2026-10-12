@@ -1,24 +1,33 @@
 import type { Vec2 } from '../core/math/vec2';
-import { FIRST_ANCHOR_OFFSET, HALF_WIDTH, RICOCHET_WALL_RISE, RING_RADIUS, ROTOR_TURN_SECONDS, WHEEL_RISE, drift, hoop, ricochet, rocket, rotorBar, slidingWall, smashWall, updraft, wheel, type IdCounters, type Segment } from '../sim/generator';
+import type { ScheduledEvent } from '../sim/events';
+import { FIRST_ANCHOR_OFFSET, HALF_WIDTH, RICOCHET_WALL_RISE, RING_RADIUS, ROTOR_TURN_SECONDS, WHEEL_RISE, accordion, drift, hoop, pocket, ricochet, rocket, rotorBar, slidingWall, smashWall, updraft, wheel, type IdCounters, type Segment } from '../sim/generator';
 import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from '../sim/state';
 
 /**
- * Scènes déterministes de démonstration, une par mécanique du lot 2 (brief du
- * 11 octobre 2026, section 18) : un premier segment construit à la main, le
- * même à chaque fois, où la nouveauté se rencontre isolément et se comprend ;
- * puis la course libre continue. Elles servent au propriétaire pour sentir
- * chaque mécanique (`?scene=rebond`), aux tests de bout en bout, au banc de
- * captures et aux robots. Les tests prouvent chaque scène par le vérificateur.
+ * Scènes déterministes de démonstration, une par mécanique des lots 2 et 3
+ * (brief du 11 octobre 2026, section 18) : un premier segment construit à la
+ * main, le même à chaque fois, où la nouveauté se rencontre isolément et se
+ * comprend ; puis la course libre continue. Elles servent au propriétaire pour
+ * sentir chaque mécanique (`?scene=rebond`), aux tests de bout en bout, au banc
+ * de captures et aux robots. Les tests prouvent chaque scène par le
+ * vérificateur. Une scène peut porter un événement (le serpentin incline le
+ * monde au-dessus de sa chaîne).
  */
 
-export type SceneId = 'rebond' | 'cassable' | 'porte' | 'anneau' | 'courant' | 'derive' | 'fusee' | 'roue' | 'tournant' | 'glissiere';
+export type SceneId = 'rebond' | 'cassable' | 'porte' | 'anneau' | 'courant' | 'derive' | 'fusee' | 'roue' | 'tournant' | 'glissiere' | 'serpentin' | 'accordeon' | 'poche';
 
 export interface SceneDef {
   readonly id: SceneId;
   readonly name: string;
   /** Une phrase, en bannière au départ. */
   readonly intro: string;
+  /** Événements de la scène, aux hauteurs au-dessus du sol : le serpentin. */
+  readonly events?: readonly ScheduledEvent[];
 }
+
+/** Le serpentin de sa scène : il commence au sommet de la chaîne de démonstration et couvre trois stades de quinze mètres. */
+export const SERPENTIN_SCENE_AT = 20;
+export const SERPENTIN_SCENE_LENGTH = 45;
 
 export const SCENES: readonly SceneDef[] = [
   { id: 'rebond', name: 'Le ricochet', intro: 'La chicane barre le trou : tire sous elle vers le mur violet, il te renvoie dedans.' },
@@ -31,7 +40,15 @@ export const SCENES: readonly SceneDef[] = [
   { id: 'roue', name: 'La roue', intro: 'La roue t\'entraîne de plus en plus vite : fais le tour, lâche en montant.' },
   { id: 'tournant', name: 'Le tournant', intro: 'La barre tourne : passe quand elle laisse le passage.' },
   { id: 'glissiere', name: 'La glissière', intro: 'Le trou du mur va et vient : tire quand il passe au-dessus de toi.' },
+  { id: 'serpentin', name: 'Le serpentin', intro: 'Le monde s\'incline peu à peu, jusqu\'à l\'horizontale, puis se redresse : suis la courbe sans perdre l\'élan.', events: [{ kind: 'serpentin', at: SERPENTIN_SCENE_AT, length: SERPENTIN_SCENE_LENGTH, side: 1 }] },
+  { id: 'accordeon', name: 'L\'accordéon', intro: 'Deux bandes de prises se rapprochent et s\'écartent : traverse quand elles sont proches, ou grimpe ton côté.' },
+  { id: 'poche', name: 'La poche', intro: 'Dans la poche, la gravité est faible : les vols s\'allongent, le grappin sert à courber et à freiner.' },
 ];
+
+/** Les événements d'une scène, ou aucun. */
+export function sceneEvents(id: SceneId): readonly ScheduledEvent[] {
+  return sceneById(id)?.events ?? [];
+}
 
 export function sceneById(id: string): SceneDef | undefined {
   return SCENES.find((scene) => scene.id === id);
@@ -207,6 +224,35 @@ export function buildScene(id: SceneId, ids: IdCounters, origin: Vec2): Segment 
       b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
       b.ids.anchor += 1;
       anchor(b, { x: 2.2, y: 19.8 });
+      break;
+    }
+    case 'serpentin':
+      // La chaîne de démonstration, droite ; le serpentin de la scène (`events`) commence à son sommet, et la course engendrée le suit.
+      anchor(b, { x: 0, y: 0 });
+      for (const p of CHAIN) anchor(b, p);
+      break;
+    case 'accordeon': {
+      // Un lanceur, puis les deux bandes de l'accordéon du générateur : la distance de la cible évolue pendant la visée.
+      anchor(b, { x: 0, y: 0 });
+      anchor(b, CHAIN[0]!);
+      const launcher = anchor(b, { x: -0.4, y: 7 }, 'lanceur');
+      const { anchors: bands, exit } = accordion(b.ids, launcher.pos, HALF_WIDTH);
+      b.anchors.push(...bands);
+      b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
+      b.ids.anchor += 1;
+      anchor(b, { x: 2.4, y: exit.y - FIRST_ANCHOR_OFFSET.y - b.origin.y + 3.6 });
+      break;
+    }
+    case 'poche': {
+      // Deux points, puis la poche de faible gravité du générateur, ses prises espacées, et la chaîne qui reprend au-dessus.
+      anchor(b, { x: 0, y: 0 });
+      const from = anchor(b, CHAIN[0]!);
+      const { zone, anchors: inside, exit } = pocket(b.ids, from.pos, HALF_WIDTH);
+      b.zones.push(zone);
+      b.anchors.push(...inside);
+      b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
+      b.ids.anchor += 1;
+      anchor(b, { x: -2.2, y: exit.y - FIRST_ANCHOR_OFFSET.y - b.origin.y + 3.6 });
       break;
     }
   }

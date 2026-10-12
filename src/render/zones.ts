@@ -5,9 +5,9 @@ import { COLOR } from './style';
 
 /**
  * Habillage des zones qui modifient le mouvement (courant ascendant, dérive,
- * couloir d'accélération, freinage) : ce qui, dans leur dessin, se calcule sans
- * PixiJS. Le rendu (`renderer.ts`) pose les formes, ce fichier dit où et avec
- * quelle intensité.
+ * couloir d'accélération, freinage, poche de faible gravité) : ce qui, dans leur
+ * dessin, se calcule sans PixiJS. Le rendu (`renderer.ts`) pose les formes, ce
+ * fichier dit où et avec quelle intensité.
  *
  * Une zone se dessine dans son propre repère, celui de son courant : `along`
  * est la distance depuis l'entrée, dans le sens où elle pousse, et `across` la
@@ -19,6 +19,10 @@ import { COLOR } from './style';
  * rien de plus que la zone elle-même. Leur disposition ne dépend que du numéro
  * de la zone (bruit déterministe) : deux zones voisines ne battent pas ensemble,
  * et une zone se redessine toujours pareille à un instant donné.
+ *
+ * La poche de faible gravité ne pousse pas non plus : elle se dessine à plat,
+ * comme le freinage, et ses particules ne filent pas, elles flottent (voir
+ * `Floater`).
  */
 
 /** Teinte de cœur de chaque espèce de zone (celle de ses traits et de son halo). */
@@ -27,6 +31,7 @@ export const ZONE_TONE: Readonly<Record<ZoneKind, number>> = {
   lateral: COLOR.drift,
   acceleration: COLOR.rocket,
   freinage: COLOR.brake,
+  poche: COLOR.pocket,
 };
 
 /** La même teinte éclaircie vers le blanc : le cœur des traits les plus vifs, comme le cœur presque blanc d'un tube de néon. */
@@ -35,6 +40,7 @@ export const ZONE_CORE: Readonly<Record<ZoneKind, number>> = {
   lateral: mixColor(COLOR.drift, COLOR.white, 0.5),
   acceleration: mixColor(COLOR.rocket, COLOR.white, 0.55),
   freinage: mixColor(COLOR.brake, COLOR.white, 0.45),
+  poche: mixColor(COLOR.pocket, COLOR.white, 0.5),
 };
 
 /** Quand le personnage est dans la zone, ses traits sont d'un cran plus vifs : ce facteur multiplie leur opacité (jamais au-delà de 1). */
@@ -56,7 +62,7 @@ const LEFT: Flow = { vertical: false, sign: -1 };
  * à plat, empilé de bas en haut, sans que rien n'y file.
  */
 export function flowOf(zone: Pick<Zone, 'kind' | 'dir'>): Flow {
-  if (zone.kind === 'freinage') return UP;
+  if (zone.kind === 'freinage' || zone.kind === 'poche') return UP;
   const { x, y } = zone.dir;
   if (Math.abs(y) >= Math.abs(x)) return y < 0 ? DOWN : UP;
   return x < 0 ? LEFT : RIGHT;
@@ -239,42 +245,129 @@ export function streakCount(kind: StreakKind, widthMeters: number, heightMeters:
  */
 export function buildMotes(zone: Pick<Zone, 'id' | 'kind' | 'x0' | 'y0' | 'x1' | 'y1'>): Mote[] {
   if (zone.kind !== 'ascendant' && zone.kind !== 'lateral') return [];
-  const tiers = STREAK_TIERS[zone.kind];
+  const shares = STREAK_TIERS[zone.kind].map((tier) => tier.share);
   const count = streakCount(zone.kind, zone.x1 - zone.x0, zone.y1 - zone.y0);
   const motes: Mote[] = [];
   for (let i = 0; i < count; i += 1) {
     const seed = zone.id * 1009 + i * 31;
     const lane = frac(0.5 + (i + 1) * R2_LANE + (noise(seed) - 0.5) * MOTE_JITTER);
     const start = frac(0.25 + (i + 1) * R2_START + (noise(seed + 7) - 0.5) * MOTE_JITTER);
-    motes.push({ lane: LANE_MARGIN + (1 - 2 * LANE_MARGIN) * lane, start, tier: tierOf(i, count, tiers) });
+    motes.push({ lane: LANE_MARGIN + (1 - 2 * LANE_MARGIN) * lane, start, tier: tierOfShare(i, count, shares) });
   }
   return motes;
 }
 
-/** Le rang de la traînée numéro `index` sur `count` : les premières sont du rang 0, puis du rang 1, selon la part de chaque rang. */
-function tierOf(index: number, count: number, tiers: readonly StreakTier[]): number {
+/** Le rang de l'élément numéro `index` sur `count` : les premiers sont du rang 0, puis du rang 1, selon la part (`shares`) de chaque rang. */
+function tierOfShare(index: number, count: number, shares: readonly number[]): number {
   let upTo = 0;
-  for (let tier = 0; tier < tiers.length - 1; tier += 1) {
-    upTo += (tiers[tier]?.share ?? 0) * count;
+  for (let tier = 0; tier < shares.length - 1; tier += 1) {
+    upTo += (shares[tier] ?? 0) * count;
     if (index < Math.round(upTo)) return tier;
   }
-  return tiers.length - 1;
+  return shares.length - 1;
 }
 
-/** Ce que le rendu retient d'une zone d'une image à l'autre : son sens, ses dimensions en mètres et ses traînées. Calculé une fois par zone. */
+/**
+ * Poche de faible gravité : de petites particules qui flottent. Chacune tourne lentement autour de son point de repos, d'un mouvement
+ * qui lui est propre (deux pulsations différentes, deux phases) : aucune direction commune, rien ne file, ce n'est pas un courant. Leur
+ * éclat monte et descend à son tour, doucement. Particules par mètre carré de poche et bornes ; pulsations (radians par seconde) et portée
+ * (mètres) du mouvement ; pulsation de l'éclat ; rayon en pixels de chacun des trois rangs de taille, et part de particules de chaque rang.
+ */
+export const FLOATER_DENSITY = 0.2;
+export const FLOATER_MIN = 8;
+export const FLOATER_MAX = 90;
+export const FLOATER_RATE_MIN = 0.12;
+export const FLOATER_RATE_MAX = 0.32;
+export const FLOATER_REACH_MIN = 0.3;
+export const FLOATER_REACH_MAX = 0.9;
+export const FLOATER_GLOW_RATE = 0.9;
+export const FLOATER_RADII: readonly number[] = [1.3, 1.9, 2.8];
+export const FLOATER_SHARES: readonly number[] = [0.55, 0.3, 0.15];
+
+/** Une particule de poche : son point de repos (mètres depuis l'entrée de la zone et depuis son bord gauche), ses portées, ses pulsations et phases, et son rang de taille. */
+export interface Floater {
+  readonly along: number;
+  readonly across: number;
+  readonly reachAlong: number;
+  readonly reachAcross: number;
+  readonly rateAlong: number;
+  readonly rateAcross: number;
+  readonly phaseAlong: number;
+  readonly phaseAcross: number;
+  readonly phaseGlow: number;
+  readonly tier: number;
+}
+
+/** Où est la particule à un instant : sa position en mètres (mêmes repères que son point de repos) et son éclat, de 0 à 1. */
+export interface FloaterSpot {
+  along: number;
+  across: number;
+  glow: number;
+}
+
+const TAU = 2 * Math.PI;
+
+/** Le nombre de particules d'une poche de cette taille (mètres) : proportionnel à sa surface, borné. */
+export function floaterCount(widthMeters: number, heightMeters: number): number {
+  return Math.min(FLOATER_MAX, Math.max(FLOATER_MIN, Math.round(widthMeters * heightMeters * FLOATER_DENSITY)));
+}
+
+/**
+ * Les particules d'une poche : toujours les mêmes pour le même numéro de zone et les mêmes dimensions, jamais hors de la poche (le repos est
+ * rangé à une portée des bords, en hauteur). Rien pour les autres espèces.
+ */
+export function buildFloaters(zone: Pick<Zone, 'id' | 'kind' | 'x0' | 'y0' | 'x1' | 'y1'>): Floater[] {
+  if (zone.kind !== 'poche') return [];
+  const breadth = zone.x1 - zone.x0;
+  const length = zone.y1 - zone.y0;
+  const count = floaterCount(breadth, length);
+  const floaters: Floater[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const seed = zone.id * 2003 + i * 53;
+    const reachAlong = FLOATER_REACH_MIN + (FLOATER_REACH_MAX - FLOATER_REACH_MIN) * noise(seed + 3);
+    const reachAcross = FLOATER_REACH_MIN + (FLOATER_REACH_MAX - FLOATER_REACH_MIN) * noise(seed + 5);
+    const across = frac(0.5 + (i + 1) * R2_LANE + (noise(seed) - 0.5) * MOTE_JITTER);
+    const along = frac(0.25 + (i + 1) * R2_START + (noise(seed + 7) - 0.5) * MOTE_JITTER);
+    floaters.push({
+      // Le repos laisse à la particule la place de sa portée en hauteur : elle ne sort jamais par le haut ni par le bas.
+      along: length > 2 * reachAlong ? reachAlong + along * (length - 2 * reachAlong) : length / 2,
+      across: across * breadth,
+      reachAlong,
+      reachAcross,
+      rateAlong: FLOATER_RATE_MIN + (FLOATER_RATE_MAX - FLOATER_RATE_MIN) * noise(seed + 11),
+      rateAcross: FLOATER_RATE_MIN + (FLOATER_RATE_MAX - FLOATER_RATE_MIN) * noise(seed + 13),
+      phaseAlong: TAU * noise(seed + 17),
+      phaseAcross: TAU * noise(seed + 19),
+      phaseGlow: TAU * noise(seed + 23),
+      tier: tierOfShare(i, count, FLOATER_SHARES),
+    });
+  }
+  return floaters;
+}
+
+/** Où est la particule à l'instant `clock` (secondes de temps réel) : un va-et-vient lent autour de son repos dans chaque sens, et un éclat qui bat. Écrit dans `out`. */
+export function floaterAt(floater: Floater, clock: number, out: FloaterSpot): FloaterSpot {
+  out.along = floater.along + floater.reachAlong * Math.sin(floater.phaseAlong + clock * floater.rateAlong);
+  out.across = floater.across + floater.reachAcross * Math.sin(floater.phaseAcross + clock * floater.rateAcross);
+  out.glow = 0.5 + 0.5 * Math.sin(floater.phaseGlow + clock * FLOATER_GLOW_RATE);
+  return out;
+}
+
+/** Ce que le rendu retient d'une zone d'une image à l'autre : son sens, ses dimensions en mètres, ses traînées et, pour une poche, ses particules. Calculé une fois par zone. */
 export interface ZoneKit {
   readonly flow: Flow;
   /** Longueur dans le sens de la poussée, largeur en travers, en mètres. */
   readonly lengthMeters: number;
   readonly breadthMeters: number;
   readonly motes: readonly Mote[];
+  readonly floaters: readonly Floater[];
 }
 
 export function buildKit(zone: Pick<Zone, 'id' | 'kind' | 'dir' | 'x0' | 'y0' | 'x1' | 'y1'>): ZoneKit {
   const flow = flowOf(zone);
   const width = zone.x1 - zone.x0;
   const height = zone.y1 - zone.y0;
-  return { flow, lengthMeters: flow.vertical ? height : width, breadthMeters: flow.vertical ? width : height, motes: buildMotes(zone) };
+  return { flow, lengthMeters: flow.vertical ? height : width, breadthMeters: flow.vertical ? width : height, motes: buildMotes(zone), floaters: buildFloaters(zone) };
 }
 
 /** Un tronçon de parcours, en fractions de la longueur de la zone (de 0 à 1), de l'arrière vers l'avant. */

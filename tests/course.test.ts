@@ -181,7 +181,7 @@ describe('robot vérificateur', () => {
         if (a.pos.y < sim.state.fogY) continue;
         const nearEdge = sim.state.schedule.some((e) => Math.abs(a.pos.y - (sim.state.groundY + e.at)) < 6 || Math.abs(a.pos.y - (sim.state.groundY + e.at + e.length)) < 6);
         if (nearEdge) continue;
-        const env = environmentOf(eventsAt(sim.state.schedule, sim.state.groundY, a.pos.y));
+        const env = environmentOf(eventsAt(sim.state.schedule, sim.state.groundY, a.pos.y), sim.state.groundY, a.pos.y);
         if (!canExit(a, anchors, sim.state.obstacles, null, T, env, sim.state.zones)) stolen.push(`graine ${seed}, point ${a.id}`);
       }
     }
