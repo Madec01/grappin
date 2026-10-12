@@ -215,7 +215,9 @@ export async function pilotFrame(page: Page, memory: PilotMemory, nowMs: number,
     const aboveRelease = target !== undefined && memory.releasedPos !== null && rise(memory.releasedPos, { x: target.x, y: target.y }) > ABOVE_RELEASE;
     const risingStill = rise({ x: 0, y: 0 }, s.vel) > 0;
     const edgeSoon = Math.abs(s.pos.x + s.vel.x * EDGE_SOON_SECONDS) > WORLD_HALF_WIDTH - EDGE_MARGIN;
-    const climbing = memory.launched ? !recently || aboveRelease : !(recently && !aboveRelease && risingStill && !edgeSoon);
+    // Sans le monde rejoué, le pilote lâche à l'ancienne, sans savoir si le vol attrape plus haut : il attrape alors tout ce qui vient,
+    // sinon il filerait hors du monde en refusant les prises plus basses.
+    const climbing = memory.launched ? !recently || aboveRelease : !(options.world !== undefined && recently && !aboveRelease && risingStill && !edgeSoon);
     // Porté vers le haut, on ne rattrape pas un point sous soi : on monte d'abord, comme un joueur.
     const rising = s.vel.y > RISING_SPEED && target !== undefined && target.y < s.pos.y - RISING_BELOW;
     if (target && climbing && !rising && !options.wait?.(s, memory) && swingIsSafe(options.world, s, live, target.id)) {
