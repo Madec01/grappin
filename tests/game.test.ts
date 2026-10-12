@@ -348,6 +348,8 @@ describe('jeu', () => {
         'pullY',
         'pulse',
         'releaseWindow',
+        'switchOpen',
+        'closing',
         'rings',
         'ropeLength',
         'runs',
@@ -1644,10 +1646,13 @@ describe('liste des niveaux : deux pages de dix', () => {
     expect(seen.lastLevelsPage).toBe(1);
     tap(game, seen, 'suite');
     game.frame(0.016);
-    expect(seen.lastLevelsPage).toBe(1);
+    expect(seen.lastLevelsPage).toBe(2);
+    tap(game, seen, 'suite');
+    game.frame(0.016);
+    expect(seen.lastLevelsPage).toBe(2);
     tap(game, seen, 'precedents');
     game.frame(0.016);
-    expect(seen.lastLevelsPage).toBe(0);
+    expect(seen.lastLevelsPage).toBe(1);
     expect(game.debugState()).toMatchObject({ screen: 'levels', step: 0 });
   });
 
@@ -2119,7 +2124,7 @@ describe('sons et départ', () => {
     expect(game.debugState().atelierChoice).toEqual(['roue']);
     seen.hit = () => 'atelierAll';
     game.press(1, 1);
-    expect(game.debugState().atelierChoice).toHaveLength(31);
+    expect(game.debugState().atelierChoice).toHaveLength(36);
     seen.hit = () => 'atelierNone';
     game.press(1, 1);
     expect(game.debugState().atelierChoice).toEqual([]);

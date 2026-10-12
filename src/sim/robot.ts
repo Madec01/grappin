@@ -5,7 +5,8 @@ import { flightStep, startFlight } from './flight';
 import { PULL_MAX, launchVelocity, pulledPosition } from './launcher';
 import { provableObstacles } from './obstacles';
 import { zoneAt, type Body } from './physics';
-import { bestLaunch } from './pilot';
+import { bestLaunch, bestRail } from './pilot';
+import { railParam, railPoint, railPull, railVelocity } from './holds';
 import { WORLD_HALF_WIDTH, releaseVelocity } from './rules';
 import { upOf } from './environment';
 import type { Anchor, RuleEvent, SimState } from './state';
@@ -55,6 +56,11 @@ export const LAUNCH_WAIT_MAX_SECONDS = 6;
 export const WHEEL_READY_RATIO = 0.95;
 const WHEEL_UP_RATIO = 0.5;
 const WHEEL_HOLD_MAX_SECONDS = 8;
+/** Sur un aimant, le robot lâche dès que le vol attrape une prise au-dessus de lui, et jamais plus de ce temps attiré. Sur un lien élastique, dès qu'il remonte et que le vol attrape. */
+const MAGNET_HOLD_MAX_SECONDS = 4;
+const ELASTIC_HOLD_MAX_SECONDS = 7;
+/** Un lien élastique ne vaut que pris en passant vite (sa puissance vient du mouvement d'arrivée) : sous cette vitesse, le robot le laisse, s'il a autre chose à portée. */
+const ELASTIC_CATCH_SPEED = 6;
 
 /** Vrai si le vol `body` ne heurte, pendant `seconds`, aucun obstacle qui bouge (tournant, panneau qui glisse), regardé là où il sera à chaque pas. */
 function clearOfMoving(state: SimState, body: Body, seconds: number, tuning: Tuning): boolean {
@@ -69,10 +75,14 @@ function clearOfMoving(state: SimState, body: Body, seconds: number, tuning: Tun
   return true;
 }
 
-/** Vrai si un tir de traction `pull` depuis le lanceur tenu ne heurte, pendant le vol que le vérificateur regarde, aucun obstacle qui bouge : sous un mur à ouverture mobile, c'est le moment de tirer. Partagé avec le pilote des scènes. */
+/** Vrai si un tir de traction `pull` depuis le lanceur (ou le rail) tenu ne heurte, pendant le vol que le vérificateur regarde, aucun obstacle qui bouge : sous un mur à ouverture mobile, c'est le moment de tirer. Partagé avec le pilote des scènes. */
 export function launchIsClear(state: SimState, pull: Vec2, tuning: Tuning): boolean {
   const launcher = state.rope ? state.anchors.find((a) => a.id === state.rope?.anchorId) : undefined;
   if (!launcher) return true;
+  if (launcher.kind === 'rail' && launcher.rail) {
+    const t = railParam(pull);
+    return clearOfMoving(state, { pos: railPoint(launcher.pos, launcher.rail, t), vel: railVelocity(launcher.rail, t) }, tuning.verifyFlightSeconds, tuning);
+  }
   return clearOfMoving(state, { pos: pulledPosition(launcher.pos, pull), vel: launchVelocity(pull, state.env) }, tuning.verifyFlightSeconds, tuning);
 }
 
@@ -170,7 +180,8 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
       // qu'une sortie du monde : s'il tombe, ou si ce point est le dernier à portée, il attrape quand même.
       const others = target ? s.anchors.filter((a) => a.id !== target.id && !a.broken && Math.hypot(a.pos.x - s.hero.pos.x, a.pos.y - s.hero.pos.y) <= tuning.ropeMax).length : 0;
       const safe = target !== null && target !== undefined && (s.hero.vel.y < 0 || others === 0 || swingIsClear(target, { pos: s.hero.pos, vel: s.hero.vel }, s.anchors, provableObstacles(s.obstacles), tuning, s.env, s.zones));
-      if (target && climbing && !rising && safe && plannedPress < 0) plannedPress = s.step + reactionSteps;
+      const slowForElastic = target?.kind === 'elastique' && others > 0 && Math.hypot(s.hero.vel.x, s.hero.vel.y) < ELASTIC_CATCH_SPEED;
+      if (target && climbing && !rising && safe && !slowForElastic && plannedPress < 0) plannedPress = s.step + reactionSteps;
       if (plannedPress >= 0 && s.step >= plannedPress) {
         plannedPress = -1;
         if (sim.press()) {
@@ -178,9 +189,10 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
           attachStep = s.step;
         }
       }
-    } else if (s.anchors.find((a) => a.id === s.rope?.anchorId)?.kind === 'lanceur') {
+    } else if (['lanceur', 'rail'].includes(s.anchors.find((a) => a.id === s.rope?.anchorId)?.kind ?? '')) {
       // Sur un lanceur : après son temps de réaction, le robot tire la traction que le vérificateur a prouvée (voir `pilot.ts`) ;
-      // sans sortie prouvée, il vise le point le plus proche au-dessus et tire à l'opposé, aux deux tiers.
+      // sans sortie prouvée, il vise le point le plus proche au-dessus et tire à l'opposé, aux deux tiers. Sur un rail, de même :
+      // la position de l'arc prouvée, sinon le milieu.
       const launcher = s.anchors.find((a) => a.id === s.rope?.anchorId)!;
       if (plannedRelease < 0) plannedRelease = s.step + aimSteps;
       if (s.step >= plannedRelease) {
@@ -192,7 +204,7 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
         }
         const dir = target ? { x: target.pos.x - launcher.pos.x, y: target.pos.y - launcher.pos.y } : { x: 0, y: 1 };
         const len = Math.hypot(dir.x, dir.y) || 1;
-        const pull = bestLaunch(s, tuning) ?? { x: (-dir.x / len) * PULL_MAX * 0.7, y: (-dir.y / len) * PULL_MAX * 0.7 };
+        const pull = launcher.kind === 'rail' ? (bestRail(s, tuning) ?? railPull(0.5)) : (bestLaunch(s, tuning) ?? { x: (-dir.x / len) * PULL_MAX * 0.7, y: (-dir.y / len) * PULL_MAX * 0.7 });
         // Sous un mur dont le trou va et vient, le robot regarde où sera le trou pendant son tir, et attend qu'il passe (jamais trop longtemps).
         const waited = (s.step - attachStep) * tuning.stepSeconds;
         if (waited < LAUNCH_WAIT_MAX_SECONDS && !launchIsClear(s, pull, tuning)) {
@@ -210,14 +222,21 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
       // Sur une roue, il faut la vitesse du moteur et partir presque droit vers le haut : le robot fait le tour et lâche à ce moment-là.
       const held_ = s.anchors.find((a) => a.id === s.rope?.anchorId);
       const onWheel = held_?.kind === 'roue';
-      const ready = onWheel ? speed >= tuning.wheelSpeed * WHEEL_READY_RATIO : speed >= profile.speedTarget || s.rope.length <= tuning.ropeMin + 1e-9;
+      const onMagnet = held_?.kind === 'aimant';
+      const onElastic = held_?.kind === 'elastique';
+      const risingNow = rise({ x: 0, y: 0 }, s.hero.vel) > 0;
+      const ready = onWheel ? speed >= tuning.wheelSpeed * WHEEL_READY_RATIO : onMagnet || onElastic ? risingNow : speed >= profile.speedTarget || s.rope.length <= tuning.ropeMin + 1e-9;
       const ax = Math.abs(s.hero.vel.x);
       const slope = ax > 0 ? s.hero.vel.y / ax : Infinity;
-      // Sur une roue, le robot lâche au premier instant où le vol qui suivrait attrape un point au-dessus de la roue (ce que le vérificateur a prouvé).
+      // Sur une roue ou un aimant, le robot lâche au premier instant où le vol qui suivrait attrape un point au-dessus de la prise (ce que le vérificateur a prouvé).
+      const catchesAbove = (): boolean => held_ !== undefined && flightCatches(held_, { pos: s.hero.pos, vel: s.hero.vel }, s.anchors, s.obstacles, tuning, s.env, s.zones, s.rings).some((id) => (s.anchors.find((a) => a.id === id)?.pos.y ?? -Infinity) > held_.pos.y + 1);
       const inWindow = onWheel
-        ? s.hero.vel.y >= tuning.wheelSpeed * WHEEL_UP_RATIO && flightCatches(held_, { pos: s.hero.pos, vel: s.hero.vel }, s.anchors, s.obstacles, tuning, s.env, s.zones, s.rings).some((id) => (s.anchors.find((a) => a.id === id)?.pos.y ?? -Infinity) > held_.pos.y + 1)
-        : s.hero.vel.y > 1 && slope > profile.minSlope && slope < profile.maxSlope;
-      const wants = (ready && inWindow) || held > (onWheel ? WHEEL_HOLD_MAX_SECONDS : profile.maxHoldSeconds);
+        ? s.hero.vel.y >= tuning.wheelSpeed * WHEEL_UP_RATIO && catchesAbove()
+        : onMagnet || onElastic
+          ? s.step % RELEASE_EVERY === 0 && catchesAbove()
+          : s.hero.vel.y > 1 && slope > profile.minSlope && slope < profile.maxSlope;
+      const maxHold = onWheel ? WHEEL_HOLD_MAX_SECONDS : onMagnet ? MAGNET_HOLD_MAX_SECONDS : onElastic ? ELASTIC_HOLD_MAX_SECONDS : profile.maxHoldSeconds;
+      const wants = (ready && inWindow) || held > maxHold;
       // Un lâcher droit dans un mur n'est pas un lâcher, ni un lâcher dont le vol n'attrape rien au-dessus (ce que le vérificateur regarde,
       // `flightCatches`) : le robot attend le prochain moment, sauf s'il pend depuis trop longtemps.
       // Le vol se regarde tous les `RELEASE_EVERY` pas, comme le vérificateur : il coûte cher.
@@ -227,10 +246,10 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
         plannedRelease = -1;
         sim.release();
         holdTotal += held;
-        // Lancé par une roue, comme par un lanceur, ou simplement lâché : le robot ne rattrape rien sous le point pendant un moment, il monte.
+        // Lancé par une roue ou un aimant, comme par un lanceur, ou simplement lâché : le robot ne rattrape rien sous le point pendant un moment, il monte.
         launchedStep = s.step;
         launchedPos = held_ ? { ...held_.pos } : null;
-        launched = onWheel;
+        launched = onWheel || onMagnet;
       }
     }
     sim.step();

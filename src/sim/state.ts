@@ -16,8 +16,19 @@ import type { EventKind, EventRuntime, ScheduledEvent } from './events';
  * électrique (piège à cycles), à éclipse (accrochable deux secondes sur
  * quatre), lanceur (fronde), roue (motorisée : accroché, le personnage est
  * entraîné en rotation à vitesse constante, sans treuil, et lâche quand il veut).
+ * Lot 5 (`holds.ts`) : aimant (attire vers son noyau sans corde tant que le doigt
+ * reste posé), interrupteur (tenue, elle ouvre le mécanisme qu'elle commande,
+ * qui se referme un temps après le lâcher), rail (retient sur un arc où le doigt
+ * choisit la position, et lance selon la direction de cet endroit), élastique
+ * (un lien qui s'étire et rappelle : une chute devient une remontée).
  */
-export type AnchorKind = 'normal' | 'fragile' | 'booster' | 'electrique' | 'eclipse' | 'lanceur' | 'roue';
+export type AnchorKind = 'normal' | 'fragile' | 'booster' | 'electrique' | 'eclipse' | 'lanceur' | 'roue' | 'aimant' | 'interrupteur' | 'rail' | 'elastique';
+
+/** L'arc d'un rail de lancement : demi-largeur et flèche, en mètres, posé sur sa prise. */
+export interface Rail {
+  readonly halfWidth: number;
+  readonly rise: number;
+}
 
 /** Le moteur d'une roue : le sens de rotation, +1 vers la gauche (sens trigonométrique, vu de face), -1 vers la droite. La vitesse est un réglage (`wheelSpeed`). */
 export interface Motor {
@@ -37,6 +48,8 @@ export interface Anchor {
   readonly motor?: Motor;
   /** Prise d'une bande d'accordéon (lot 3, T3) : la bande gauche (-1) ou droite (1) ; la prise glisse avec elle (`cable`). */
   readonly band?: -1 | 1;
+  /** Rail de lancement : son arc. */
+  readonly rail?: Rail;
 }
 
 /**
@@ -66,6 +79,19 @@ export interface Slide {
 }
 
 /**
+ * Panneau d'un passage qui se referme (O6 du brief) : quand le personnage passe
+ * `triggerY`, le panneau glisse de `travel` mètres vers `side` en `closeSeconds`,
+ * reste fermé `shutSeconds`, rouvre en `closeSeconds`, puis se réarme.
+ */
+export interface Closer {
+  readonly triggerY: number;
+  readonly travel: number;
+  readonly side: -1 | 1;
+  readonly closeSeconds: number;
+  readonly shutSeconds: number;
+}
+
+/**
  * Obstacle : boîte alignée sur les axes, en mètres, Y vers le haut. Le frôler
  * rapporte ; le toucher dépend de son espèce. Un obstacle qui bouge (voir
  * `moving.ts`) garde ici sa boîte de repos : un tournant, le carré qui
@@ -86,6 +112,12 @@ export interface Obstacle {
   readonly rotor?: Rotor;
   /** Panneau qui glisse : son va-et-vient. */
   readonly slide?: Slide;
+  /** Porte commandée par une prise interrupteur (lot 5, P5) : le numéro de la prise ; fermée, sauf tant que la prise est tenue et `openUntilStep` après. */
+  readonly switchedBy?: number;
+  openUntilStep?: number;
+  /** Panneau d'un passage qui se referme (lot 5, O6), et le pas où le personnage l'a déclenché. */
+  readonly closer?: Closer;
+  triggeredStep?: number;
 }
 
 /**
@@ -187,7 +219,9 @@ export type RuleEvent =
   /** Anneau de précision traversé ; `centred` si le passage est près du centre. */
   | { readonly type: 'ring'; readonly ringId: number; readonly centred: boolean }
   /** Décharge d'une prise électrique tenue quand elle se charge : corde lâchée, personnage repoussé et étourdi. */
-  | { readonly type: 'shock'; readonly anchorId: number };
+  | { readonly type: 'shock'; readonly anchorId: number }
+  /** Un passage qui se referme vient de se déclencher derrière le personnage : il faut sortir avant la fermeture. */
+  | { readonly type: 'escape'; readonly obstacleId: number };
 
 export interface SimState {
   /** Numéro du pas courant. */

@@ -3,7 +3,8 @@ import { ATELIER_ELEMENTS, isAtelierId, parseAtelier, toggleAtelier, type Atelie
 import type { Vec2 } from '../core/math/vec2';
 import { Music, silentAudio } from '../audio/music';
 import { SILENT_PULSE, pulseAt, syntheticRhythm, type Pulse, type Rhythm } from '../audio/rhythm';
-import { bestLaunch } from '../sim/pilot';
+import { closerState } from '../sim/moving';
+import { bestLaunch, bestRail } from '../sim/pilot';
 import { silentRhythms, type RhythmSource } from '../audio/rhythms';
 import { cueFor, silentSfx, type SoundPlayer } from '../audio/sfx';
 import { Coach } from './coach';
@@ -173,6 +174,9 @@ export interface DebugState {
   readonly heldKind: AnchorKind | null;
   /** Lâcher maintenant serait parfait : la fenêtre de lâcher, que le rendu montre. */
   readonly releaseWindow: boolean;
+  /** Lot 5 : une porte commandée par un interrupteur est ouverte en ce moment ; un passage qui se referme est déclenché (il se ferme ou est fermé). */
+  readonly switchOpen: boolean;
+  readonly closing: boolean;
   /** Le conseil du tutoriel affiché en ce moment, ou null. */
   readonly tip: string | null;
   /** Traction du doigt sur un lanceur tenu, en mètres de monde (y vers le haut), plafonnée ; nulle sinon. */
@@ -418,7 +422,8 @@ export class Game {
     }
     if (this.screen === 'playing') {
       const { sim } = this.run;
-      sim.release(heldKind(sim.state) === 'lanceur' ? (pull ?? sim.state.pull) : undefined);
+      const kind = heldKind(sim.state);
+      sim.release(kind === 'lanceur' || kind === 'rail' ? (pull ?? sim.state.pull) : undefined);
     }
     this.finger = null;
   }
@@ -578,7 +583,8 @@ export class Game {
 
   /** La traction qui, depuis le lanceur tenu, lance vers un point au-dessus à travers le mur (celle que le vérificateur a prouvée), ou null. Pour les pilotes de test. */
   launchAim(): Vec2 | null {
-    return bestLaunch(this.run.sim.state, this.run.tuning);
+    const { state } = this.run.sim;
+    return heldKind(state) === 'rail' ? bestRail(state, this.run.tuning) : bestLaunch(state, this.run.tuning);
   }
 
   /** Les points d'accroche encore là, pour un pilote de test qui doit viser (un lanceur, un trou dans un mur). */
@@ -642,6 +648,8 @@ export class Game {
       events: state.schedule.map((event, index) => ({ kind: event.kind, started: state.eventRuntimes[index]!.startStep !== null, ended: state.eventRuntimes[index]!.endStep !== null })),
       heldKind: heldKind(state),
       releaseWindow: inReleaseWindow(state, this.run.tuning),
+      switchOpen: state.obstacles.some((box) => box.switchedBy !== undefined && box.openUntilStep !== undefined && state.step < box.openUntilStep),
+      closing: state.obstacles.some((box) => box.closer !== undefined && box.triggeredStep !== undefined && closerState(box, state.step, this.run.tuning) !== 'rouvre'),
       tip: this.run.effects.banner?.tone === 'tip' ? this.run.effects.banner.text : null,
       pullX: state.pull.x,
       pullY: state.pull.y,
@@ -658,10 +666,11 @@ export class Game {
     return this.run.camera.screenToWorldDelta(this.finger.at.x - this.finger.from.x, this.finger.at.y - this.finger.from.y);
   }
 
-  /** Tenu à un lanceur, le doigt qui tire règle la traction à chaque image. */
+  /** Tenu à un lanceur ou sur un rail, le doigt qui tire règle la traction à chaque image. */
   private aimLauncher(): void {
     const { sim } = this.run;
-    if (heldKind(sim.state) !== 'lanceur') return;
+    const kind = heldKind(sim.state);
+    if (kind !== 'lanceur' && kind !== 'rail') return;
     const pull = this.fingerPull();
     if (pull) sim.aim(pull);
   }

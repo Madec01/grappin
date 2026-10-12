@@ -4,6 +4,7 @@ import { STILL, type Environment } from './environment';
 import { CABLE_HALF_LENGTH, CABLE_PERIOD_SECONDS, TRAVERSIERE_PERIOD_SECONDS } from './events';
 import { circleBoxGap } from './geometry';
 import { LANCEUR_CLEARANCE } from './launcher';
+import { DEFAULT_RAIL, RAIL_CLEARANCE } from './holds';
 import { zoneAt } from './physics';
 import { WORLD_HALF_WIDTH } from './rules';
 import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from './state';
@@ -25,7 +26,7 @@ import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from './state
  * d'accélération puis une zone de freinage avant le point suivant
  * (« accélération, envolée, freinage, rattrapage »).
  */
-export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' | 'fragiles' | 'saut' | 'lanceur' | 'courant' | 'derive' | 'fusee' | 'brise' | 'sas' | 'cerceau' | 'ricochet' | 'percee' | 'roue' | 'tournant' | 'glissiere' | 'accordeon' | 'poche';
+export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' | 'fragiles' | 'saut' | 'lanceur' | 'courant' | 'derive' | 'fusee' | 'brise' | 'sas' | 'cerceau' | 'ricochet' | 'percee' | 'roue' | 'tournant' | 'glissiere' | 'accordeon' | 'poche' | 'aimant' | 'interrupteur' | 'rail' | 'elastique' | 'evasion';
 
 /**
  * Les cinq derniers motifs EXIGENT une mécanique du lot 2 (retour du
@@ -42,7 +43,14 @@ export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' 
  * de hauteur qu'un vol direct, et la visée attrape à 5,6 m. Lot 3, les
  * transformations du terrain : « accordeon », deux bandes de prises qui se
  * rapprochent et s'écartent ; « poche », une poche de faible gravité aux prises
- * plus espacées. (Le serpentin, lui, est un événement : voir `events.ts`.)
+ * plus espacées. (Le serpentin, lui, est un événement : voir `events.ts`.) Lot 5,
+ * les prises nouvelles (`holds.ts`) et le passage qui se referme : « aimant »,
+ * un aimant devant une prise trop haute pour un balancement, que seule son
+ * attraction atteint ; « interrupteur », une prise qui ouvre la porte du mur
+ * au-dessus d'elle ; « rail », un rail de lancement sous un mur à trou décalé ;
+ * « elastique », un lien élastique de côté, dont le rappel seul monte à la
+ * prise suivante ; « evasion », un couloir dont la sortie se referme derrière
+ * le personnage.
  */
 export const ARCHETYPES: readonly Archetype[] = ['chaine', 'escalier', 'couloir', 'dalles', 'rafale', 'fragiles', 'saut', 'lanceur', 'courant', 'derive', 'fusee', 'brise', 'sas', 'cerceau', 'ricochet', 'percee'];
 
@@ -216,6 +224,10 @@ export function tierProfile(tier: number): TierProfile {
   // Lot 3 : la poche de faible gravité, une respiration, dès le palier 2 ; l'accordéon, qui demande du timing, au palier 4.
   if (tier >= 2) archetypes.push('poche');
   if (tier >= 4) archetypes.push('accordeon');
+  // Lot 5 : l'aimant et l'interrupteur au palier 3 (brief : « priorité de prototype : roue, aimant, interrupteur »), le rail et le lien élastique au 4, le passage qui se referme au 5.
+  if (tier >= 3) archetypes.push('aimant', 'interrupteur');
+  if (tier >= 4) archetypes.push('rail', 'elastique');
+  if (tier >= 5) archetypes.push('evasion');
   return {
     spacing: Math.min(5, 3 + 0.4 * tier),
     obstacles: tier === 0 ? 0 : Math.min(3, 1 + Math.floor(tier / 2)),
@@ -288,6 +300,11 @@ const SHAPES: Record<Archetype, { dy: readonly [number, number]; dx: readonly [n
   glissiere: { dy: [0.55, 0.9], dx: [0.4, 1] },
   accordeon: { dy: [0.55, 0.9], dx: [0.4, 1] },
   poche: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  aimant: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  interrupteur: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  rail: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  elastique: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  evasion: { dy: [0.55, 0.9], dx: [0.4, 1] },
 };
 
 /**
@@ -583,6 +600,115 @@ export function accordion(ids: IdCounters, from: Vec2, halfWidth: number): { anc
   return { anchors, exit: { x: clampX(from.x * 0.3, halfWidth), y: top + ACCORDION_EXIT_RISE } };
 }
 
+/**
+ * Lot 5 (0.15.0), en mètres. Aimant (P3) : la chaîne reprend `MAGNET_RISE`
+ * au-dessus de l'aimant, un peu de côté, trop haut pour un balancement : seule
+ * l'attraction, qui lance le personnage à travers le noyau, y mène. Interrupteur
+ * (P5) : le mur d'un lanceur dont le trou décalé est une porte commandée par la
+ * prise, ouverte tant qu'on la tient et quatre secondes après. Rail (P2) : un
+ * rail de lancement (`DEFAULT_RAIL`) sous un mur à trou décalé, comme un
+ * lanceur. Lien élastique (P4) : la prise élastique est de côté, à peine plus
+ * haut (`ELASTIC_SIDE`, `ELASTIC_LIFT`) ; on l'attrape en passant, on tombe
+ * au-delà, le lien rappelle, et la chaîne reprend `ELASTIC_RISE` au-dessus :
+ * seul le rappel y monte. Rien ne se pose sous un lien sur `ELASTIC_DROP`.
+ * Évasion (O6) : un couloir de `CORRIDOR_HEIGHT` entre deux parois à
+ * ± `CORRIDOR_HALF_WIDTH`, des prises en zigzag serré dedans, et à sa sortie
+ * deux panneaux qui glissent depuis les parois et ferment le couloir
+ * `CLOSE_SECONDS` après que le personnage a passé sa ligne d'entrée, le
+ * gardent fermé `SHUT_SECONDS`, puis rouvrent.
+ */
+export const MAGNET_RISE = 10;
+const MAGNET_SIDE = 2;
+/** Le verrou d'un interrupteur : une porte de cette largeur, posée sur le vol entre la prise et la suivante, un peu au-dessus de la ligne droite. */
+export const LOCK_WIDTH = 2.4;
+const LOCK_ABOVE_LINE = 0.5;
+export const ELASTIC_SIDE = 3.2;
+export const ELASTIC_RISE = 10.5;
+const ELASTIC_LIFT = 0.4;
+const ELASTIC_DROP = 7;
+export const CORRIDOR_HALF_WIDTH = 3.6;
+export const CORRIDOR_HEIGHT = 10;
+const CORRIDOR_ABOVE_ENTRY = 1.5;
+const CORRIDOR_STEP = 3.3;
+const CORRIDOR_ZIG = 0.6;
+const CORRIDOR_TRIGGER_ABOVE = 1;
+const CORRIDOR_EXIT_RISE = 3.5;
+export const CLOSE_SECONDS = 8;
+export const SHUT_SECONDS = 4;
+/** Hauteur d'un couloir d'évasion, de son point d'entrée à la prise où la chaîne reprend. */
+export const CORRIDOR_RISE = CORRIDOR_ABOVE_ENTRY + CORRIDOR_HEIGHT + CORRIDOR_EXIT_RISE;
+
+/**
+ * L'aimant, `MAGNET_LIFT` au-dessus du point `from` (on l'attrape de loin, il
+ * monte le personnage jusqu'à son noyau), et où la chaîne reprend : à portée du
+ * noyau, trop haut pour un balancement depuis `from`. Partagé avec les scènes.
+ */
+export const MAGNET_LIFT = 6;
+export function magnetHold(ids: IdCounters, from: Vec2, halfWidth: number): { anchor: Anchor; exit: Vec2 } {
+  const side = from.x > 0 ? -1 : 1;
+  const core = { x: clampX(from.x + side * 0.6, halfWidth), y: from.y + MAGNET_LIFT };
+  return { anchor: makeAnchor(ids, core, 'aimant'), exit: { x: clampX(core.x + side * MAGNET_SIDE, halfWidth), y: from.y + MAGNET_RISE } };
+}
+
+/**
+ * La prise interrupteur au point `from`, et le verrou qu'elle commande : une
+ * porte posée sur le vol vers la prise suivante `next`, fermée tant que la
+ * prise n'est pas tenue, ouverte tant qu'on la tient et quatre secondes après.
+ * On tient, on lâche, on passe. Partagé avec les scènes.
+ */
+export function switchLock(ids: IdCounters, from: Vec2, next: Vec2): { anchor: Anchor; door: Obstacle } {
+  const anchor = makeAnchor(ids, from, 'interrupteur');
+  const x = (from.x + next.x) / 2;
+  const y = (from.y + next.y) / 2 + LOCK_ABOVE_LINE;
+  const door: Obstacle = { id: ids.obstacle, x0: x - LOCK_WIDTH / 2, y0: y - OBSTACLE_THICKNESS / 2, x1: x + LOCK_WIDTH / 2, y1: y + OBSTACLE_THICKNESS / 2, kind: 'porte', switchedBy: anchor.id };
+  ids.obstacle += 1;
+  return { anchor, door };
+}
+
+/** Le rail de lancement au point `from`, le mur à trou décalé au-dessus, et où la chaîne reprend. Partagé avec les scènes. */
+export function railHold(ids: IdCounters, from: Vec2, rise: number, gapX: number, halfWidth: number): { anchor: Anchor; walls: Obstacle[]; exit: Vec2 } {
+  const anchor: Anchor = { ...makeAnchor(ids, from, 'rail'), rail: DEFAULT_RAIL };
+  const wallY = from.y + rise;
+  const x = clampX(gapX, halfWidth - GAP_HALF_WIDTH);
+  const walls: Obstacle[] = [
+    { id: ids.obstacle, x0: -WALL_EDGE, y0: wallY, x1: x - GAP_HALF_WIDTH, y1: wallY + OBSTACLE_THICKNESS },
+    { id: ids.obstacle + 1, x0: x + GAP_HALF_WIDTH, y0: wallY, x1: WALL_EDGE, y1: wallY + OBSTACLE_THICKNESS },
+  ];
+  ids.obstacle += 2;
+  return { anchor, walls, exit: { x, y: wallY + ABOVE_WALL } };
+}
+
+/** Le lien élastique de côté du point `from`, vers `side`, et où la chaîne reprend au-dessus de lui. Partagé avec les scènes. */
+export function elasticHold(ids: IdCounters, from: Vec2, side: -1 | 1, halfWidth: number): { anchor: Anchor; exit: Vec2 } {
+  const pos = { x: clampX(from.x + side * ELASTIC_SIDE, halfWidth), y: from.y + ELASTIC_LIFT };
+  return { anchor: makeAnchor(ids, pos, 'elastique'), exit: { x: clampX(pos.x - side * 1, halfWidth), y: pos.y + ELASTIC_RISE } };
+}
+
+/** Le couloir d'évasion au-dessus du point `from` : ses parois, ses prises, ses deux panneaux de sortie, et où la chaîne reprend. Partagé avec les scènes. */
+export function escapeCorridor(ids: IdCounters, from: Vec2, halfWidth: number): { walls: Obstacle[]; anchors: Anchor[]; exit: Vec2 } {
+  const y0 = from.y + CORRIDOR_ABOVE_ENTRY;
+  const y1 = y0 + CORRIDOR_HEIGHT;
+  const half = Math.min(CORRIDOR_HALF_WIDTH, halfWidth);
+  const walls: Obstacle[] = [
+    { id: ids.obstacle, x0: -half - OBSTACLE_THICKNESS, y0, x1: -half, y1 },
+    { id: ids.obstacle + 1, x0: half, y0, x1: half + OBSTACLE_THICKNESS, y1 },
+  ];
+  const closer = { triggerY: y0 + CORRIDOR_TRIGGER_ABOVE, travel: half, closeSeconds: CLOSE_SECONDS, shutSeconds: SHUT_SECONDS };
+  // Au repos, les panneaux sont posés sur les parois, à l'extérieur du couloir ; déclenchés, ils glissent vers le milieu et se rejoignent.
+  walls.push(
+    { id: ids.obstacle + 2, x0: -2 * half, y0: y1, x1: -half, y1: y1 + OBSTACLE_THICKNESS, closer: { ...closer, side: 1 } },
+    { id: ids.obstacle + 3, x0: half, y0: y1, x1: 2 * half, y1: y1 + OBSTACLE_THICKNESS, closer: { ...closer, side: -1 } },
+  );
+  ids.obstacle += 4;
+  const anchors: Anchor[] = [];
+  let side = from.x > 0 ? -1 : 1;
+  for (let y = y0 + 2; y < y1 - 1; y += CORRIDOR_STEP) {
+    anchors.push(makeAnchor(ids, { x: side * CORRIDOR_ZIG, y }));
+    side = -side;
+  }
+  return { walls, anchors, exit: { x: clampX(side * 1.2, halfWidth), y: y1 + CORRIDOR_EXIT_RISE } };
+}
+
 /** Vrai si la boîte s'approche d'une zone à moins de `ZONE_CLEARANCE`. */
 function nearZone(box: Obstacle, zones: readonly Zone[]): boolean {
   return zones.some((z) => box.x1 > z.x0 - ZONE_CLEARANCE && box.x0 < z.x1 + ZONE_CLEARANCE && box.y1 > z.y0 - ZONE_CLEARANCE && box.y0 < z.y1 + ZONE_CLEARANCE);
@@ -637,7 +763,7 @@ export const PLAIN_CONTEXT: SegmentContext = { env: STILL, entryEnv: STILL, cabl
 
 /** Longueur visée d'un segment : de 16 à 24 m (de 22 à 26 pour un motif qui demande de la place), ou jusqu'à la frontière proche d'un événement, à 28 m au plus. */
 function targetHeight(rng: Rng, startY: number, maxY: number, archetype: Archetype): number {
-  const roomy = archetype === 'accordeon' || archetype === 'poche';
+  const roomy = archetype === 'accordeon' || archetype === 'poche' || archetype === 'evasion';
   const natural = roomy ? startY + 22 + 4 * rng.next() : startY + 16 + 8 * rng.next();
   return maxY - 2 <= natural + 4 ? maxY - 2 : natural;
 }
@@ -665,6 +791,8 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
   const zones: Zone[] = [];
   /** Anneaux posés par le motif lui-même (cerceau). */
   const fixedRings: Ring[] = [];
+  /** Points que le motif veut normaux (le point d'où l'on part vers un aimant ou un lien élastique : un propulseur y rendrait la prise inutile). */
+  const pinned = new Set<number>();
 
   while (cur.y < targetY) {
     if (wantsSplit && !splitDone && cur.y - startY > 3 && targetY - cur.y > 9) {
@@ -791,6 +919,60 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
       featureDone = true;
       continue;
     }
+    if (archetype === 'aimant' && !featureDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > MAGNET_RISE + 3) {
+      // Aimant : au-dessus du dernier point, un aimant qui monte le personnage à son noyau ; la chaîne reprend trop haut pour un balancement : lui seul y mène.
+      const { anchor, exit } = magnetHold(ids, cur, halfWidth);
+      pinned.add(anchors[anchors.length - 1]!.id);
+      anchors.push(anchor);
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      featureDone = true;
+      continue;
+    }
+    if (archetype === 'interrupteur' && !featureDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > 8) {
+      // Interrupteur : le dernier point commande un verrou posé sur le vol vers le point suivant ; on le tient ouvert, on lâche, on passe avant qu'il se referme.
+      const next = chainStep(rng, cur, spacing, shape.dy, shape.dx, profile.spread, halfWidth);
+      const { anchor, door } = switchLock(ids, cur, next);
+      anchors[anchors.length - 1] = anchor;
+      fixed.push(door);
+      cur = next;
+      anchors.push(makeAnchor(ids, cur));
+      featureDone = true;
+      continue;
+    }
+    if (archetype === 'rail' && !featureDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > 11) {
+      // Rail : le dernier point devient un rail de lancement sous un mur à trou décalé ; la position sur l'arc choisit l'angle.
+      const side = cur.x > 0 ? -1 : 1;
+      const { anchor, walls, exit } = railHold(ids, cur, WALL_RISE_MIN + WALL_RISE_RANGE * rng.next(), cur.x + side * (GAP_OFFSET_MIN + (GAP_OFFSET_MAX - GAP_OFFSET_MIN) * rng.next()), halfWidth);
+      anchors[anchors.length - 1] = anchor;
+      fixed.push(...walls);
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      featureDone = true;
+      continue;
+    }
+    // Le lien n'est posé qu'à six mètres au-dessus du départ du segment : il faut arriver avec de l'élan, pas depuis le toit.
+    if (archetype === 'elastique' && !featureDone && anchors.length > 0 && cur.y - startY > 6 && targetY - cur.y > ELASTIC_RISE + 3 && halfWidth - Math.abs(cur.x) >= ELASTIC_SIDE - 1) {
+      // Lien élastique : de côté du point courant, un lien que l'on attrape en passant ; la chute l'étire, le rappel monte à la suite.
+      const side: -1 | 1 = cur.x > 0 ? -1 : 1;
+      const { anchor, exit } = elasticHold(ids, cur, side, halfWidth);
+      pinned.add(anchors[anchors.length - 1]!.id);
+      anchors.push(anchor);
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      featureDone = true;
+      continue;
+    }
+    if (archetype === 'evasion' && !featureDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > CORRIDOR_RISE + 1) {
+      // Évasion : un couloir dont la sortie se referme derrière le personnage : il faut le remonter avant.
+      const { walls, anchors: inside, exit } = escapeCorridor(ids, cur, halfWidth);
+      fixed.push(...walls);
+      anchors.push(...inside);
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      featureDone = true;
+      continue;
+    }
     if (archetype === 'accordeon' && !featureDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > ACCORDION_HEIGHT + 1) {
       // Accordéon : deux bandes de prises qui se rapprochent et s'écartent. Une fois sur deux, quand les lanceurs sont permis, on y entre
       // par un lanceur (brief : « très bonne association avec le lanceur : la distance cible évolue »).
@@ -870,7 +1052,7 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
     const side = beside.pos.x > 0 ? -1 : 1;
     pickups.push(makePickup(ids, { x: clampX(beside.pos.x + side * 1.3, halfWidth), y: beside.pos.y + 0.8 }));
   }
-  assignKinds(rng, anchors, profile, archetype, junctionId, branchIds);
+  assignKinds(rng, anchors, profile, archetype, junctionId, branchIds, pinned);
   if (context.cable !== 'none') hangCables(anchors, junctionId, branchIds, halfWidth, context.cable);
   addSpecialAnchors(rng, ids, anchors, profile, halfWidth, zones);
   const rings = [...fixedRings, ...placeRings(rng, ids, anchors, pickups, zones, profile.rings ?? 0, new Set([...branchIds, junctionId ?? -1]), halfWidth, fixedRings)];
@@ -909,7 +1091,7 @@ function placeRings(rng: Rng, ids: IdCounters, anchors: readonly Anchor[], picku
   for (let i = 1; i < anchors.length - 2; i += 1) {
     const a = anchors[i]!;
     const b = anchors[i + 1]!;
-    if (a.kind === 'lanceur' || b.kind === 'lanceur' || a.cable || b.cable || protectedIds.has(a.id) || protectedIds.has(b.id)) continue;
+    if (LAUNCHING.has(a.kind) || LAUNCHING.has(b.kind) || a.cable || b.cable || protectedIds.has(a.id) || protectedIds.has(b.id)) continue;
     if (b.pos.y < a.pos.y + 2) continue;
     pairs.push(i);
   }
@@ -951,13 +1133,25 @@ const SPECIAL_CLEARANCE = 1.6;
  * la visée peut la préférer. Chacune est insérée juste après son point, pour
  * garder la liste à peu près ordonnée par hauteur et le sommet en dernier.
  */
+/** Les prises d'où l'on part d'un coup, sans balancement : rien ne se pose sur leur vol. */
+const LAUNCHING: ReadonlySet<Anchor['kind']> = new Set(['lanceur', 'rail', 'interrupteur', 'aimant', 'elastique']);
+
 /**
- * La bande de tir de chaque lanceur : de juste sous lui jusqu'au-dessus du point
- * où la chaîne reprend par-dessus son mur. Rien d'autre que le mur ne s'y pose :
- * ni obstacle tiré au sort, ni prise spéciale, qui n'aurait pas de sortie.
+ * La bande de tir de chaque lanceur (rail, interrupteur) : de juste sous lui
+ * jusqu'au-dessus du point où la chaîne reprend par-dessus son mur ; celle d'un
+ * aimant, jusqu'à la prise où il envoie ; celle d'un lien élastique, de la
+ * profondeur où il s'étire jusqu'à la prise où son rappel monte. Rien d'autre
+ * que le mur ne s'y pose : ni obstacle tiré au sort, ni prise spéciale, qui
+ * n'aurait pas de sortie.
  */
 function launchBands(anchors: readonly Anchor[]): { readonly y0: number; readonly y1: number }[] {
-  return anchors.filter((a) => a.kind === 'lanceur').map((a) => ({ y0: a.pos.y - 1, y1: a.pos.y + WALL_RISE_MIN + WALL_RISE_RANGE + ABOVE_WALL + 1 }));
+  const bands: { readonly y0: number; readonly y1: number }[] = [];
+  for (const a of anchors) {
+    if (a.kind === 'lanceur' || a.kind === 'rail') bands.push({ y0: a.pos.y - 1, y1: a.pos.y + WALL_RISE_MIN + WALL_RISE_RANGE + ABOVE_WALL + 1 });
+    if (a.kind === 'aimant') bands.push({ y0: a.pos.y - MAGNET_LIFT - 1, y1: a.pos.y + MAGNET_RISE - MAGNET_LIFT + 1 });
+    if (a.kind === 'elastique') bands.push({ y0: a.pos.y - ELASTIC_DROP, y1: a.pos.y + ELASTIC_RISE + 1 });
+  }
+  return bands;
 }
 
 function addSpecialAnchors(rng: Rng, ids: IdCounters, anchors: Anchor[], profile: TierProfile, halfWidth: number, zones: readonly Zone[] = []): void {
@@ -974,8 +1168,8 @@ function addSpecialAnchors(rng: Rng, ids: IdCounters, anchors: Anchor[], profile
       const here = anchors[i]!;
       const after = anchors[i + 1]!;
       if (here.cable || before.cable || after.cable) continue;
-      // Jamais autour d'un lanceur ni dans sa bande de tir : sous le mur, une prise n'aurait pas de sortie.
-      if (before.kind === 'lanceur' || here.kind === 'lanceur' || after.kind === 'lanceur') continue;
+      // Jamais autour d'un lanceur (rail, interrupteur, aimant, lien élastique) ni dans sa bande de tir : sous le mur, une prise n'aurait pas de sortie.
+      if (LAUNCHING.has(before.kind) || LAUNCHING.has(here.kind) || LAUNCHING.has(after.kind)) continue;
       if (before.kind === 'roue' || here.kind === 'roue' || after.kind === 'roue') continue;
       const pos =
         kind === 'eclipse'
@@ -1026,8 +1220,8 @@ export function buildPlainSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, 
  * le premier ni le dernier point. La rafale aligne trois propulseurs de suite,
  * la série de fragiles trois à quatre fragiles de suite, au milieu du segment.
  */
-function assignKinds(rng: Rng, anchors: Anchor[], profile: TierProfile, archetype: Archetype, junctionId: number | null, branchIds: readonly number[]): void {
-  const protectedIds = new Set<number>([...branchIds, junctionId ?? -1, anchors.at(-1)?.id ?? -1, anchors[0]?.id ?? -1]);
+function assignKinds(rng: Rng, anchors: Anchor[], profile: TierProfile, archetype: Archetype, junctionId: number | null, branchIds: readonly number[], pinned: ReadonlySet<number> = new Set()): void {
+  const protectedIds = new Set<number>([...branchIds, junctionId ?? -1, anchors.at(-1)?.id ?? -1, anchors[0]?.id ?? -1, ...pinned]);
   // Les prises d'une bande d'accordéon glissent déjà : ni fragiles ni propulseurs.
   const eligible = anchors.filter((a) => !protectedIds.has(a.id) && a.kind === 'normal' && !a.cable);
   const fragile = new Set<number>();
@@ -1086,7 +1280,7 @@ function placeObstacles(
   // Un point qui glisse est tenu à l'écart partout où il passe : à ses deux bouts et au milieu. Autour d'un lanceur, rien jusqu'où la traction recule le personnage.
   const clearOf = (pos: Vec2, box: Obstacle): boolean => circleBoxGap(pos, 0, box) >= OBSTACLE_CLEARANCE && !underAnchor(pos, box, env);
   const keepAway = (box: Obstacle): boolean =>
-    anchors.every((a) => (a.kind === 'lanceur' ? circleBoxGap(a.pos, LANCEUR_CLEARANCE, box) > 0 : a.kind === 'roue' ? circleBoxGap(a.pos, WHEEL_CLEARANCE, box) > 0 : (a.cable ? [a.cable.from, a.pos, a.cable.to] : [a.pos]).every((pos) => clearOf(pos, box)))) &&
+    anchors.every((a) => (a.kind === 'lanceur' ? circleBoxGap(a.pos, LANCEUR_CLEARANCE, box) > 0 : a.kind === 'rail' ? circleBoxGap(a.pos, RAIL_CLEARANCE, box) > 0 : a.kind === 'roue' ? circleBoxGap(a.pos, WHEEL_CLEARANCE, box) > 0 : (a.cable ? [a.cable.from, a.pos, a.cable.to] : [a.pos]).every((pos) => clearOf(pos, box)))) &&
     pickups.every((p) => circleBoxGap(p.pos, 0, box) >= PICKUP_CLEARANCE) &&
     rings.every((r) => circleBoxGap(r.pos, r.radius, box) >= RING_OBSTACLE_CLEARANCE) &&
     !nearZone(box, zones) &&

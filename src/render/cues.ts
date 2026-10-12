@@ -22,7 +22,7 @@ function heldAnchor(state: SimState): Anchor | undefined {
   return rope ? state.anchors.find((anchor) => anchor.id === rope.anchorId) : undefined;
 }
 
-/** Espèce du point tenu en ce moment, ou null sans corde : « lanceur » dit au jeu de lire la traction du doigt. */
+/** Espèce du point tenu en ce moment, ou null sans corde : « lanceur » et « rail » disent au jeu de lire la traction du doigt. */
 export function heldKind(state: SimState): AnchorKind | null {
   return heldAnchor(state)?.kind ?? null;
 }
@@ -51,7 +51,8 @@ export function shadowPoints(state: SimState, tuning: Tuning, seconds: number = 
  * Le rendu la montre discrètement ; le tutoriel s'en sert pour dire « lâche ».
  */
 export function inReleaseWindow(state: SimState, tuning: Tuning): boolean {
-  if (!state.rope || heldKind(state) === 'lanceur') return false;
+  const kind = heldKind(state);
+  if (!state.rope || kind === 'lanceur' || kind === 'rail') return false;
   const vel = releaseVelocity(state, tuning);
   return isPerfectRelease(vel.x, vel.y, tuning, state.env);
 }

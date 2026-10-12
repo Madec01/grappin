@@ -10,9 +10,9 @@ import type { RunStats } from '../src/meta/missions';
 const T = DEFAULT_TUNING;
 const quietRun: RunStats = { holds: 0, perfectStreak: 0, grazes: 0, height: 0, pickups: 0, requiredPickups: 0, combo: 0, fragileReleases: 0, boosters: 0, seconds: 0 };
 
-describe('les vingt niveaux', () => {
+describe('les vingt-deux niveaux', () => {
   it('se suivent sans trou, avec des graines distinctes et des profils complets', () => {
-    expect(LEVELS).toHaveLength(20);
+    expect(LEVELS).toHaveLength(22);
     expect(LEVELS[0]!.startY).toBe(0);
     for (let i = 1; i < LEVELS.length; i += 1) expect(LEVELS[i]!.startY).toBe(LEVELS[i - 1]!.endY);
     expect(new Set(LEVELS.map((l) => l.seed)).size).toBe(LEVELS.length);

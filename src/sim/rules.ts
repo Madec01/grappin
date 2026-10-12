@@ -3,6 +3,7 @@ import { grabbable, isCharged, isLit } from './cycles';
 import { tierName } from '../data/tiers';
 import { STILL, isUpright, upOf, type Environment } from './environment';
 import { launchVelocity } from './launcher';
+import { SWITCH_HOLD_SECONDS, railParam, railPoint, railVelocity } from './holds';
 import { obstacleGap, pushOutAt } from './moving';
 import { BOUNCE_FRICTION, BOUNCE_RESTITUTION, RING_CENTRE_RATIO, SMASH_KEEP, reflected, ringBoosted } from './flight';
 import { isSolidNow, obstacleKind } from './obstacles';
@@ -91,6 +92,15 @@ export function tryAttach(state: SimState, tuning: Tuning, events: RuleEvent[]):
     state.hero.vel = { x: 0, y: 0 };
     state.pull = { x: 0, y: 0 };
     state.rope.length = tuning.ropeMin;
+  } else if (anchor.kind === 'rail' && anchor.rail) {
+    // Posé au milieu du rail : le doigt glisse pour choisir la position, le lancer part de là.
+    state.hero.pos = railPoint(anchor.pos, anchor.rail, 0.5);
+    state.hero.vel = { x: 0, y: 0 };
+    state.pull = { x: 0, y: 0 };
+    state.rope.length = tuning.ropeMin;
+  } else if (anchor.kind === 'aimant') {
+    // L'aimant attire : pas d'impulsion, le mouvement vient du champ.
+    state.rope.length = d;
   } else {
     // La première accroche de la partie peut recevoir un élan de départ plus généreux.
     const first = state.attachCount === 0 && tuning.startKickSpeed > tuning.kickSpeed;
@@ -159,6 +169,7 @@ export function releaseVelocity(state: SwingContext, tuning: Tuning): Vec2 {
   const anchor = state.rope ? findAnchor(state, state.rope.anchorId) : undefined;
   // Un lâcher ne part jamais plus vite que `releaseMaxSpeed` : retour du propriétaire, « la vitesse devient impossible à gérer ».
   if (anchor?.kind === 'lanceur') return clampLength(launchVelocity(state.pull ?? { x: 0, y: 0 }, state.env ?? STILL), tuning.releaseMaxSpeed);
+  if (anchor?.kind === 'rail' && anchor.rail) return clampLength(railVelocity(anchor.rail, railParam(state.pull ?? { x: 0, y: 0 })), tuning.releaseMaxSpeed);
   if (anchor?.kind === 'booster') return clampLength(scale(state.hero.vel, tuning.boostFactor), tuning.releaseMaxSpeed);
   return clampLength(state.hero.vel, tuning.releaseMaxSpeed);
 }
@@ -172,10 +183,11 @@ export function release(state: SimState, tuning: Tuning, events: RuleEvent[], fo
   const held = (state.step - state.attachStep) * tuning.stepSeconds;
   state.hero.vel = releaseVelocity(state, tuning);
   if (kind === 'booster') events.push({ type: 'boost' });
-  // Un lancer ne se juge pas : la série de parfaits reste ce qu'elle est. Un lâcher parfait monte le combo ; un lâcher
+  // Un lancer (lanceur, rail) ne se juge pas : la série de parfaits reste ce qu'elle est. Un lâcher parfait monte le combo ; un lâcher
   // correct ne le casse plus, il le fait redescendre de `comboMissPenalty` crans ; seules les erreurs réelles le remettent à zéro.
-  const perfect = kind !== 'lanceur' && isPerfectRelease(state.hero.vel.x, state.hero.vel.y, tuning, state.env);
-  if (kind !== 'lanceur') state.combo = perfect ? state.combo + 1 : Math.max(0, state.combo - tuning.comboMissPenalty);
+  const launched = kind === 'lanceur' || kind === 'rail';
+  const perfect = !launched && isPerfectRelease(state.hero.vel.x, state.hero.vel.y, tuning, state.env);
+  if (!launched) state.combo = perfect ? state.combo + 1 : Math.max(0, state.combo - tuning.comboMissPenalty);
   state.pull = { x: 0, y: 0 };
   state.lastAnchorId = state.rope.anchorId;
   state.releaseStep = state.step;
@@ -228,6 +240,40 @@ export function applyCycles(state: SimState, tuning: Tuning, events: RuleEvent[]
   if (!anchor) return;
   if (anchor.kind === 'electrique' && isCharged(anchor.id, state.step, tuning)) shock(state, anchor, tuning, events);
   else if (anchor.kind === 'eclipse' && !isLit(anchor.id, state.step, tuning)) release(state, tuning, events, true);
+}
+
+/**
+ * Prise interrupteur tenue (lot 5, P5) : les portes qu'elle commande restent
+ * ouvertes tant qu'on la tient, et `SWITCH_HOLD_SECONDS` après le lâcher ; le
+ * délai se renouvelle à chaque pas de tenue.
+ */
+export function applySwitches(state: SimState, tuning: Tuning): void {
+  const anchor = state.rope ? findAnchor(state, state.rope.anchorId) : undefined;
+  if (!anchor || anchor.kind !== 'interrupteur') return;
+  // Le pas s'incrémente après : compté depuis la fin de ce pas, le délai est entier.
+  const until = state.step + 1 + Math.round(SWITCH_HOLD_SECONDS / tuning.stepSeconds);
+  for (const box of state.obstacles) if (box.switchedBy === anchor.id) box.openUntilStep = until;
+}
+
+/**
+ * Passages qui se referment (lot 5, O6) : un panneau se déclenche quand le
+ * personnage est dans le couloir, entre sa ligne d'entrée et le panneau lui-même ;
+ * il ferme, reste fermé, rouvre, puis se réarme (et se redéclenche si le
+ * personnage est toujours dedans ; passé au-dessus, plus jamais). Un événement
+ * est émis par passage (le panneau de droite parle pour les deux).
+ */
+export function applyClosers(state: SimState, tuning: Tuning, events: RuleEvent[]): void {
+  for (const box of state.obstacles) {
+    if (!box.closer) continue;
+    if (box.triggeredStep === undefined) {
+      if (state.hero.pos.y <= box.closer.triggerY || state.hero.pos.y >= box.y0) continue;
+      box.triggeredStep = state.step;
+      if (box.closer.side === 1) events.push({ type: 'escape', obstacleId: box.id });
+      continue;
+    }
+    const elapsed = (state.step - box.triggeredStep) * tuning.stepSeconds;
+    if (elapsed >= 2 * box.closer.closeSeconds + box.closer.shutSeconds) delete box.triggeredStep;
+  }
 }
 
 /** Rebond sur un obstacle solide : part de la vitesse rendue dans la direction du choc, et part gardée le long de la surface. */
@@ -422,7 +468,8 @@ export function applyFinish(state: SimState, events: RuleEvent[]): void {
  */
 export function applyHang(state: SimState, tuning: Tuning, events: RuleEvent[]): void {
   const anchor = state.rope ? findAnchor(state, state.rope.anchorId) : undefined;
-  if (!state.rope || !anchor || anchor.kind === 'lanceur') {
+  // Ni un lanceur ni un rail ne se balancent ; un aimant tire de lui-même.
+  if (!state.rope || !anchor || anchor.kind === 'lanceur' || anchor.kind === 'rail' || anchor.kind === 'aimant') {
     state.hangSteps = 0;
     return;
   }

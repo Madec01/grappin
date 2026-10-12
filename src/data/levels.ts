@@ -246,6 +246,28 @@ export const LEVELS: readonly LevelDef[] = [
     profile: { spacing: 5, obstacles: 3, split: true, fragileChance: 0.4, boosters: 1, archetypes: ['lanceur', 'chaine', 'rafale', 'dalles', 'couloir', 'fragiles', 'saut', 'roue', 'tournant', 'glissiere', 'accordeon', 'poche'], spread: 1.5, electric: 2, eclipse: 2, rotors: 1 },
     events: [{ kind: 'vent', at: 15, length: 30, side: -1, strength: 3.5 }, { kind: 'serpentin', at: 50, length: 45, side: -1 }, { kind: 'traversiere', at: 100, length: 30 }, { kind: 'alerte', at: 130, length: 15 }, { kind: 'bascule', at: 170, length: 35, side: 1 }, { kind: 'traversiere', at: 215, length: 30 }],
   },
+  {
+    id: 21,
+    name: 'Les aimants',
+    intro: 'Des aimants qui t\'attirent vers leur noyau : traverse et lâche en montant. Et des prises qui ouvrent des portes.',
+    seed: 1021,
+    startY: 3600,
+    endY: 3820,
+    fogBaseSpeed: 1.5,
+    profile: { spacing: 4.6, obstacles: 2, split: true, fragileChance: 0.25, boosters: 1, archetypes: ['aimant', 'aimant', 'interrupteur', 'interrupteur', 'chaine', 'couloir', 'dalles'], spread: 1.35, electric: 1, eclipse: 1 },
+    events: [{ kind: 'pluie', at: 30, length: 25 }, { kind: 'panne', at: 100, length: 30 }, { kind: 'pluie', at: 160, length: 25 }],
+  },
+  {
+    id: 22,
+    name: 'Les rails',
+    intro: 'Des rails où ta position choisit l\'angle, des liens élastiques qui changent la chute en remontée, et un passage qui se referme.',
+    seed: 1022,
+    startY: 3820,
+    endY: 4050,
+    fogBaseSpeed: 1.55,
+    profile: { spacing: 4.7, obstacles: 2, split: true, fragileChance: 0.3, boosters: 1, archetypes: ['rail', 'rail', 'elastique', 'elastique', 'evasion', 'chaine', 'escalier'], spread: 1.4, electric: 1, eclipse: 1 },
+    events: [{ kind: 'vent', at: 25, length: 30, side: 1, strength: 3 }, { kind: 'cable', at: 90, length: 30 }, { kind: 'vent', at: 160, length: 30, side: -1, strength: 3 }],
+  },
 ];
 
 export function levelById(id: number): LevelDef | undefined {

@@ -1,5 +1,6 @@
 import type { Vec2 } from '../core/math/vec2';
 import { launchSet, launchVelocity, pulledPosition } from './launcher';
+import { railPoint, railPull, railSet, railVelocity } from './holds';
 import type { Anchor, SimState } from './state';
 import type { Tuning } from './tuning';
 import { circleBoxGap } from './geometry';
@@ -19,6 +20,27 @@ import { flightCatches } from './verifier';
  * le parcours est accepté. Déterministe, sans trigonométrie (l'éventail est
  * tabulé dans `launcher.ts`).
  */
+
+/** La traction (le glissement du doigt de côté, voir `railParam`) qui, depuis le rail tenu, lance vers un point au-dessus, le plus haut possible ; null sans rail tenu ni sortie trouvée. */
+export function bestRail(state: SimState, tuning: Tuning): Vec2 | null {
+  if (!state.rope) return null;
+  const rail = state.anchors.find((a) => a.id === state.rope?.anchorId);
+  if (!rail || rail.kind !== 'rail' || !rail.rail) return null;
+  const candidates = state.anchors.filter((a) => a.id !== rail.id && !a.broken && a.pos.y > rail.pos.y + 1);
+  if (candidates.length === 0) return null;
+  const byId = new Map<number, Anchor>(candidates.map((a) => [a.id, a]));
+  const obstacles = provableObstacles(state.obstacles);
+  let best: { t: number; height: number } | null = null;
+  for (const t of railSet()) {
+    const pos = railPoint(rail.pos, rail.rail, t);
+    if (obstacles.some((box) => circleBoxGap(pos, tuning.heroRadius, box) <= 0)) continue;
+    for (const id of flightCatches(rail, { pos, vel: railVelocity(rail.rail, t) }, candidates, obstacles, tuning, state.env, state.zones, state.rings)) {
+      const height = byId.get(id)?.pos.y ?? -Infinity;
+      if (!best || height > best.height) best = { t, height };
+    }
+  }
+  return best ? railPull(best.t) : null;
+}
 
 /** La traction (mètres de monde, le doigt tiré à l'opposé du vol) qui lance vers un point au-dessus du lanceur tenu, ou null sans lanceur tenu ni sortie trouvée. */
 export function bestLaunch(state: SimState, tuning: Tuning): Vec2 | null {

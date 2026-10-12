@@ -16,11 +16,12 @@ export function obstacleKind(box: Obstacle): ObstacleKind {
   return box.kind ?? 'solide';
 }
 
-/** Solide pour le personnage en ce moment : ni cassé, ni porte ouverte, ni porte refermée sur lui. */
+/** Solide pour le personnage en ce moment : ni cassé, ni porte ouverte (par son cycle, ou par la prise interrupteur qui la commande), ni porte refermée sur lui. */
 export function isSolidNow(box: Obstacle, step: number, tuning: Tuning, doorsInside: readonly number[]): boolean {
   if (box.broken) return false;
   if (obstacleKind(box) !== 'porte') return true;
-  return isDoorClosed(box.id, step, tuning) && !doorsInside.includes(box.id);
+  const closed = box.switchedBy !== undefined ? box.openUntilStep === undefined || step >= box.openUntilStep : isDoorClosed(box.id, step, tuning);
+  return closed && !doorsInside.includes(box.id);
 }
 
 /**
@@ -32,7 +33,7 @@ export function solidObstacles(state: Pick<SimState, 'obstacles' | 'step' | 'doo
   return state.obstacles.filter((box) => isSolidNow(box, state.step, tuning, state.doorsInside) && obstacleKind(box) !== 'tournant').map((box) => obstacleAt(box, state.step, tuning));
 }
 
-/** Ce que le vérificateur tient pour solide : tout sauf les portes, les parois cassées, et ce qui bouge (tournants, panneaux qui glissent), que l'on attend ou que l'on évite. */
+/** Ce que le vérificateur tient pour solide : tout sauf les portes (à cycle ou commandées), les parois cassées, et ce qui bouge (tournants, panneaux qui glissent ou se referment), que l'on attend, que l'on commande ou que l'on évite. */
 export function provableObstacles(obstacles: readonly Obstacle[]): Obstacle[] {
-  return obstacles.filter((box) => !box.broken && obstacleKind(box) !== 'porte' && obstacleKind(box) !== 'tournant' && box.slide === undefined);
+  return obstacles.filter((box) => !box.broken && obstacleKind(box) !== 'porte' && obstacleKind(box) !== 'tournant' && box.slide === undefined && box.closer === undefined);
 }

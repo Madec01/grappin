@@ -16,10 +16,10 @@ describe('boutons des niveaux', () => {
 });
 
 describe('pages de la liste des niveaux', () => {
-  it('dix niveaux par page : les vingt niveaux font deux pages', () => {
+  it('dix niveaux par page : les vingt-deux niveaux font trois pages', () => {
     expect(LEVELS_PER_PAGE).toBe(10);
     expect(levelPageCount()).toBe(Math.ceil(LEVELS.length / 10));
-    expect(levelPageCount()).toBe(2);
+    expect(levelPageCount()).toBe(3);
   });
 
   it('chaque niveau tombe sur une page et une seule, dans l\'ordre, sans en oublier', () => {
@@ -36,7 +36,7 @@ describe('pages de la liste des niveaux', () => {
   });
 
   it('une page hors de la liste est vide, et un numéro inconnu tombe sur la première page', () => {
-    expect(levelsOfPage(2)).toEqual([]);
+    expect(levelsOfPage(3)).toEqual([]);
     expect(levelsOfPage(-1)).toEqual([]);
     expect(pageOfLevel(0)).toBe(0);
     expect(pageOfLevel(99)).toBe(0);

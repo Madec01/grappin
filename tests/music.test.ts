@@ -71,10 +71,10 @@ describe('musiques', () => {
 
     const levelsOf: Record<MusicFamily, number[]> = {
       biome1: [1, 2, 11, 12],
-      biome2: [3, 4, 13, 14],
+      biome2: [3, 4, 13, 14, 21],
       biome3: [5, 6, 15, 16],
       biome4: [7, 8, 17, 19],
-      boss: [9, 10, 18, 20],
+      boss: [9, 10, 18, 20, 22],
       menu: [],
     };
     for (const [family, ids] of Object.entries(levelsOf)) {

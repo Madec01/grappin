@@ -21,7 +21,32 @@ export const ROTOR_THICKNESS = 0.4;
 
 /** Vrai pour un obstacle dont la géométrie dépend du pas. */
 export function isMoving(box: Obstacle): boolean {
-  return box.rotor !== undefined || box.slide !== undefined;
+  return box.rotor !== undefined || box.slide !== undefined || box.closer !== undefined;
+}
+
+/**
+ * Le décalage d'un panneau de passage qui se referme à ce pas : nul tant qu'il
+ * n'est pas déclenché ; puis il ferme, reste fermé, rouvre (`Closer`).
+ */
+export function closerOffset(box: Obstacle, step: number, tuning: Tuning): number {
+  if (!box.closer || box.triggeredStep === undefined) return 0;
+  const { travel, side, closeSeconds, shutSeconds } = box.closer;
+  const elapsed = (step - box.triggeredStep) * tuning.stepSeconds;
+  if (elapsed < closeSeconds) return side * travel * (elapsed / closeSeconds);
+  if (elapsed < closeSeconds + shutSeconds) return side * travel;
+  const opening = (elapsed - closeSeconds - shutSeconds) / closeSeconds;
+  return opening >= 1 ? 0 : side * travel * (1 - opening);
+}
+
+/** Où en est un passage qui se referme : `armé` (ouvert, prêt), `se ferme`, `fermé`, `rouvre`. Pour le rendu. */
+export type CloserState = 'arme' | 'se ferme' | 'ferme' | 'rouvre';
+
+export function closerState(box: Obstacle, step: number, tuning: Tuning): CloserState {
+  if (!box.closer || box.triggeredStep === undefined) return 'arme';
+  const elapsed = (step - box.triggeredStep) * tuning.stepSeconds;
+  if (elapsed < box.closer.closeSeconds) return 'se ferme';
+  if (elapsed < box.closer.closeSeconds + box.closer.shutSeconds) return 'ferme';
+  return 'rouvre';
 }
 
 /** L'angle de la barre à ce pas, en tours. */
@@ -47,8 +72,12 @@ export function slideOffset(slide: Slide, step: number, tuning: Tuning): number 
   return slide.amplitude * (k < 0.5 ? 4 * k - 1 : 3 - 4 * k);
 }
 
-/** L'obstacle là où il est à ce pas : un panneau décalé de son glissement ; tout autre obstacle, lui-même. */
+/** L'obstacle là où il est à ce pas : un panneau décalé de son glissement ou de sa fermeture ; tout autre obstacle, lui-même. */
 export function obstacleAt(box: Obstacle, step: number, tuning: Tuning): Obstacle {
+  if (box.closer) {
+    const dx = closerOffset(box, step, tuning);
+    return dx === 0 ? box : { ...box, x0: box.x0 + dx, x1: box.x1 + dx };
+  }
   if (!box.slide) return box;
   const dx = slideOffset(box.slide, step, tuning);
   return { ...box, x0: box.x0 + dx, x1: box.x1 + dx };

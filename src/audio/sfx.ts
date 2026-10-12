@@ -54,7 +54,7 @@ export function cueFor(event: RuleEvent): Cue | null {
     case 'attach':
       return { id: 'attach', pitch: 1 };
     case 'release':
-      if (event.kind === 'lanceur') return { id: 'launch', pitch: 1 };
+      if (event.kind === 'lanceur' || event.kind === 'rail') return { id: 'launch', pitch: 1 };
       if (event.forced) return null;
       return event.perfect ? { id: 'perfect', pitch: perfectPitch(event.combo) } : { id: 'release', pitch: 1 };
     case 'boost':

@@ -6,7 +6,8 @@ import { sceneEvents } from '../data/scenes';
 import { STILL } from './environment';
 import { applyEvents, type ScheduledEvent } from './events';
 import { integrate, swingStep } from './physics';
-import { applyBufferedPress, applyFall, applyFinish, applyFog, applyCycles, applyFragile, applyGround, applyHang, applyObstacles, applyPickups, applyRings, applyScore, applyTier, press, release } from './rules';
+import { elasticStep, magnetStep, railParam, railPoint } from './holds';
+import { applyBufferedPress, applyClosers, applyFall, applyFinish, applyFog, applyCycles, applyFragile, applyGround, applyHang, applyObstacles, applyPickups, applyRings, applyScore, applySwitches, applyTier, press, release } from './rules';
 import type { RuleEvent, SimState } from './state';
 import { DEFAULT_TUNING, type Tuning } from './tuning';
 
@@ -86,7 +87,7 @@ export class Simulation {
     return outcome === 'attached';
   }
 
-  /** Le doigt glisse pendant qu'on tient un lanceur : la traction, en mètres de monde. Sans effet physique avant le relâché. */
+  /** Le doigt glisse pendant qu'on tient un lanceur ou un rail : la traction, en mètres de monde. Sans effet physique avant le relâché. */
   aim(pull: Vec2): void {
     this.state.pull = clampPull(pull);
   }
@@ -99,6 +100,7 @@ export class Simulation {
       // comme un doigt l'aurait fait et comme le vérificateur le suppose : pas du lanceur lui-même.
       const held = this.state.rope ? this.state.anchors.find((a) => a.id === this.state.rope!.anchorId) : undefined;
       if (held?.kind === 'lanceur') this.state.hero.pos = pulledPosition(held.pos, this.state.pull);
+      if (held?.kind === 'rail' && held.rail) this.state.hero.pos = railPoint(held.pos, held.rail, railParam(this.state.pull));
     }
     const recorded = this.state.pull;
     const ok = release(this.state, this.tuning, this.events);
@@ -107,7 +109,7 @@ export class Simulation {
   }
 
   /**
-   * Avance d'un pas. Ordre fixe : événements, casse fragile, treuil et mouvement,
+   * Avance d'un pas. Ordre fixe : événements, casse fragile, cycles, interrupteurs, treuil et mouvement, passages qui se referment,
    * sol, chute, obstacles, étoiles, anneaux, pendaison, score, palier, arrivée, brume, parcours, visée, appui en mémoire.
    */
   step(): void {
@@ -116,11 +118,26 @@ export class Simulation {
     applyEvents(s, this.tuning, this.events);
     applyFragile(s, this.tuning, this.events);
     applyCycles(s, this.tuning, this.events);
+    applySwitches(s, this.tuning);
     const held = s.rope ? s.anchors.find((a) => a.id === s.rope!.anchorId) : undefined;
     if (s.rope && held && held.kind === 'lanceur') {
       // Tenu au lanceur, reculé de la traction du doigt : pas de balancement, pas de gravité.
       s.hero.pos = pulledPosition(held.pos, s.pull);
       s.hero.vel = { x: 0, y: 0 };
+    } else if (s.rope && held && held.kind === 'rail' && held.rail) {
+      // Retenu sur le rail, à la position que le doigt choisit : pas de balancement, pas de gravité.
+      s.hero.pos = railPoint(held.pos, held.rail, railParam(s.pull));
+      s.hero.vel = { x: 0, y: 0 };
+    } else if (s.rope && held && held.kind === 'aimant') {
+      // Attiré vers le noyau de l'aimant, sans corde.
+      const pulled = magnetStep(s.hero, held.pos, this.tuning, s.env, s.zones);
+      s.hero.pos = pulled.pos;
+      s.hero.vel = pulled.vel;
+    } else if (s.rope && held && held.kind === 'elastique') {
+      // Au bout d'un lien élastique de longueur de repos `rope.length` : étiré, il rappelle.
+      const sprung = elasticStep(s.hero, held.pos, s.rope.length, this.tuning, s.env, s.zones);
+      s.hero.pos = sprung.pos;
+      s.hero.vel = sprung.vel;
     } else if (s.rope && held) {
       const swung = swingStep(s.hero, held.pos, s.rope.length, this.tuning, s.env, s.zones, held.motor ?? null);
       s.hero.pos = swung.body.pos;
@@ -132,6 +149,7 @@ export class Simulation {
       s.hero.vel = moved.vel;
     }
     s.step += 1;
+    applyClosers(s, this.tuning, this.events);
     applyGround(s, this.tuning);
     applyFall(s, this.events);
     applyObstacles(s, this.tuning, this.events);

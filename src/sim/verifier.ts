@@ -1,6 +1,7 @@
 import { clampLength, distance, scale, type Vec2 } from '../core/math/vec2';
 import { isOptional } from './cycles';
 import { LANCEUR_CLEARANCE, launchSet, launchVelocity, pulledPosition } from './launcher';
+import { ELASTIC_ENTRY_ABOVE, ELASTIC_ENTRY_SPEED, ELASTIC_HOLD_SECONDS, MAGNET_HOLD_SECONDS, RAIL_CLEARANCE, elasticStep, magnetStep, railPoint, railSet, railVelocity } from './holds';
 import { bestAnchor } from './aim';
 import { STILL, upOf, type Environment } from './environment';
 import { circleBoxGap } from './geometry';
@@ -36,7 +37,11 @@ import type { Tuning } from './tuning';
  * depuis 0.12.1, les vols jouent aussi les rencontres (`flight.ts`) : une
  * surface de rebond renvoie, une paroi cassable cède si l'on va assez vite, un
  * anneau pris au centre accélère ; le générateur peut donc EXIGER une de ces
- * mécaniques, le vérificateur ne prouve le passage qu'avec elle.
+ * mécaniques, le vérificateur ne prouve le passage qu'avec elle. Lot 5 : un
+ * aimant tenu attire (`magnetStep`), un lien élastique rappelle
+ * (`elasticStep`, l'arrivée supposée est une chute depuis le côté), un rail se
+ * prouve comme un lanceur, par ses positions (`railSet`) ; une porte commandée
+ * par un interrupteur ne compte pas, comme une porte à cycle : on la commande.
  */
 const NO_RINGS: readonly Ring[] = [];
 
@@ -63,10 +68,34 @@ interface Swing {
   ropeLength: number;
 }
 
-/** État d'arrivée : pendu sous le point, décalé d'un côté, lancé à `speed` le long du cercle vers le prochain point. */
+/** Un pas de tenue selon l'espèce de la prise : balancement à la corde, attraction d'un aimant, rappel d'un lien élastique. */
+function holdStep(from: Anchor, swing: Swing, tuning: Tuning, env: Environment, zones: readonly Zone[]): Swing {
+  if (from.kind === 'aimant') return { body: magnetStep(swing.body, from.pos, tuning, env, zones), ropeLength: swing.ropeLength };
+  if (from.kind === 'elastique') return { body: elasticStep(swing.body, from.pos, swing.ropeLength, tuning, env, zones), ropeLength: swing.ropeLength };
+  return swingStep(swing.body, from.pos, swing.ropeLength, tuning, env, zones, from.motor ?? null);
+}
+
+/** Temps de tenue que le vérificateur examine depuis une prise : moins sur une fragile (elle casse), le sien pour un aimant ou un lien élastique. */
+function holdSecondsOf(from: Anchor, tuning: Tuning): number {
+  if (from.kind === 'fragile') return Math.min(tuning.verifyHoldSeconds, tuning.fragileSeconds - 2 * tuning.stepSeconds);
+  if (from.kind === 'aimant') return MAGNET_HOLD_SECONDS;
+  if (from.kind === 'elastique') return ELASTIC_HOLD_SECONDS;
+  return tuning.verifyHoldSeconds;
+}
+
+/**
+ * État d'arrivée : pendu sous le point, décalé d'un côté, lancé à `speed` le
+ * long du cercle vers le prochain point. Sur un lien élastique, l'arrivée est
+ * une chute : au-dessus de la prise, un peu de côté, la vitesse vers le bas, le
+ * lien à sa longueur de repos ; on tombe au-delà, il s'étire et rappelle.
+ */
 function entryState(anchor: Anchor, offset: number, speed: number, anchors: readonly Anchor[], tuning: Tuning, env: Environment): Swing {
-  // Pendu « sous » le point au sens de la gravité du moment, décalé perpendiculairement.
   const up = upOf(env);
+  if (anchor.kind === 'elastique') {
+    const pos = { x: anchor.pos.x + up.x * ELASTIC_ENTRY_ABOVE - up.y * offset, y: anchor.pos.y + up.y * ELASTIC_ENTRY_ABOVE + up.x * offset };
+    return { body: { pos, vel: scale(up, -ELASTIC_ENTRY_SPEED) }, ropeLength: Math.max(tuning.ropeMin, distance(pos, anchor.pos)) };
+  }
+  // Pendu « sous » le point au sens de la gravité du moment, décalé perpendiculairement.
   const pos = { x: anchor.pos.x - up.x * ENTRY_ROPE - up.y * offset, y: anchor.pos.y - up.y * ENTRY_ROPE + up.x * offset };
   const ropeLength = distance(pos, anchor.pos);
   const context = {
@@ -81,19 +110,22 @@ function entryState(anchor: Anchor, offset: number, speed: number, anchors: read
 
 /** Une fois accroché à `anchor` depuis `body`, le balancement qui suit évite-t-il les obstacles ? Le robot s'en sert aussi avant d'attraper. */
 export function swingIsClear(anchor: Anchor, body: Body, anchors: readonly Anchor[], obstacles: readonly Obstacle[], tuning: Tuning, env: Environment, zones: readonly Zone[]): boolean {
-  // Un lanceur ne se balance pas : il suffit que rien ne gêne autour, jusqu'où la traction recule le personnage.
+  // Un lanceur ou un rail ne se balance pas : il suffit que rien ne gêne autour, jusqu'où la traction recule le personnage ou jusqu'aux bouts de l'arc.
   if (anchor.kind === 'lanceur') return obstacles.every((box) => circleBoxGap(anchor.pos, LANCEUR_CLEARANCE, box) > 0);
+  if (anchor.kind === 'rail') return obstacles.every((box) => circleBoxGap(anchor.pos, RAIL_CLEARANCE, box) > 0);
   const ropeLength = Math.max(tuning.ropeMin, distance(body.pos, anchor.pos));
+  const magnet = anchor.kind === 'aimant';
   const context = {
-    hero: { pos: body.pos, vel: constrainVelocity(body.pos, body.vel, anchor.pos, ropeLength), grounded: false },
+    hero: { pos: body.pos, vel: magnet ? body.vel : constrainVelocity(body.pos, body.vel, anchor.pos, ropeLength), grounded: false },
     rope: { anchorId: anchor.id, length: ropeLength },
     anchors: [...anchors],
   };
-  kickIfSlow(context, tuning, [] as RuleEvent[]);
+  // Un aimant ne reçoit pas d'impulsion : son champ fait le mouvement.
+  if (!magnet) kickIfSlow(context, tuning, [] as RuleEvent[]);
   let swing: Swing = { body: { pos: context.hero.pos, vel: context.hero.vel }, ropeLength };
   const steps = Math.round(AFTER_CATCH_SECONDS / tuning.stepSeconds);
   for (let k = 0; k < steps; k += 1) {
-    swing = swingStep(swing.body, anchor.pos, swing.ropeLength, tuning, env, zones, anchor.motor ?? null);
+    swing = holdStep(anchor, swing, tuning, env, zones);
     if (obstacles.some((box) => circleBoxGap(swing.body.pos, tuning.heroRadius, box) <= 0)) return false;
   }
   return true;
@@ -161,8 +193,7 @@ function holdAndRelease(
   zones: readonly Zone[],
   rings: readonly Ring[],
 ): boolean {
-  const holdSeconds = from.kind === 'fragile' ? Math.min(tuning.verifyHoldSeconds, tuning.fragileSeconds - 2 * tuning.stepSeconds) : tuning.verifyHoldSeconds;
-  const maxSteps = Math.round(holdSeconds / tuning.stepSeconds);
+  const maxSteps = Math.round(holdSecondsOf(from, tuning) / tuning.stepSeconds);
   const satisfied = (): boolean => (required ? required.every((id) => reached.has(id)) : reached.size > 0);
   let swing = start;
   for (let k = 0; k <= maxSteps; k += 1) {
@@ -172,7 +203,7 @@ function holdAndRelease(
       if (satisfied()) return true;
     }
     if (obstacles.some((box) => circleBoxGap(swing.body.pos, tuning.heroRadius, box) <= 0)) break;
-    swing = swingStep(swing.body, from.pos, swing.ropeLength, tuning, env, zones, from.motor ?? null);
+    swing = holdStep(from, swing, tuning, env, zones);
   }
   return satisfied();
 }
@@ -185,6 +216,7 @@ function holdAndRelease(
 export function canExit(from: Anchor, anchors: readonly Anchor[], allObstacles: readonly Obstacle[], required: readonly number[] | null, tuning: Tuning, env: Environment = STILL, zones: readonly Zone[] = NO_ZONES, rings: readonly Ring[] = NO_RINGS): boolean {
   const obstacles = provableObstacles(allObstacles);
   if (from.kind === 'lanceur') return launchExits(from, anchors, obstacles, required, tuning, env, zones, rings);
+  if (from.kind === 'rail') return railExits(from, anchors, obstacles, required, tuning, env, zones, rings);
   for (const offset of ENTRY_OFFSETS) {
     const worst = entryState(from, offset, tuning.kickSpeed, anchors, tuning, env);
     if (!holdAndRelease(from, worst, anchors, obstacles, null, new Set(), tuning, env, zones, rings)) return false;
@@ -209,6 +241,19 @@ function launchExits(from: Anchor, anchors: readonly Anchor[], obstacles: readon
     const pos = pulledPosition(from.pos, pull);
     if (obstacles.some((box) => circleBoxGap(pos, tuning.heroRadius, box) <= 0)) continue;
     for (const id of flightCatches(from, { pos, vel: launchVelocity(pull, env) }, anchors, obstacles, tuning, env, zones, rings)) reached.add(id);
+    if (required ? required.every((id) => reached.has(id)) : reached.size > 0) return true;
+  }
+  return false;
+}
+
+/** Depuis un rail, comme depuis un lanceur : il suffit qu'une des positions de l'arc, par son lancer, attrape une sortie (chaque branche exigée pour une fourche). */
+function railExits(from: Anchor, anchors: readonly Anchor[], obstacles: readonly Obstacle[], required: readonly number[] | null, tuning: Tuning, env: Environment, zones: readonly Zone[], rings: readonly Ring[]): boolean {
+  if (!from.rail) return false;
+  const reached = new Set<number>();
+  for (const t of railSet()) {
+    const pos = railPoint(from.pos, from.rail, t);
+    if (obstacles.some((box) => circleBoxGap(pos, tuning.heroRadius, box) <= 0)) continue;
+    for (const id of flightCatches(from, { pos, vel: railVelocity(from.rail, t) }, anchors, obstacles, tuning, env, zones, rings)) reached.add(id);
     if (required ? required.every((id) => reached.has(id)) : reached.size > 0) return true;
   }
   return false;

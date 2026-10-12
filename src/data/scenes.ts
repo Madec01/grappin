@@ -1,6 +1,6 @@
 import type { Vec2 } from '../core/math/vec2';
 import type { ScheduledEvent } from '../sim/events';
-import { FIRST_ANCHOR_OFFSET, HALF_WIDTH, RICOCHET_WALL_RISE, RING_RADIUS, ROTOR_TURN_SECONDS, WHEEL_RISE, accordion, drift, hoop, pocket, ricochet, rocket, rotorBar, slidingWall, smashWall, updraft, wheel, type IdCounters, type Segment } from '../sim/generator';
+import { FIRST_ANCHOR_OFFSET, HALF_WIDTH, RICOCHET_WALL_RISE, RING_RADIUS, ROTOR_TURN_SECONDS, WHEEL_RISE, accordion, drift, elasticHold, escapeCorridor, hoop, magnetHold, pocket, railHold, ricochet, rocket, rotorBar, slidingWall, smashWall, switchLock, updraft, wheel, type IdCounters, type Segment } from '../sim/generator';
 import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from '../sim/state';
 
 /**
@@ -14,7 +14,7 @@ import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from '../sim/
  * monde au-dessus de sa chaîne).
  */
 
-export type SceneId = 'rebond' | 'cassable' | 'porte' | 'anneau' | 'courant' | 'derive' | 'fusee' | 'roue' | 'tournant' | 'glissiere' | 'serpentin' | 'accordeon' | 'poche';
+export type SceneId = 'rebond' | 'cassable' | 'porte' | 'anneau' | 'courant' | 'derive' | 'fusee' | 'roue' | 'tournant' | 'glissiere' | 'serpentin' | 'accordeon' | 'poche' | 'aimant' | 'interrupteur' | 'rail' | 'elastique' | 'evasion';
 
 export interface SceneDef {
   readonly id: SceneId;
@@ -43,6 +43,11 @@ export const SCENES: readonly SceneDef[] = [
   { id: 'serpentin', name: 'Le serpentin', intro: 'Le monde s\'incline peu à peu, jusqu\'à l\'horizontale, puis se redresse : suis la courbe sans perdre l\'élan.', events: [{ kind: 'serpentin', at: SERPENTIN_SCENE_AT, length: SERPENTIN_SCENE_LENGTH, side: 1 }] },
   { id: 'accordeon', name: 'L\'accordéon', intro: 'Deux bandes de prises se rapprochent et s\'écartent : traverse quand elles sont proches, ou grimpe ton côté.' },
   { id: 'poche', name: 'La poche', intro: 'Dans la poche, la gravité est faible : les vols s\'allongent, le grappin sert à courber et à freiner.' },
+  { id: 'aimant', name: 'L\'aimant', intro: 'L\'aimant t\'attire vers son noyau tant que tu tiens : traverse-le et lâche en montant.' },
+  { id: 'interrupteur', name: 'L\'interrupteur', intro: 'Tenir la prise ouvre la porte du mur ; lâchée, elle se referme en quatre secondes : prépare, puis passe.' },
+  { id: 'rail', name: 'Le rail', intro: 'Sur le rail, glisse le doigt pour choisir ta position : chaque endroit lance dans sa direction.' },
+  { id: 'elastique', name: 'Le lien élastique', intro: 'Attrape le lien en passant : ta chute l\'étire, il te rappelle vers le haut, lâche pendant la remontée.' },
+  { id: 'evasion', name: 'Le passage qui se referme', intro: 'Dès que tu entres dans le couloir, sa sortie se referme : monte avant qu\'elle soit close.' },
 ];
 
 /** Les événements d'une scène, ou aucun. */
@@ -241,6 +246,69 @@ export function buildScene(id: SceneId, ids: IdCounters, origin: Vec2): Segment 
       b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
       b.ids.anchor += 1;
       anchor(b, { x: 2.4, y: exit.y - FIRST_ANCHOR_OFFSET.y - b.origin.y + 3.6 });
+      break;
+    }
+    case 'aimant': {
+      // Deux points, puis au-dessus du second un aimant qui monte le personnage à son noyau ; la prise suivante n'est à portée que de là.
+      anchor(b, { x: 0, y: 0 });
+      const from = anchor(b, CHAIN[0]!);
+      const { anchor: magnet, exit } = magnetHold(b.ids, from.pos, HALF_WIDTH);
+      b.anchors.push(magnet);
+      b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
+      b.ids.anchor += 1;
+      anchor(b, { x: 2.2, y: exit.y - FIRST_ANCHOR_OFFSET.y - b.origin.y + 3.6 });
+      anchor(b, { x: -1, y: exit.y - FIRST_ANCHOR_OFFSET.y - b.origin.y + 7.2 });
+      break;
+    }
+    case 'interrupteur': {
+      // Une prise interrupteur, et sur le vol vers la prise suivante le verrou qu'elle commande : tenir, lâcher, passer avant qu'il se referme.
+      anchor(b, { x: 0, y: 0 });
+      anchor(b, CHAIN[0]!);
+      const at = { x: b.origin.x + FIRST_ANCHOR_OFFSET.x + 0.8, y: b.origin.y + FIRST_ANCHOR_OFFSET.y + 7.2 };
+      const next = { x: b.origin.x + FIRST_ANCHOR_OFFSET.x - 2.6, y: b.origin.y + FIRST_ANCHOR_OFFSET.y + 11 };
+      const { anchor: lever, door } = switchLock(b.ids, at, next);
+      b.anchors.push(lever);
+      b.obstacles.push(door);
+      b.anchors.push({ id: b.ids.anchor, pos: next, kind: 'normal', broken: false });
+      b.ids.anchor += 1;
+      for (const p of CHAIN.slice(3)) anchor(b, p);
+      break;
+    }
+    case 'rail': {
+      // Un rail de lancement sous un mur à trou décalé : la position sur l'arc choisit l'angle du lancer.
+      anchor(b, { x: 0, y: 0 });
+      anchor(b, CHAIN[0]!);
+      const at = { x: b.origin.x + FIRST_ANCHOR_OFFSET.x - 0.4, y: b.origin.y + FIRST_ANCHOR_OFFSET.y + 7 };
+      const { anchor: rail, walls, exit } = railHold(b.ids, at, 5, at.x + 2.3, HALF_WIDTH);
+      b.anchors.push(rail);
+      b.obstacles.push(...walls);
+      b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
+      b.ids.anchor += 1;
+      anchor(b, { x: -1.4, y: 20 });
+      break;
+    }
+    case 'elastique': {
+      // La chaîne jusqu'à un point, un lien élastique de côté, et la prise suivante bien plus haut : seul le rappel y monte.
+      anchor(b, { x: 0, y: 0 });
+      anchor(b, CHAIN[0]!);
+      const from = anchor(b, CHAIN[1]!);
+      const { anchor: link, exit } = elasticHold(b.ids, from.pos, -1, HALF_WIDTH);
+      b.anchors.push(link);
+      b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
+      b.ids.anchor += 1;
+      anchor(b, { x: 2, y: exit.y - FIRST_ANCHOR_OFFSET.y - b.origin.y + 3.6 });
+      break;
+    }
+    case 'evasion': {
+      // Deux points, puis le couloir dont la sortie se referme derrière le personnage, et la chaîne qui reprend au-dessus.
+      anchor(b, { x: 0, y: 0 });
+      const from = anchor(b, CHAIN[0]!);
+      const { walls, anchors: inside, exit } = escapeCorridor(b.ids, from.pos, HALF_WIDTH);
+      b.obstacles.push(...walls);
+      b.anchors.push(...inside);
+      b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
+      b.ids.anchor += 1;
+      anchor(b, { x: -2, y: exit.y - FIRST_ANCHOR_OFFSET.y - b.origin.y + 3.6 });
       break;
     }
     case 'poche': {

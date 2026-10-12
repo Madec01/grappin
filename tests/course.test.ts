@@ -34,7 +34,9 @@ describe('parcours engendré', () => {
       // la sortie d'un lanceur, par-dessus son mur, se tire, elle peut être à dix mètres ; et la sortie d'un courant ou
       // d'une fusée, portée par la zone qui s'étend entre les deux points, jusqu'à douze.
       const bridged = sim.state.zones.some((z) => z.y0 >= prev.pos.y - 0.5 && z.y1 <= cur.pos.y + 0.5 && z.kind !== 'lateral');
-      expect(Math.hypot(cur.pos.x - prev.pos.x, cur.pos.y - prev.pos.y)).toBeLessThan(bridged ? 13 : prev.kind === 'lanceur' ? 11 : 8);
+      // Lot 5 : la sortie d'un rail se tire comme celle d'un lanceur ; celle d'un aimant ou d'un lien élastique se gagne par sa fronde ou son rappel, à dix mètres.
+      const launched = prev.kind === 'lanceur' || prev.kind === 'rail' || prev.kind === 'aimant' || prev.kind === 'elastique';
+      expect(Math.hypot(cur.pos.x - prev.pos.x, cur.pos.y - prev.pos.y)).toBeLessThan(bridged ? 13 : launched ? 11 : 8);
     }
   });
 

@@ -2,7 +2,7 @@
  * Les musiques, fournies par le propriétaire (dépôt Way, `assets/music/`),
  * une par niveau et une pour le titre. Les fichiers vivent dans
  * `public/musique/` et se chargent au besoin, un à la fois : le jeu ne pèse
- * pas plus lourd au départ. Les douze pistes de jeu tournent sur les vingt
+ * pas plus lourd au départ. Les douze pistes de jeu tournent sur les vingt-deux
  * niveaux ; la course libre prend la piste du niveau qui couvre sa hauteur.
  */
 
@@ -62,6 +62,8 @@ const LEVEL_TRACKS: readonly TrackId[] = [
   'biome4-1',
   'boss3',
   'biome4-2',
+  'boss4',
+  'biome2-1',
   'boss4',
 ];
 

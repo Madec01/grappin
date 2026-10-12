@@ -44,14 +44,14 @@ Le brief complet du propriétaire (synthèse des échanges du 11 octobre 2026) e
 | Lanceur L4 passage sous un plafond | 6 | à revoir : impossible tel quel, une prise s'attrape à toute vitesse ; demande une accroche qui dépende de la vitesse (décision du propriétaire), voir CHANGELOG 0.10.0 |
 | Lanceur L3 ouverture mobile, L5 tir avec rebond | 6 | L5 fait (0.12.1, motif « ricochet ») ; L3 fait (0.13.0, motif « glissiere » : le trou va et vient, on tire quand il passe) |
 | P1 Roue motorisée | 7 | fait (0.13.0 : moteur le long de la corde jusqu'à 11 m/s, sortie dix mètres plus haut que seule la roue atteint) |
-| P2 Rail de lancement | 7 | à faire (lot 5) |
-| P3 Aimant de trajectoire | 7 | à faire (lot 5) |
-| P4 Lien élastique | 7 | prototype (lot 5) |
-| P5 Prise interrupteur | 7 | à faire (lot 5) |
+| P2 Rail de lancement | 7 | fait (0.15.0 : arc en dôme, la position du doigt choisit l'angle, 12 m/s ; à régler sur ressenti : le glissement et la puissance, comme le brief le prévoit) |
+| P3 Aimant de trajectoire | 7 | fait (0.15.0 : champ visqueux qui attire au noyau, un ascenseur ; l'attraction/répulsion reste une extension) |
+| P4 Lien élastique | 7 | fait (0.15.0 : rappel trois fois plus fort que la retenue, rebond vertical de plus en plus haut, butée à 2 m ; à revoir sur ressenti) |
+| P5 Prise interrupteur | 7 | fait (0.15.0 : un verrou sur le vol suivant, ouvert tenu et quatre secondes après ; « déplace une surface » et « immobilise un tournant » restent à faire) |
 | Z1 Courant ascendant, Z2 courant latéral, Z3 couloir d'accélération, Z4 zone de freinage | 8 | fait (0.12.0, avec une scène chacun ; les forces, plafonds et dimensions sont des constantes de `sim/generator.ts`, à revoir sur ressenti) |
 | O1 Portes intermittentes, O3 surfaces de rebond, O4 parois cassables, O5 anneaux de précision | 9 | fait (0.11.0) ; rendus exigés en 0.12.1 (sas, ricochet, mur à percer et percée, cerceau), suite au retour du propriétaire « ça ne rajoute pas de difficulté » ; à revoir sur ressenti : restitution, seuil de vitesse, cycle des portes, et la part des lanceurs dans ces usages |
 | O2 Obstacles tournants | 9 | fait (0.13.0 : barre de 2,6 m, un tour en six secondes, choc au contact, passée au bon moment) |
-| O6 Passage qui se referme | 9 | à faire (lot 5) |
+| O6 Passage qui se referme | 9 | fait (0.15.0 : couloir de dix mètres, sortie qui se ferme huit secondes après l'entrée, annoncée ; marge à ressentir) |
 | H1 Puits de chute, H2 tunnel descendant, règles de la brume en descente | 10 | à faire (lot 5) |
 | D1 Duo alterné, D2 bille écho | 11 | prototype (lot 6) |
 | T1 Serpentin, T3 accordéon, T6 faible gravité | 12 | fait (0.14.0 : serpentin en trois stades sur 45 m, accordéon de deux bandes prouvé dans ses trois états, poche à 30 % de gravité ; à revoir sur ressenti : la lenteur de la rotation, l'amplitude et la période des bandes, la part de gravité de la poche) |

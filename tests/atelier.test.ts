@@ -6,8 +6,8 @@ import { DEFAULT_TUNING as T } from '../src/sim/tuning';
 
 /** L'atelier (0.13.0) : « un vrai mode test où je peux choisir à quelles prises ou autres éléments je veux être confronté ». */
 describe('le catalogue de l\'atelier', () => {
-  it('a trente et un éléments, tous dans un groupe du catalogue, aux identifiants uniques', () => {
-    expect(ATELIER_ELEMENTS).toHaveLength(31);
+  it('a trente-six éléments, tous dans un groupe du catalogue, aux identifiants uniques', () => {
+    expect(ATELIER_ELEMENTS).toHaveLength(36);
     const ids = new Set(ATELIER_ELEMENTS.map((element) => element.id));
     expect(ids.size).toBe(ATELIER_ELEMENTS.length);
     const groups = new Set(ATELIER_GROUPS.map((group) => group.id));

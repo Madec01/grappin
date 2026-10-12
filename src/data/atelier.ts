@@ -15,8 +15,8 @@ import type { Archetype, TierProfile } from '../sim/generator';
 export type AtelierGroup = 'prises' | 'obstacles' | 'lanceurs' | 'zones' | 'transformations' | 'evenements';
 
 export type AtelierId =
-  | 'fragile' | 'propulseur' | 'electrique' | 'eclipse' | 'lanceur' | 'roue'
-  | 'dalles' | 'rebond' | 'cassable' | 'porte' | 'anneau' | 'tournant'
+  | 'fragile' | 'propulseur' | 'electrique' | 'eclipse' | 'lanceur' | 'roue' | 'aimant' | 'interrupteur' | 'rail' | 'elastique'
+  | 'dalles' | 'rebond' | 'cassable' | 'porte' | 'anneau' | 'tournant' | 'evasion'
   | 'brise' | 'sas' | 'cerceau' | 'ricochet' | 'percee' | 'glissiere'
   | 'courant' | 'derive' | 'fusee'
   | 'serpentin' | 'accordeon' | 'poche'
@@ -44,12 +44,17 @@ export const ATELIER_ELEMENTS: readonly AtelierElement[] = [
   { id: 'eclipse', label: 'Éclipses', group: 'prises' },
   { id: 'lanceur', label: 'Lanceurs', group: 'prises' },
   { id: 'roue', label: 'Roues', group: 'prises' },
+  { id: 'aimant', label: 'Aimants', group: 'prises' },
+  { id: 'interrupteur', label: 'Interrupteurs', group: 'prises' },
+  { id: 'rail', label: 'Rails', group: 'prises' },
+  { id: 'elastique', label: 'Élastiques', group: 'prises' },
   { id: 'dalles', label: 'Dalles', group: 'obstacles' },
   { id: 'rebond', label: 'Rebonds', group: 'obstacles' },
   { id: 'cassable', label: 'Cassables', group: 'obstacles' },
   { id: 'porte', label: 'Portes', group: 'obstacles' },
   { id: 'anneau', label: 'Anneaux', group: 'obstacles' },
   { id: 'tournant', label: 'Tournants', group: 'obstacles' },
+  { id: 'evasion', label: 'Évasion', group: 'obstacles' },
   { id: 'brise', label: 'Mur à percer', group: 'lanceurs' },
   { id: 'sas', label: 'Sas', group: 'lanceurs' },
   { id: 'cerceau', label: 'Cerceau', group: 'lanceurs' },
@@ -113,7 +118,7 @@ export function atelierProfile(selection: readonly AtelierId[]): TierProfile {
   if (has('lanceur')) archetypes.push('lanceur');
   if (has('roue')) archetypes.push('roue');
   if (has('tournant')) archetypes.push('tournant');
-  for (const id of ['brise', 'sas', 'cerceau', 'ricochet', 'percee', 'glissiere', 'courant', 'derive', 'fusee', 'accordeon', 'poche'] as const) if (has(id)) archetypes.push(id);
+  for (const id of ['brise', 'sas', 'cerceau', 'ricochet', 'percee', 'glissiere', 'courant', 'derive', 'fusee', 'accordeon', 'poche', 'aimant', 'interrupteur', 'rail', 'elastique', 'evasion'] as const) if (has(id)) archetypes.push(id);
   if (archetypes.length === 0) archetypes.push('chaine', 'couloir');
   return {
     spacing: 4,

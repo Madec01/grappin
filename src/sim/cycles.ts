@@ -1,4 +1,4 @@
-import type { Anchor } from './state';
+import type { Anchor, Obstacle } from './state';
 import type { Tuning } from './tuning';
 
 /**
@@ -60,6 +60,17 @@ export function isDoorClosed(obstacleId: number, step: number, tuning: Tuning): 
 export function doorGauge(obstacleId: number, step: number, tuning: Tuning): number {
   const t = cycleTime(obstacleId, step, tuning, DOOR_PERIOD_SECONDS);
   return t < DOOR_OPEN_SECONDS ? t / DOOR_OPEN_SECONDS : (t - DOOR_OPEN_SECONDS) / (DOOR_PERIOD_SECONDS - DOOR_OPEN_SECONDS);
+}
+
+/**
+ * Porte commandée par une prise interrupteur (lot 5, P5) : ouverte tant que la
+ * prise est tenue et `SWITCH_HOLD_SECONDS` après ; `switchGauge` dit la part du
+ * délai déjà écoulée (0 tenue ou tout juste lâchée, 1 refermée), pour le rendu.
+ */
+export function switchGauge(box: Pick<Obstacle, 'openUntilStep'>, step: number, tuning: Tuning, holdSeconds: number): number {
+  if (box.openUntilStep === undefined || step >= box.openUntilStep) return 1;
+  const remaining = (box.openUntilStep - step) * tuning.stepSeconds;
+  return remaining >= holdSeconds ? 0 : 1 - remaining / holdSeconds;
 }
 
 export type ElectricState = 'calme' | 'avertit' | 'chargee';
