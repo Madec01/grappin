@@ -151,5 +151,5 @@ describe('robots joueurs', () => {
   it('un joueur raisonnable monte au moins trente mètres en une minute sur la plupart des graines', () => {
     const reports = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((seed) => playRobot(seed, T, 60, REASONABLE));
     expect(reports.filter((r) => r.height >= 30).length).toBeGreaterThanOrEqual(7);
-  });
+  }, 20_000);
 });

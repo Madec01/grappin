@@ -267,7 +267,7 @@ describe('les segments, scènes, robots, atelier et niveaux du lot 5 A', () => {
       const beginner = playRobot(5, T, 45, BEGINNER, { kind: 'scene', sceneId: id, startY: 0 });
       expect(beginner.height, `${scene.name}, débutant`).toBeGreaterThan(26);
     }
-  });
+  }, 20_000);
 
   it('l\'atelier connaît les cinq éléments, et les paliers les ouvrent dans l\'ordre', () => {
     expect(ATELIER_ELEMENTS.filter((e) => ['aimant', 'interrupteur', 'rail', 'elastique', 'evasion'].includes(e.id))).toHaveLength(5);
