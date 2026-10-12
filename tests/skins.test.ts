@@ -1,7 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { DOOR_BLINK_HZ, CRACK_SPACING, SKIN, crackPattern, doorLook, ringPhase, springTeeth, stepWave } from '../src/render/skins';
+import {
+  DOOR_BLINK_HZ,
+  CRACK_SPACING,
+  ROTOR_PIVOT_RADIUS,
+  SKIN,
+  WHEEL_RIM_RADIUS,
+  WHEEL_SPOKES,
+  WHEEL_TURNS_PER_SECOND,
+  crackPattern,
+  doorLook,
+  ringPhase,
+  rotorWidths,
+  springTeeth,
+  stepWave,
+  wheelAngle,
+  wheelChevrons,
+  wheelDirection,
+  wheelSpokes,
+} from '../src/render/skins';
+import { COLOR } from '../src/render/style';
 import { DOOR_OPEN_SECONDS, DOOR_PERIOD_SECONDS, DOOR_WARNING_SECONDS, doorGauge, doorState } from '../src/sim/cycles';
 import { RING_RADIUS } from '../src/sim/generator';
+import { ROTOR_THICKNESS } from '../src/sim/moving';
+import { motorStep } from '../src/sim/physics';
 import { RING_CENTRE_RATIO } from '../src/sim/rules';
 import { DEFAULT_TUNING as T } from '../src/sim/tuning';
 
@@ -167,7 +188,7 @@ describe('springTeeth : le ressort d\'une surface de rebond', () => {
 
 describe('teintes dérivées', () => {
   it('chaque masse reste sombre : aucun canal ne dépasse 0x70', () => {
-    for (const [name, color] of Object.entries({ bounceBody: SKIN.bounceBody, smashBody: SKIN.smashBody, smashBodyLit: SKIN.smashBodyLit, doorBody: SKIN.doorBody })) {
+    for (const [name, color] of Object.entries({ bounceBody: SKIN.bounceBody, smashBody: SKIN.smashBody, smashBodyLit: SKIN.smashBodyLit, doorBody: SKIN.doorBody, rotorBody: SKIN.rotorBody })) {
       for (const channel of [(color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff]) expect(channel, name).toBeLessThan(0x70);
     }
   });
@@ -176,5 +197,151 @@ describe('teintes dérivées', () => {
     expect((SKIN.smashBodyLit >> 16) & 0xff).toBeGreaterThan((SKIN.smashBody >> 16) & 0xff);
     const light = (color: number): number => ((color >> 16) & 0xff) + ((color >> 8) & 0xff) + (color & 0xff);
     expect(light(SKIN.crackHot)).toBeGreaterThan(light(SKIN.crackDim));
+  });
+});
+
+describe('la roue motorisée : rayons et chevrons de la jante', () => {
+  const TAU = 2 * Math.PI;
+  const NEAR = 0.01;
+
+  /** L'angle d'un point dans le repère de l'écran, de -π à π. */
+  const angleOf = (x: number, y: number): number => Math.atan2(y, x);
+  /** L'écart signé de `to` à `from`, ramené entre -π et π. */
+  const turnBetween = (from: number, to: number): number => {
+    const d = (to - from) % TAU;
+    return d > Math.PI ? d - TAU : d < -Math.PI ? d + TAU : d;
+  };
+
+  it('a de quatre à six rayons, une jante de 0,9 m et tourne à 0,4 tour par seconde', () => {
+    expect(WHEEL_SPOKES).toBeGreaterThanOrEqual(4);
+    expect(WHEEL_SPOKES).toBeLessThanOrEqual(6);
+    expect(WHEEL_RIM_RADIUS).toBeCloseTo(0.9, 9);
+    expect(WHEEL_TURNS_PER_SECOND).toBeCloseTo(0.4, 9);
+    // Un tour en 2,5 s : l'angle revient au même (à un tour près) puis a fait précisément un tour.
+    for (const spin of [1, -1] as const) {
+      expect(Math.abs(wheelAngle(2.5, spin) - wheelAngle(0, spin))).toBeCloseTo(TAU, 9);
+    }
+  });
+
+  it('tourne dans le sens du moteur : +1 vers la gauche en haut (sens trigonométrique, vu de face), -1 l\'inverse', () => {
+    expect(wheelDirection(1)).toBe(-1);
+    expect(wheelDirection(-1)).toBe(1);
+    // À l'écran (y vers le bas), tourner vers la gauche en haut, c'est un angle qui décroît.
+    expect(wheelAngle(0.2, 1)).toBeLessThan(wheelAngle(0, 1));
+    expect(wheelAngle(0.2, -1)).toBeGreaterThan(wheelAngle(0, -1));
+    // Au premier instant, les deux sens sont dans la même position : seul le sens change.
+    expect(wheelAngle(0, 1)).toBeCloseTo(0, 12);
+    expect(wheelAngle(0, -1)).toBeCloseTo(0, 12);
+  });
+
+  it('un rayon se déplace comme le moteur pousse : le bout d\'un rayon va où va le personnage accroché au même endroit de la roue', () => {
+    const rope = 3;
+    for (const spin of [1, -1] as const) {
+      for (const clock of [0, 0.37, 1.1]) {
+        const before = wheelSpokes(clock, spin, 4, 20, WHEEL_SPOKES);
+        const after = wheelSpokes(clock + 0.01, spin, 4, 20, WHEEL_SPOKES);
+        before.forEach((spoke, k) => {
+          // Le déplacement du bout du rayon, à l'écran (y vers le bas).
+          const move = { x: after[k]!.x1 - spoke.x1, y: after[k]!.y1 - spoke.y1 };
+          // Le personnage au même endroit : en repère du monde (y vers le haut), le point de l'écran (x, y) est en (x, -y).
+          const norm = Math.hypot(spoke.x1, spoke.y1);
+          const hero = { x: (spoke.x1 / norm) * rope, y: (-spoke.y1 / norm) * rope };
+          const pushed = motorStep({ pos: hero, vel: { x: 0, y: 0 } }, { x: 0, y: 0 }, rope, { spin }, T);
+          const push = { x: pushed.vel.x, y: -pushed.vel.y };
+          expect(move.x * push.x + move.y * push.y, `spin ${spin}, horloge ${clock}, rayon ${k}`).toBeGreaterThan(0);
+        });
+      }
+    }
+  });
+
+  it('a ses rayons également répartis, de `inner` à `outer`, et les fait avancer avec l\'horloge', () => {
+    const spokes = wheelSpokes(0.6, 1, 6, 30, WHEEL_SPOKES);
+    expect(spokes).toHaveLength(WHEEL_SPOKES);
+    spokes.forEach((spoke, k) => {
+      expect(Math.hypot(spoke.x0, spoke.y0)).toBeCloseTo(6, 9);
+      expect(Math.hypot(spoke.x1, spoke.y1)).toBeCloseTo(30, 9);
+      // Un rayon : son bout est dans le prolongement de son pied.
+      expect(angleOf(spoke.x0, spoke.y0)).toBeCloseTo(angleOf(spoke.x1, spoke.y1), 9);
+      const next = spokes[(k + 1) % WHEEL_SPOKES]!;
+      // Le rayon suivant est un cinquième de tour plus loin, dans le sens de l'angle qui croît.
+      expect(turnBetween(angleOf(spoke.x1, spoke.y1), angleOf(next.x1, next.y1))).toBeCloseTo(TAU / WHEEL_SPOKES, 9);
+    });
+    const first = wheelSpokes(0, 1, 6, 30);
+    const later = wheelSpokes(1, 1, 6, 30);
+    expect(turnBetween(angleOf(first[0]!.x1, first[0]!.y1), angleOf(later[0]!.x1, later[0]!.y1))).toBeCloseTo(-WHEEL_TURNS_PER_SECOND * TAU, 9);
+  });
+
+  it('est le même d\'un appel à l\'autre, et les deux sens sont le miroir l\'un de l\'autre', () => {
+    expect(wheelSpokes(0.5, 1, 4, 20)).toEqual(wheelSpokes(0.5, 1, 4, 20));
+    const left = wheelSpokes(0.5, 1, 4, 20);
+    const right = wheelSpokes(0.5, -1, 4, 20);
+    // Le rayon k de l'une est, au miroir (y changé de signe), le rayon -k de l'autre : mêmes rayons, tournés dans l'autre sens.
+    left.forEach((spoke, k) => {
+      const mirrored = right[(WHEEL_SPOKES - k) % WHEEL_SPOKES]!;
+      expect(mirrored.x1).toBeCloseTo(spoke.x1, 9);
+      expect(mirrored.y1).toBeCloseTo(-spoke.y1, 9);
+    });
+  });
+
+  it('pose un chevron entre chaque paire de rayons, sur la jante, la pointe dans le sens du tour', () => {
+    const rim = 28;
+    const size = 5;
+    for (const spin of [1, -1] as const) {
+      for (const clock of [0, 0.8]) {
+        const chevrons = wheelChevrons(clock, spin, rim, size, WHEEL_SPOKES);
+        const spokes = wheelSpokes(clock, spin, 4, rim, WHEEL_SPOKES);
+        expect(chevrons).toHaveLength(WHEEL_SPOKES);
+        chevrons.forEach(([ax, ay, tx, ty, bx, by]) => {
+          // Sur la jante : la pointe, à la taille du chevron près.
+          expect(Math.abs(Math.hypot(tx, ty) - rim)).toBeLessThan(size * 0.2);
+          // La pointe est en avant des bras, dans le sens où tourne la roue (l'angle croît pour +1 = -1 vers la gauche, voir `wheelDirection`).
+          const arms = angleOf((ax + bx) / 2, (ay + by) / 2);
+          expect(Math.sign(turnBetween(arms, angleOf(tx, ty))), `spin ${spin}`).toBe(wheelDirection(spin));
+          // Entre deux rayons : à plus d'un chevron d'un pied de rayon.
+          for (const spoke of spokes) expect(Math.hypot(tx - spoke.x1, ty - spoke.y1)).toBeGreaterThan(size);
+        });
+      }
+    }
+  });
+
+  it('ne tremble pas près de zéro : la rotation est lisse, un pas de temps minuscule déplace à peine un rayon', () => {
+    const a = wheelSpokes(3, 1, 4, 20)[0]!;
+    const b = wheelSpokes(3 + NEAR / 1000, 1, 4, 20)[0]!;
+    expect(Math.hypot(b.x1 - a.x1, b.y1 - a.y1)).toBeLessThan(0.001);
+  });
+});
+
+describe('rotorWidths : la barre d\'un obstacle tournant, en pixels', () => {
+  const EDGE = 2;
+
+  it('a l\'épaisseur de la collision (0,4 m de monde) : le trait extérieur déborde d\'un demi-contour de chaque côté, le corps en retire autant', () => {
+    for (const scale of [20, 32, 45]) {
+      const { outer, body } = rotorWidths(scale, EDGE);
+      expect(outer).toBeCloseTo(ROTOR_THICKNESS * scale + EDGE, 9);
+      expect(body).toBeCloseTo(ROTOR_THICKNESS * scale - EDGE, 9);
+      // L'anneau de contour que laisse le corps vaut le trait du contour.
+      expect((outer - body) / 2).toBeCloseTo(EDGE, 9);
+    }
+  });
+
+  it('se voit encore très dézoomée : au moins quatre pixels de barre, de quoi garder un contour', () => {
+    const { outer, body } = rotorWidths(2, EDGE);
+    expect(outer - EDGE).toBeGreaterThanOrEqual(4);
+    expect(body).toBeGreaterThan(0);
+    expect((outer - body) / 2).toBeCloseTo(EDGE, 9);
+  });
+
+  it('le disque du pivot est plus gros que la barre, à tout zoom', () => {
+    for (const scale of [2, 10, 32, 60]) {
+      const { outer, pivot } = rotorWidths(scale, EDGE);
+      expect(pivot).toBeGreaterThan(outer / 2);
+    }
+    expect(ROTOR_PIVOT_RADIUS).toBeGreaterThan(ROTOR_THICKNESS / 2);
+  });
+
+  it('la masse de la barre est sombre, avec un soupçon du rouge-magenta du danger', () => {
+    const red = (color: number): number => (color >> 16) & 0xff;
+    expect(red(SKIN.rotorBody)).toBeGreaterThan(red(COLOR.obstacle));
+    expect(red(SKIN.rotorBody)).toBeLessThan(red(COLOR.obstacleEdge));
   });
 });

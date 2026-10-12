@@ -177,7 +177,7 @@ export function buildScene(id: SceneId, ids: IdCounters, origin: Vec2): Segment 
       break;
     }
     case 'roue': {
-      // Deux points, puis une roue motorisée (vers la gauche) ; la chaîne reprend bien plus haut, là où la roue envoie.
+      // Deux points, puis une roue motorisée qui tourne dans le sens où l'on arrive (venant de la gauche : sens trigonométrique) ; la chaîne reprend bien plus haut, là où la roue envoie.
       anchor(b, { x: 0, y: 0 });
       anchor(b, CHAIN[0]!);
       const at = { x: b.origin.x + FIRST_ANCHOR_OFFSET.x + 0.8, y: b.origin.y + FIRST_ANCHOR_OFFSET.y + 7.2 };

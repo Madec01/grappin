@@ -49,9 +49,9 @@ const ZONE_AHEAD_SECONDS = 0.4;
 const LOOK_AHEAD_SECONDS = 0.5;
 
 /** Sous un mur à ouverture mobile, le robot attend que le trou passe, jamais plus longtemps que ceci (secondes) : la brume monte. */
-const LAUNCH_WAIT_MAX_SECONDS = 6;
+export const LAUNCH_WAIT_MAX_SECONDS = 6;
 /** Sur une roue, le robot ne lâche qu'une fois le moteur presque à sa vitesse, et presque à la verticale vers le haut : c'est là que la roue porte (10 m plus haut). Il y reste jusqu'à ce moment, au plus `WHEEL_HOLD_MAX_SECONDS`. */
-const WHEEL_READY_RATIO = 0.95;
+export const WHEEL_READY_RATIO = 0.95;
 const WHEEL_UP_RATIO = 0.5;
 const WHEEL_HOLD_MAX_SECONDS = 8;
 

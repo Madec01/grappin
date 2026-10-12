@@ -5,6 +5,7 @@ import { chromium, type Browser, type Page } from '@playwright/test';
 import gifenc from 'gifenc';
 import { PNG } from 'pngjs';
 import { doorGauge, doorState } from '../src/sim/cycles';
+import { rotorTurns, slideOffset } from '../src/sim/moving';
 import { Simulation } from '../src/sim/simulation';
 import type { ZoneKind } from '../src/sim/state';
 import { DEFAULT_TUNING } from '../src/sim/tuning';
@@ -205,6 +206,15 @@ const REBOND_AFTER_FRAMES = 16;
 const CASSABLE_LIT_Y = 15.2;
 const CASSABLE_AFTER_FRAMES = 4;
 const RING_AFTER_FRAMES = 2;
+/** La roue : la prise « tenue » est faite quand le personnage tient la roue depuis `WHEEL_HELD_SECONDS` et que le moteur a pris cette part de sa vitesse (il tourne à plein) ; l'image « en vol » vient quelques images après le lâcher, le temps de s'écarter de la roue. */
+const WHEEL_HELD_RATIO = 0.9;
+const WHEEL_HELD_SECONDS = 1.5;
+const WHEEL_AFTER_FRAMES = 6;
+/** Le tournant : le personnage « en approche » est sous la barre depuis cette hauteur (la barre est à 9,6 m au-dessus du premier point), et on veut la barre en diagonale, de 32 à 58 degrés d'un axe. */
+const ROTOR_APPROACH_Y = 10;
+const ROTOR_DIAGONAL: readonly [number, number] = [0.09, 0.16];
+/** La glissière : le trou, en déplacement, à cet écart (mètres) du lanceur, de ce côté et en revenant vers lui ; et un pas d'attente à la fois, d'au plus ce nombre de pas. */
+const SLIDE_SHOT_OFFSET: readonly [number, number] = [-2, -1.4];
 
 /** Mène l'horloge figée de la page jusqu'au pas de simulation `target` (à un pas ou deux près, par excès), par grands bonds puis image par image. */
 async function advanceToStep(page: Page, target: number): Promise<number> {
@@ -265,6 +275,11 @@ const ZONE_SHOTS: readonly { readonly id: string; readonly file: string; readonl
  *    son éclat, « Au centre ! » ou « Anneau » et les traits de vitesse derrière le personnage ;
  *  - 32-scene-courant, 33-scene-derive, 34-scene-fusee : le personnage dans la zone (colonne du courant ascendant, bande de dérive,
  *    couloir d'accélération avec la zone de freinage au-dessus), bannière effacée.
+ *  - 35-scene-roue : la roue motorisée, le personnage tenu dessus et lancé à plein (le moteur a pris 90 % de sa vitesse, rayons et chevrons
+ *    de la jante, halo de la roue tenue) ; 35-scene-roue-vol : une image après le lâcher, le personnage en vol, la roue qui continue de tourner ;
+ *  - 36-scene-tournant : la barre en diagonale (à mi-chemin d'un quart de tour), le personnage en approche en dessous ;
+ *  - 37-scene-glissiere : le lanceur tenu sous le mur, le trou en déplacement, décalé du lanceur et revenant vers lui ; 37-scene-glissiere-vol :
+ *    le tir parti quand le trou est passé, le personnage dans le trou, entre les deux panneaux.
  * Une prise que le parcours ne permet plus (réglages changés) est omise avec un avertissement, sans bloquer le banc.
  */
 async function captureScenes(browser: Browser): Promise<void> {
@@ -394,6 +409,151 @@ async function captureScenes(browser: Browser): Promise<void> {
         console.log(`Scène anneau, passage : ${s.rings} anneau(x) traversé(s), score ${Math.round(s.score)}, vitesse ${Math.hypot(s.vel.x, s.vel.y).toFixed(1)} m/s`);
       }
       await close();
+    }
+  }
+
+  // La roue : le personnage attend sur le toit que la bannière d'intro s'efface (elle cacherait le haut de la prise), puis le pilote le mène sur la
+  // roue. Tenu : l'image où le moteur a pris presque toute sa vitesse, le personnage tourne à plein. En vol : quelques images après le lâcher.
+  if (wanted('roue')) {
+    const world = sceneWorld('roue', seed);
+    {
+      const { page, close } = await openScene(browser, 'roue');
+      await page.clock.runFor(PULSE_INTRO_MS);
+      // Pas de la première image tenue : à l'accroche, le personnage arrive à vive allure mais la corde n'est pas encore tendue ni dessinée ; il faut le tour.
+      let heldSince = -1;
+      const spinning = await climbUntil(
+        page,
+        (s) => {
+          if (s.heldKind !== 'roue') heldSince = -1;
+          else if (heldSince < 0) heldSince = s.step;
+          return heldSince >= 0 && (s.step - heldSince) * DEFAULT_TUNING.stepSeconds >= WHEEL_HELD_SECONDS && Math.hypot(s.vel.x, s.vel.y) >= DEFAULT_TUNING.wheelSpeed * WHEEL_HELD_RATIO;
+        },
+        { world },
+      );
+      if (!spinning) console.warn('35-scene-roue : le pilote ne tourne pas à plein sur la roue, prise omise');
+      else {
+        const s = await page.evaluate(() => window.__grappin!.state());
+        await page.screenshot({ path: join(outDir, '35-scene-roue.png') });
+        console.log(`Scène roue : tenue, vitesse ${Math.hypot(s.vel.x, s.vel.y).toFixed(1)} m/s (moteur à ${DEFAULT_TUNING.wheelSpeed}), position (${s.pos.x.toFixed(1)}, ${s.pos.y.toFixed(1)}) m, pas ${s.step}`);
+      }
+      await close();
+    }
+    {
+      const { page, close } = await openScene(browser, 'roue');
+      await page.clock.runFor(PULSE_INTRO_MS);
+      let onWheel = false;
+      const released = await climbUntil(
+        page,
+        (s) => {
+          if (s.heldKind === 'roue') onWheel = true;
+          return onWheel && !s.attached;
+        },
+        { world },
+      );
+      if (!released) console.warn('35-scene-roue-vol : le pilote ne lâche pas la roue, prise omise');
+      else {
+        await page.clock.runFor(WHEEL_AFTER_FRAMES * FRAME_MS);
+        const s = await page.evaluate(() => window.__grappin!.state());
+        await page.screenshot({ path: join(outDir, '35-scene-roue-vol.png') });
+        console.log(`Scène roue en vol : (${s.pos.x.toFixed(1)}, ${s.pos.y.toFixed(1)}) m, vitesse (${s.vel.x.toFixed(1)}, ${s.vel.y.toFixed(1)}) m/s, pas ${s.step}`);
+      }
+      await close();
+    }
+  }
+
+  // Le tournant : la barre en diagonale, le personnage en approche en dessous. Le parcours du pilote ne dépend pas de la barre avant qu'il l'atteigne
+  // (la preuve ne compte pas sur ce qui bouge) : on le mène une première fois pour savoir à quel pas il arrive sous la barre, puis on retarde son départ
+  // (il attend sur le toit) du temps qu'il faut pour que la barre soit en diagonale à son arrivée.
+  if (wanted('tournant')) {
+    const world = sceneWorld('tournant', seed);
+    const rotor = world.obstacles.find((box) => box.rotor)?.rotor;
+    if (!rotor) console.warn('36-scene-tournant : pas de barre dans la scène, prise omise');
+    else {
+      const diagonal = (step: number): boolean => {
+        const turns = rotorTurns(rotor, step, DEFAULT_TUNING);
+        const quarter = turns - Math.floor(turns * 4) / 4;
+        return quarter >= ROTOR_DIAGONAL[0] && quarter <= ROTOR_DIAGONAL[1];
+      };
+      const approach = async (delayMs: number): Promise<{ page: Page; close: () => Promise<void>; ok: boolean }> => {
+        const opened = await openScene(browser, 'tournant');
+        await opened.page.clock.runFor(delayMs);
+        const ok = await climbUntil(opened.page, (s) => s.pos.y >= ROTOR_APPROACH_Y, { world });
+        return { ...opened, ok };
+      };
+      let attempt = await approach(PULSE_INTRO_MS);
+      if (attempt.ok) {
+        const arrival = (await attempt.page.evaluate(() => window.__grappin!.state())).step;
+        if (!diagonal(arrival)) {
+          // Le plus petit retard, par images, qui met la barre en diagonale à l'arrivée.
+          let delay = FRAME_MS;
+          while (delay < 8000 && !diagonal(arrival + Math.round(delay * STEPS_PER_FRAME / FRAME_MS))) delay += FRAME_MS;
+          await attempt.close();
+          attempt = await approach(PULSE_INTRO_MS + delay);
+        }
+      }
+      if (!attempt.ok) console.warn('36-scene-tournant : le pilote n\'arrive pas sous la barre, prise omise');
+      else {
+        const s = await attempt.page.evaluate(() => window.__grappin!.state());
+        await attempt.page.screenshot({ path: join(outDir, '36-scene-tournant.png') });
+        const turns = rotorTurns(rotor, s.step, DEFAULT_TUNING);
+        console.log(`Scène tournant : pas ${s.step}, barre à ${((turns - Math.floor(turns)) * 360).toFixed(0)} degrés, personnage en (${s.pos.x.toFixed(1)}, ${s.pos.y.toFixed(1)}) m, pivot en (${rotor.pivot.x.toFixed(1)}, ${rotor.pivot.y.toFixed(1)}) m`);
+      }
+      await attempt.close();
+    }
+  }
+
+  // La glissière : le lanceur tenu sous le mur, le trou en déplacement (décalé du lanceur, il y revient) ; puis le tir parti quand le trou est passé, le
+  // personnage dans le trou, entre les deux panneaux. Le pilote n'attrape rien avant d'avoir franchi le mur.
+  if (wanted('glissiere')) {
+    const world = sceneWorld('glissiere', seed);
+    const wall = world.obstacles.find((box) => box.slide);
+    if (!wall?.slide) console.warn('37-scene-glissiere : pas de mur qui glisse dans la scène, prise omise');
+    else {
+      const slide = wall.slide;
+      {
+        const { page, close } = await openScene(browser, 'glissiere');
+        if (!(await holdAtLauncher(page, world))) console.warn('37-scene-glissiere : le pilote n\'atteint pas le lanceur, prise omise');
+        else {
+          // Le premier pas, à partir de maintenant, où le trou est à l'écart voulu du lanceur et revient vers lui.
+          const now = (await page.evaluate(() => window.__grappin!.state())).step;
+          const offsetAt = (step: number): number => slideOffset(slide, step, DEFAULT_TUNING);
+          let target = -1;
+          for (let step = now; step < now + 6 * Math.round(1 / DEFAULT_TUNING.stepSeconds); step += 1) {
+            const offset = offsetAt(step);
+            if (offset >= SLIDE_SHOT_OFFSET[0] && offset <= SLIDE_SHOT_OFFSET[1] && offsetAt(step + 1) > offset) {
+              target = step;
+              break;
+            }
+          }
+          if (target < 0) console.warn('37-scene-glissiere : le trou n\'est jamais à l\'écart voulu en six secondes, prise omise');
+          else {
+            const reached = await advanceToStep(page, target);
+            await page.screenshot({ path: join(outDir, '37-scene-glissiere.png') });
+            console.log(`Scène glissière : lanceur tenu, pas ${reached}, trou décalé de ${offsetAt(reached).toFixed(2)} m du lanceur`);
+          }
+        }
+        await close();
+      }
+      {
+        const { page, close } = await openScene(browser, 'glissiere');
+        let launchedStep = -1;
+        const inGap = await flyUntil(
+          page,
+          world,
+          (s, memory) => {
+            if (memory.launchedAt > 0 && launchedStep < 0) launchedStep = s.step;
+            return memory.launchedAt > 0 && !s.attached && s.pos.y >= wall.y0 && s.pos.y <= wall.y1;
+          },
+          { wait: (s, memory) => memory.launchedAt > 0 && s.pos.y < wall.y1 + 1 },
+        );
+        if (!inGap) console.warn('37-scene-glissiere-vol : le tir ne passe pas dans le trou, prise omise');
+        else {
+          const s = await page.evaluate(() => window.__grappin!.state());
+          await page.screenshot({ path: join(outDir, '37-scene-glissiere-vol.png') });
+          console.log(`Scène glissière en vol : (${s.pos.x.toFixed(2)}, ${s.pos.y.toFixed(2)}) m dans le mur (${wall.y0.toFixed(1)} à ${wall.y1.toFixed(1)} m), trou décalé de ${slideOffset(slide, s.step, DEFAULT_TUNING).toFixed(2)} m, tir au pas ${launchedStep}, pas ${s.step}`);
+        }
+        await close();
+      }
     }
   }
 

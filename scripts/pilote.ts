@@ -4,7 +4,7 @@ import type { SceneId } from '../src/data/scenes';
 import { flightStep, startFlight } from '../src/sim/flight';
 import { launchSet, launchVelocity, pulledPosition } from '../src/sim/launcher';
 import { provableObstacles } from '../src/sim/obstacles';
-import { LAUNCH_AIM_SECONDS } from '../src/sim/robot';
+import { LAUNCH_AIM_SECONDS, LAUNCH_WAIT_MAX_SECONDS, WHEEL_READY_RATIO, launchIsClear } from '../src/sim/robot';
 import { Simulation } from '../src/sim/simulation';
 import type { SimState } from '../src/sim/state';
 import { DEFAULT_TUNING } from '../src/sim/tuning';
@@ -22,9 +22,14 @@ import { flightCatches, swingIsClear } from '../src/sim/verifier';
  *  - il n'attrape pas un point si le balancement qui suivrait heurte un mur
  *    (`swingIsClear`, sur le monde de la scène rejoué en Node) ;
  *  - sur un lanceur, il laisse le temps de bander la fronde (0,35 s), puis tire
- *    la traction que le vérificateur a prouvée (`launchAim`) ;
+ *    la traction que le vérificateur a prouvée (`launchAim`) ; sous un mur dont
+ *    le trou va et vient (`glissiere`), il attend, une image après l'autre, que
+ *    le tir passe sans heurter ce qui bouge (`launchIsClear`, regardé au pas de
+ *    la page), jusqu'à six secondes ;
  *  - il lâche dans la fenêtre du lâcher parfait, ou dès qu'il va assez vite en
- *    montant à 30° à 60°, jamais plus de 2,5 s tenu.
+ *    montant à 30° à 60°, jamais plus de 2,5 s tenu ; sur une roue motorisée, il
+ *    attend aussi que le moteur ait pris 95 % de sa vitesse (le tour fait, c'est là
+ *    que la roue porte), et il la tient aussi longtemps qu'il le faut pour cela.
  */
 
 /** L'état que le jeu rend à `state()`. */
@@ -36,8 +41,13 @@ const LAUNCH_AIM_MS = LAUNCH_AIM_SECONDS * 1000;
 /** Le pilote qui monte à plus de cette vitesse (m/s) ignore un point visé plus bas que lui de cette distance (m) : il attend la suite, comme le robot. */
 const RISING_SPEED = 1;
 const RISING_BELOW = 0.5;
-/** Jamais plus longtemps pendu, en millisecondes. */
+/** Jamais plus longtemps pendu, en millisecondes ; à une roue, le moteur a besoin de son tour pour prendre sa vitesse (voir `WHEEL_MAX_HOLD_MS`). */
 const MAX_HOLD_MS = 2500;
+const WHEEL_MAX_HOLD_MS = 6000;
+/** Sous un mur à ouverture mobile, jamais plus longtemps à attendre que le trou passe, en millisecondes : la borne du robot. */
+const LAUNCH_WAIT_MAX_MS = LAUNCH_WAIT_MAX_SECONDS * 1000;
+/** La traction du tir quand le vérificateur n'en prouve aucune. */
+const DEFAULT_PULL: Vec2 = { x: 0, y: -1.75 };
 /** Un vol libre de pure physique (sans rattrapage) : la durée simulée d'un tir qu'on essaie, en secondes. */
 const SHOT_SECONDS = 3.5;
 /** La traction du tir mou, en mètres de monde : un peu plus de la moitié de la traction maximale (2,5), soit 12,1 m/s au départ. */
@@ -104,6 +114,11 @@ export function ringShot(world: SimState): Vec2 | null {
   return crossing;
 }
 
+/** Le monde de la scène tel qu'il est au pas de la page, le lanceur `launcherId` tenu : de quoi demander à `launchIsClear` si un tir passe là où les obstacles mobiles seront (leur géométrie ne dépend que du pas). */
+function heldWorld(world: SimState, step: number, launcherId: number): SimState {
+  return { ...world, step, rope: { anchorId: launcherId, length: 0 } };
+}
+
 /** Vrai si s'accrocher à `targetId` d'ici ne mène pas dans un mur (le balancement qui suit, joué comme le robot le regarde). Sans monde rejoué, on ne regarde pas. */
 function swingIsSafe(world: SimState | undefined, s: Seen, targetId: number): boolean {
   if (!world) return true;
@@ -134,15 +149,23 @@ export async function pilotFrame(page: Page, memory: PilotMemory, nowMs: number,
     if (nowMs - memory.holdSince > LAUNCH_AIM_MS && nowMs >= (options.launchNotBefore ?? 0)) {
       const aim = options.shot === 'mou' ? SOFT_PULL : (options.shot === 'anneau' && options.world ? ringShot(options.world) : null) ?? (await page.evaluate(() => window.__grappin!.launchAim()));
       const launcher = (await page.evaluate(() => window.__grappin!.anchors())).find((a) => a.kind === 'lanceur');
-      if (aim) await page.evaluate((pull) => window.__grappin!.release(pull.x, pull.y), aim);
-      else await page.evaluate(() => window.__grappin!.release(0, -1.75));
+      const pull = aim ?? DEFAULT_PULL;
+      // Sous un mur dont le trou va et vient : tant que le tir heurterait ce qui bouge, on attend une image de plus (jamais plus de six secondes
+      // une fois le tir permis, pour que la brume ne rattrape pas le pilote).
+      const readyAt = Math.max(memory.holdSince + LAUNCH_AIM_MS, options.launchNotBefore ?? 0);
+      if (options.world && launcher && nowMs - readyAt < LAUNCH_WAIT_MAX_MS && !launchIsClear(heldWorld(options.world, s.step, launcher.id), pull, DEFAULT_TUNING)) return s;
+      await page.evaluate((p) => window.__grappin!.release(p.x, p.y), pull);
       memory.launchedAt = nowMs;
       memory.launchedY = launcher?.y ?? s.pos.y;
     }
   } else if (s.attached && nowMs - memory.holdSince > 80) {
-    const ready = Math.hypot(s.vel.x, s.vel.y) >= 8 || (s.ropeLength !== null && s.ropeLength <= 1.5 + 1e-9);
+    const speed = Math.hypot(s.vel.x, s.vel.y);
+    // Sur une roue, ni treuil ni fenêtre de lâcher parfait qui vaille : il faut la vitesse du moteur, et on la tient le temps qu'il l'atteigne.
+    const onWheel = s.heldKind === 'roue';
+    const ready = onWheel ? speed >= DEFAULT_TUNING.wheelSpeed * WHEEL_READY_RATIO : speed >= 8 || (s.ropeLength !== null && s.ropeLength <= 1.5 + 1e-9);
     const slope = s.vel.x !== 0 ? s.vel.y / Math.abs(s.vel.x) : Infinity;
-    if (s.releaseWindow || (ready && s.vel.y > 1 && slope > 0.6 && slope < 1.8) || nowMs - memory.holdSince > MAX_HOLD_MS) await page.evaluate(() => window.__grappin!.release());
+    const lingered = nowMs - memory.holdSince > (onWheel ? WHEEL_MAX_HOLD_MS : MAX_HOLD_MS);
+    if ((!onWheel && s.releaseWindow) || (ready && s.vel.y > 1 && slope > 0.6 && slope < 1.8) || lingered) await page.evaluate(() => window.__grappin!.release());
   }
   return s;
 }

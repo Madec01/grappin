@@ -17,8 +17,8 @@ import { newMemory, pilotFrame, sceneWorld } from '../scripts/pilote';
  * réglages du titre (Sons, Départ) survivent au rechargement, la fenêtre de
  * lâcher s'ouvre puis se referme pendant un balancement, et le premier conseil
  * du tutoriel apparaît à la première accroche, les quatre scènes de démonstration du lot 2 (le ricochet, le mur à percer, la porte, le cerceau)
- * se jouent et se dessinent sans erreur et le pilote y prouve la mécanique exigée (rebond, fracas, anneau traversé), et les trois scènes de zones (courant ascendant, dérive, fusée) chargent leurs zones et voient le
- * pilote y entrer. Tout passe par `window.__grappin`.
+ * se jouent et se dessinent sans erreur et le pilote y prouve la mécanique exigée (rebond, fracas, anneau traversé), les trois scènes de zones (courant ascendant, dérive, fusée) chargent leurs zones et voient le
+ * pilote y entrer, et les trois scènes de la fin du lot 2 (la roue motorisée, le tournant, la glissière) se jouent au pilote sans erreur. Tout passe par `window.__grappin`.
  */
 
 const CENTER = { x: 195, y: 422 };
@@ -556,6 +556,113 @@ for (const { scene, zone } of ZONE_SCENES) {
   });
 }
 
+/**
+ * Les trois scènes de la fin du lot 2 (0.13.0), jouées par le pilote des scènes sur l'horloge figée de la page, sans erreur de console :
+ *  - la roue (`roue`) : le pilote tient la roue (`heldKind`), le moteur le porte au-delà de 10 m/s ; le lâcher part à pleine vitesse et le
+ *    personnage monte bien plus haut qu'un balancement ordinaire (au-dessus de 18 m) ;
+ *  - le tournant (`tournant`) : la scène charge l'obstacle tournant, et le pilote passe au-dessus de 20 m ;
+ *  - la glissière (`glissiere`) : le pilote tient le lanceur et ne tire que quand le trou passe. La page ne compte pas les chocs : on les
+ *    reconnaît à leur effet, le personnage renvoyé vers le bas avant d'avoir franchi le mur ; puis il dépasse 16 m, le haut du mur.
+ */
+test('scène « roue » : le pilote tient la roue, le moteur le porte au-delà de 10 m/s, puis après le lâcher il monte au-dessus de 18 m', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'roue');
+  const world = sceneWorld('roue', 5);
+  expect(world.anchors.filter((a) => a.kind === 'roue')).toHaveLength(1);
+  expect((await page.evaluate(() => window.__grappin!.anchors())).filter((a) => a.kind === 'roue')).toHaveLength(1);
+  const memory = newMemory();
+  let heldFrames = 0;
+  let fastestHeld = 0;
+  let released = false;
+  let highest = 0;
+  for (let frame = 0; frame < 700 && !(released && highest > 18); frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world });
+    expect(seen.screen).toBe('playing');
+    if (seen.heldKind === 'roue') {
+      heldFrames += 1;
+      fastestHeld = Math.max(fastestHeld, speedOf(seen));
+    } else if (heldFrames > 0 && !seen.attached) released = true;
+    // Le lâcher de la roue : ce qui compte est la hauteur gagnée ensuite (la roue est à 11,2 m, la prise suivante est dix mètres plus haut).
+    if (released) highest = Math.max(highest, seen.pos.y);
+  }
+  // La roue est tenue plus d'une seconde : le moteur a besoin de son tour pour prendre sa vitesse (18 m/s² pour 11 m/s, après avoir retourné l'élan d'arrivée).
+  expect(heldFrames * FRAME_MS).toBeGreaterThan(1000);
+  expect(fastestHeld, 'vitesse tenue sur la roue').toBeGreaterThan(10);
+  expect(released).toBe(true);
+  expect(highest, 'hauteur après le lâcher').toBeGreaterThan(18);
+  // La roue qui tourne et la corde tendue se dessinent encore quelques images, sans erreur.
+  for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
+  expect((await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
+test('scène « tournant » : la scène charge l\'obstacle tournant, et le pilote passe au-dessus de 20 m', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'tournant');
+  const world = sceneWorld('tournant', 5);
+  const rotors = world.obstacles.filter((box) => box.kind === 'tournant');
+  expect(rotors).toHaveLength(1);
+  expect(rotors[0]!.rotor).toBeDefined();
+  const loaded = await state(page);
+  expect(loaded).toMatchObject({ screen: 'playing', scene: 'tournant' });
+  expect(loaded.obstacles).toBe(world.obstacles.length);
+  const memory = newMemory();
+  let highest = 0;
+  for (let frame = 0; frame < 700 && highest <= 20; frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world });
+    expect(seen.screen).toBe('playing');
+    highest = Math.max(highest, seen.pos.y);
+  }
+  expect(highest, 'hauteur atteinte').toBeGreaterThan(20);
+  // La barre tourne et se dessine encore quelques images, sans erreur.
+  for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
+  expect((await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
+test('scène « glissiere » : le pilote tient le lanceur et ne tire que quand le trou passe (aucun choc contre un panneau), puis il dépasse 16 m', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'glissiere');
+  const world = sceneWorld('glissiere', 5);
+  const panels = world.obstacles.filter((box) => box.slide);
+  expect(panels).toHaveLength(2);
+  expect((await state(page)).obstacles).toBe(world.obstacles.length);
+  const top = Math.max(...panels.map((box) => box.y1));
+  const memory = newMemory();
+  let heldFrames = 0;
+  let launched = false;
+  let passed = false;
+  let flightY = -Infinity;
+  let bounced = 0;
+  let highest = 0;
+  for (let frame = 0; frame < 700 && highest <= 17; frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world });
+    expect(seen.screen).toBe('playing');
+    if (seen.heldKind === 'lanceur') heldFrames += 1;
+    else if (heldFrames > 0 && !seen.attached) launched = true;
+    highest = Math.max(highest, seen.pos.y);
+    // Le choc contre un panneau renvoie le personnage vers le bas : tant qu'il n'a pas franchi le mur, sa hauteur ne redescend jamais. Le tir, lui,
+    // part vers le haut avec 14,9 m/s, et la gravité ne le ramène pas vers le bas en moins d'une demi-seconde (le mur est à cinq mètres du lanceur).
+    if (launched && !passed) {
+      if (seen.pos.y < flightY - 0.01) bounced += 1;
+      flightY = Math.max(flightY, seen.pos.y);
+      if (seen.pos.y > top) passed = true;
+    }
+  }
+  // Le lanceur est tenu au moins le temps de bander la fronde (0,35 s), puis le tir passe par le trou.
+  expect(heldFrames * FRAME_MS).toBeGreaterThanOrEqual(350);
+  expect(launched).toBe(true);
+  expect(bounced, 'images où le personnage redescend avant le mur (un choc)').toBe(0);
+  expect(passed, 'le tir franchit le mur').toBe(true);
+  expect(highest, 'hauteur atteinte').toBeGreaterThan(16);
+  for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
+  expect((await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
 test('progression : une partie rapporte de l\'expérience, le profil survit au rechargement, un talisman s\'équipe', async ({ page }) => {
   const errors = watchErrors(page);
   // Brume rapide : sans personne pour jouer, elle finit la partie en quelques secondes.
@@ -644,6 +751,31 @@ test('titre : Sons et Départ se basculent et survivent au rechargement', async 
   await page.reload();
   await page.waitForFunction(() => window.__grappin !== undefined);
   expect(await state(page)).toMatchObject({ screen: 'title', sfxOn: true, freeStart: 'advanced' });
+  expect(errors).toEqual([]);
+});
+
+test('atelier : en mode test, on coche des éléments, le choix se garde, et la partie n\'engendre que ces éléments', async ({ page }) => {
+  const errors = watchErrors(page);
+  await open(page, '/?test=1&graine=3');
+  await page.evaluate(() => window.__grappin!.resetProfile());
+  expect((await buttons(page)).some((button) => button.id === 'atelier')).toBe(true);
+  await tapButton(page, 'atelier');
+  await expect.poll(async () => (await state(page)).screen).toBe('atelier');
+  await tapButton(page, 'atelier:porte');
+  await tapButton(page, 'atelier:roue');
+  await expect.poll(async () => (await state(page)).atelierChoice).toEqual(['roue', 'porte']);
+  await page.reload();
+  await page.waitForFunction(() => window.__grappin !== undefined);
+  expect((await state(page)).atelierChoice).toEqual(['roue', 'porte']);
+  await tapButton(page, 'atelier');
+  await tapButton(page, 'atelierPlay');
+  await expect.poll(async () => (await state(page)).screen).toBe('playing');
+  expect((await state(page)).atelier).toEqual(['roue', 'porte']);
+  // Les points sont des roues ou des points normaux, et les obstacles chargés comptent les portes.
+  const kinds = new Set((await page.evaluate(() => window.__grappin!.anchors())).map((anchor) => anchor.kind));
+  expect([...kinds].every((kind) => kind === 'normal' || kind === 'roue')).toBe(true);
+  expect(kinds.has('roue')).toBe(true);
+  expect((await state(page)).obstacles).toBeGreaterThan(0);
   expect(errors).toEqual([]);
 });
 

@@ -1,4 +1,5 @@
 import { doorGauge, doorState } from '../sim/cycles';
+import { ROTOR_THICKNESS } from '../sim/moving';
 import { RING_CENTRE_RATIO } from '../sim/rules';
 import type { Obstacle, Ring, SimState } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
@@ -8,16 +9,20 @@ import { COLOR } from './style';
 
 /**
  * Habillages des obstacles à comportement (surface de rebond, paroi cassable,
- * porte) et des anneaux de précision : ce qui, dans leur dessin, se calcule de
- * l'état sans PixiJS ni temps réel. Le rendu (`renderer.ts`) pose les formes,
- * ce fichier dit quoi poser et dans quel état.
+ * porte, barre tournante), des anneaux de précision et de la roue motorisée : ce
+ * qui, dans leur dessin, se calcule de l'état sans PixiJS ni temps réel. Le
+ * rendu (`renderer.ts`) pose les formes, ce fichier dit quoi poser et dans quel
+ * état.
  *
  * Règle : tout se lit de l'état de la simulation, jamais de l'horloge de
  * l'écran. Une porte se lit de `state.step` (cycle, jauge, clignotement), une
  * paroi cassable de la vitesse du personnage, un anneau de sa traversée en
  * cours : une même image se redessine toujours pareille, ce qui rend les
  * captures reproductibles. Les motifs (fissures) viennent du numéro de
- * l'obstacle, par un bruit déterministe.
+ * l'obstacle, par un bruit déterministe. Fait exception la roue motorisée, dont
+ * les rayons tournent à l'écran sur l'horloge des effets : un simple
+ * mouvement du décor, jamais un état du jeu, mais la formule de leur angle est
+ * ici, pure.
  */
 
 /**
@@ -38,6 +43,8 @@ export const SKIN = {
   doorPale: mixColor(COLOR.door, COLOR.white, 0.45),
   /** Anneau traversé en cours : le cœur s'éclaircit vers le blanc. */
   ringHot: mixColor(COLOR.ring, COLOR.white, 0.55),
+  /** Masse de la barre d'un tournant : sombre, avec un soupçon du rouge-magenta du danger, pour qu'une barre qui bouge ne se confonde pas avec un mur. */
+  rotorBody: mixColor(COLOR.obstacle, COLOR.obstacleEdge, 0.16),
 } as const;
 
 /** Le cycle d'une onde de pas : de 0 à 1, `hz` fois par seconde de simulation (jamais de temps réel). */
@@ -136,4 +143,87 @@ const SPRING_PERIOD = 15;
 
 export function springTeeth(lengthPixels: number): number {
   return Math.max(2, Math.round(lengthPixels / SPRING_PERIOD));
+}
+
+/**
+ * La roue motorisée : un moyeu (le point d'accroche), une jante de ce rayon (en
+ * mètres de monde) et des rayons qui tournent à l'écran dans le sens où le
+ * moteur entraîne le personnage. Une marque dit la direction même sur une image
+ * fixe : un chevron, sur la jante, entre deux rayons, pointé dans le sens du
+ * tour. L'angle est celui du repère de l'écran (x vers la droite, y vers le
+ * bas : un angle qui croît tourne vers la droite en haut, dans le sens des
+ * aiguilles d'une montre), alors que le moteur dit son sens vu de face, y vers
+ * le haut (+1 : à gauche en haut, sens trigonométrique).
+ */
+export const WHEEL_RIM_RADIUS = 0.9;
+export const WHEEL_SPOKES = 5;
+/** Tours par seconde de l'horloge des effets : assez lent pour se lire, assez vif pour qu'on voie que ça entraîne. */
+export const WHEEL_TURNS_PER_SECOND = 0.4;
+
+/** Le sens de rotation à l'écran, dans le repère de l'écran : +1 vers la droite en haut (sens des aiguilles), -1 vers la gauche. Opposé au `spin` du moteur, qui se dit y vers le haut. */
+export function wheelDirection(spin: -1 | 1): 1 | -1 {
+  return spin === 1 ? -1 : 1;
+}
+
+/** L'angle (radians, repère de l'écran) du premier rayon à cet instant de l'horloge des effets. */
+export function wheelAngle(clock: number, spin: -1 | 1): number {
+  return wheelDirection(spin) * WHEEL_TURNS_PER_SECOND * clock * 2 * Math.PI;
+}
+
+/** Un segment dans le repère de l'écran, relatif à un centre. */
+export interface WheelSegment {
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+}
+
+/** Les rayons de la roue à cet instant, du rayon `inner` à `outer` (pixels), autour du moyeu : `count` rayons également répartis. */
+export function wheelSpokes(clock: number, spin: -1 | 1, inner: number, outer: number, count: number = WHEEL_SPOKES): WheelSegment[] {
+  const first = wheelAngle(clock, spin);
+  return Array.from({ length: count }, (_, k) => {
+    const angle = first + (k / count) * 2 * Math.PI;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    return { x0: cos * inner, y0: sin * inner, x1: cos * outer, y1: sin * outer };
+  });
+}
+
+/** Un chevron : ses trois sommets à plat (bras, pointe, bras), relatifs à un centre. */
+export type WheelChevron = readonly [number, number, number, number, number, number];
+
+/**
+ * Les chevrons de la jante, un entre chaque paire de rayons, de taille `size` (pixels), posés sur la jante de rayon `rim`, la pointe vers
+ * l'avant du tour : celui qui lit la roue sait de quel côté elle entraîne sans la voir bouger.
+ */
+export function wheelChevrons(clock: number, spin: -1 | 1, rim: number, size: number, count: number = WHEEL_SPOKES): WheelChevron[] {
+  const first = wheelAngle(clock, spin);
+  const way = wheelDirection(spin);
+  return Array.from({ length: count }, (_, k) => {
+    const angle = first + ((k + 0.5) / count) * 2 * Math.PI;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    // Sur la jante, `along` suit le tour et `across` pointe vers l'extérieur.
+    const along = { x: -sin * way, y: cos * way };
+    const across = { x: cos, y: sin };
+    const at = (a: number, b: number): [number, number] => [cos * rim + along.x * a + across.x * b, sin * rim + along.y * a + across.y * b];
+    const [ax, ay] = at(-size * 0.6, size * 0.7);
+    const [tx, ty] = at(size * 0.6, 0);
+    const [bx, by] = at(-size * 0.6, -size * 0.7);
+    return [ax, ay, tx, ty, bx, by] as const;
+  });
+}
+
+/**
+ * La barre d'un obstacle tournant, en pixels. Son épaisseur est celle de la collision (`ROTOR_THICKNESS` mètres de monde), au moins `minThickness`
+ * pixels quand on dézoome : une barre qui s'effaçerait serait un piège. Le contour de `edge` pixels est centré sur le bord, comme celui d'un mur :
+ * le trait extérieur (`outer`) déborde donc d'un demi-contour de chaque côté, et le corps sombre (`body`) qu'on pose par-dessus en retire autant,
+ * pour ne laisser que l'anneau du contour. Le disque du pivot (`pivot`, rayon) est plus gros que la barre, pour qu'on voie autour de quoi elle tourne.
+ */
+export const ROTOR_PIVOT_RADIUS = 0.3;
+
+export function rotorWidths(scale: number, edge: number, minThickness = 2 * edge): { readonly outer: number; readonly body: number; readonly pivot: number } {
+  const thickness = Math.max(ROTOR_THICKNESS * scale, minThickness);
+  const outer = thickness + edge;
+  return { outer, body: Math.max(0, thickness - edge), pivot: Math.max(ROTOR_PIVOT_RADIUS * scale, outer / 2 + 1) };
 }

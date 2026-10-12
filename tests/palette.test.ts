@@ -13,6 +13,8 @@ const SPECIES: Record<string, number> = {
   wear: COLOR.wear,
   booster: COLOR.booster,
   launcher: COLOR.launcher,
+  // La roue motorisée (0.13.0) : un bleu sarcelle entre le cyan du propulseur et le vert d'eau du lanceur.
+  wheel: COLOR.wheel,
   electric: COLOR.electric,
   electricCharged: COLOR.electricCharged,
   eclipse: COLOR.eclipse,
@@ -235,6 +237,25 @@ describe('les teintes des zones qui modifient le mouvement', () => {
     // Pâle : le canal le plus faible est déjà haut ; froid : le bleu domine.
     expect(Math.min(br, bg, bb)).toBeGreaterThan(0x80);
     expect(bb).toBeGreaterThanOrEqual(Math.max(br, bg));
+  });
+});
+
+describe('la teinte de la roue motorisée (0.13.0)', () => {
+  it('est un bleu sarcelle : ni le cyan du propulseur ni le vert d\'eau du lanceur, dont elle est voisine, ni l\'obstacle tournant qui la côtoie', () => {
+    const [r = 0, g = 0, b = 0] = channels(COLOR.wheel);
+    // Sarcelle : le rouge est le canal le plus faible, le bleu domine et le vert le suit de près.
+    expect(r).toBeLessThan(Math.min(g, b));
+    expect(b).toBeGreaterThanOrEqual(g);
+    expect(distance(COLOR.wheel, COLOR.booster)).toBeGreaterThan(60);
+    expect(distance(COLOR.wheel, COLOR.launcher)).toBeGreaterThan(60);
+    expect(distance(COLOR.wheel, COLOR.obstacleEdge)).toBeGreaterThan(150);
+  });
+
+  it('est à plus de 40 de toute autre couleur de sens, zones comprises', () => {
+    for (const [name, color] of Object.entries({ ...SPECIES, ...ZONES })) {
+      if (name === 'wheel') continue;
+      expect(distance(COLOR.wheel, color), name).toBeGreaterThan(40);
+    }
   });
 });
 

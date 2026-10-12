@@ -604,8 +604,10 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
     }
     // La roue n'est posée qu'à six mètres au-dessus du départ du segment : au bout de sa corde, le personnage tourne jusqu'à cinq mètres sous elle, au-dessus des obstacles du segment d'avant.
     if (archetype === 'roue' && !featureDone && anchors.length > 0 && cur.y - startY > 6 && targetY - cur.y > WHEEL_RISE + 3) {
-      // Roue : le dernier point devient une roue motorisée, et la chaîne reprend bien plus haut, du côté où elle envoie.
-      const spin: -1 | 1 = cur.x > 0 ? -1 : 1;
+      // Roue : le dernier point devient une roue motorisée, et la chaîne reprend bien plus haut, du côté où elle envoie. Elle tourne dans
+      // le sens où l'on arrive (venant de la gauche, on passe sous elle vers la droite : sens trigonométrique) : elle entraîne au lieu de freiner.
+      const previous = anchors.length >= 2 ? anchors[anchors.length - 2]!.pos : (from ?? cur);
+      const spin: -1 | 1 = previous.x <= cur.x ? 1 : -1;
       const { anchor: hub, exit } = wheel(ids, cur, spin, halfWidth);
       anchors[anchors.length - 1] = hub;
       cur = exit;

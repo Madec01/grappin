@@ -17,6 +17,7 @@ const SPECIES: readonly number[] = [
   COLOR.wear,
   COLOR.booster,
   COLOR.launcher,
+  COLOR.wheel,
   COLOR.electric,
   COLOR.electricCharged,
   COLOR.eclipse,

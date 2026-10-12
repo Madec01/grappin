@@ -1,10 +1,12 @@
 import type { InstallState } from '../app/install';
+import type { AtelierId } from '../data/atelier';
 import { Application, Container, Graphics, type Text } from 'pixi.js';
 import { SILENT_PULSE, type Pulse } from '../audio/rhythm';
 import type { Vec2 } from '../core/math/vec2';
 import type { LevelOutcome, Profile, RunOutcome } from '../meta/profile';
 import type { LevelResult } from '../meta/traversee';
 import { PULL_MAX } from '../sim/launcher';
+import { obstacleAt, rotorEnds } from '../sim/moving';
 import { obstacleKind } from '../sim/obstacles';
 import { ZONE_RAMP, zoneAt } from '../sim/physics';
 import { RING_CENTRE_RATIO, WORLD_HALF_WIDTH, canSmash, multiplier } from '../sim/rules';
@@ -20,7 +22,7 @@ import { formatDecimal } from './format';
 import { neonCircle, neonDiscs, neonFill, neonLine, neonRects, neonStroke, type NeonStrokeStyle } from './neon';
 import { LAMP_COUNT, ambientHalo, cityLots, cityStroke, fogSheetAlpha, lampColor, lampOf, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow, type HaloBoost } from './pulse';
 import { Screens, type OverlayView } from './screens';
-import { SKIN, crackPattern, doorLook, ringPhase, springTeeth, type Crack, type DoorLook } from './skins';
+import { SKIN, WHEEL_RIM_RADIUS, WHEEL_SPOKES, crackPattern, doorLook, ringPhase, rotorWidths, springTeeth, wheelChevrons, wheelSpokes, type Crack, type DoorLook } from './skins';
 import { bandWidth, cupRadius, cupTips, mixColor, pullRatio, traceCup } from './sling';
 import { COLOR, GlowText, PALETTES, makeText, readSafeInset, starPoints, type Palette } from './style';
 import {
@@ -88,6 +90,14 @@ import {
  * (fissures) : jamais de l'horloge de l'écran, pour que chaque capture soit reproductible. Les obstacles solides, eux, sont dessinés
  * exactement comme avant. Un rebond, un fracas ou un anneau laisse aussi un éclat bref au personnage, et un anneau traversé, qui accélère, quelques traits de vitesse derrière lui (voir `effects.ts`).
  *
+ * Les trois mécaniques de la fin du lot 2 (version 0.13.0). La roue motorisée : le moyeu (le point d'accroche, un disque sarcelle), une jante
+ * de 0,9 m de rayon, cinq rayons qui tournent à l'écran dans le sens où le moteur entraîne le personnage (sur l'horloge des effets : un
+ * mouvement du décor, purement visuel) et des chevrons sur la jante, pointés dans le sens du tour, qui disent le sens sur une image fixe ;
+ * tenue, elle s'allume d'un cran. L'obstacle tournant : une barre néon de bout à bout, à son épaisseur de collision, au contour rouge-magenta
+ * du danger et au cerne pulsé comme les autres obstacles, autour d'un disque de pivot ; son carré englobant n'est jamais dessiné, il ne
+ * sert qu'à écarter ce qui est hors de la vue. Le mur à ouverture mobile : ses panneaux se dessinent là où ils sont à ce pas de simulation
+ * (`obstacleAt`), exactement comme un mur solide ; rien d'autre, c'est le trou qui bouge.
+ *
  * Les zones qui modifient le mouvement (courant ascendant, dérive, couloir d'accélération, freinage) se dessinent comme des champs de
  * lumière plus que comme des objets, sous les obstacles et les anneaux, au-dessus du décor : un remplissage à peine visible, et dedans des
  * traits qui disent la direction, chaque espèce avec son motif et sa teinte (voir `zones.ts`). Le courant ascendant : des traînées qui montent
@@ -113,7 +123,7 @@ import {
  */
 
 /** Écran du jeu à habiller : le rendu ne sait que l'afficher, c'est le jeu qui le choisit. */
-export type GameScreen = 'title' | 'levels' | 'playing' | 'paused' | 'dead' | 'won' | 'talismans';
+export type GameScreen = 'title' | 'levels' | 'playing' | 'paused' | 'dead' | 'won' | 'talismans' | 'atelier';
 
 /** Ce qui a tué le personnage. */
 export type DeathCause = Extract<RuleEvent, { type: 'death' }>['cause'];
@@ -144,6 +154,8 @@ export interface GameFrame {
   readonly pulse: Pulse;
   /** L'installation sur l'écran d'accueil : le titre en montre le bouton ou le rappel (voir app/install.ts). */
   readonly install: InstallState;
+  /** L'atelier du mode test : les éléments choisis, que l'écran de l'atelier coche. */
+  readonly atelier: readonly AtelierId[];
 }
 
 const TAU = Math.PI * 2;
@@ -488,6 +500,24 @@ const TIP_ALPHA = 0.92;
 const GOAL_FONT_SIZE = 22;
 const GOAL_GAP = 8;
 
+/**
+ * Roue motorisée (pixels CSS) : la jante, les rayons et les chevrons de la jante, et le surcroît de lumière de la roue tenue. Le moyeu
+ * est un disque comme celui des autres espèces ; les rayons partent de son bord. Un chevron mesure un sixième du rayon de la jante, entre
+ * deux bornes. La jante a le rayon du monde (`WHEEL_RIM_RADIUS`), mais jamais moins de `WHEEL_RIM_FLOOR` pixels : la caméra recule quand le
+ * personnage va vite, et c'est justement là, sur la roue, que la roue doit se lire.
+ */
+const WHEEL_RIM_WIDTH = 2;
+const WHEEL_RIM_ALPHA = 0.8;
+const WHEEL_SPOKE_WIDTH = 2;
+const WHEEL_SPOKE_ALPHA = 0.85;
+const WHEEL_SPOKE_GAP = 2;
+const WHEEL_CHEVRON_WIDTH = 2;
+const WHEEL_CHEVRON_MIN = 3;
+const WHEEL_CHEVRON_MAX = 6;
+const WHEEL_CHEVRON_RATIO = 1 / 6;
+const WHEEL_RIM_FLOOR = 24;
+const WHEEL_HELD_GLOW = 1.35;
+
 const DEATH_MESSAGES: Record<DeathCause, string> = {
   fog: "La brume t'a rattrapé",
   fall: 'Tombé dans le vide',
@@ -510,13 +540,14 @@ const SPECIES_TUBE: Record<Exclude<AnchorKind, 'normal'>, Tube> = {
   electrique: { color: COLOR.electric, halo: COLOR.electric },
   eclipse: { color: COLOR.eclipse, halo: COLOR.eclipse },
   lanceur: { color: COLOR.launcher, halo: COLOR.launcher },
+  roue: { color: COLOR.wheel, halo: COLOR.wheel },
 };
 const CHARGED_TUBE: Tube = { color: COLOR.electricCharged, halo: COLOR.electricCharged };
 /** Corde et halo du personnage dans la fenêtre de lâcher : la même teinte chaude sur toutes les ambiances. */
 const READY_TUBE: Tube = { color: COLOR.release, halo: COLOR.releaseHalo };
 /** Dans quel groupe tombe une prise électrique selon son cycle. */
 const ELECTRIC_GROUP: Record<ElectricState, 'calm' | 'warning' | 'charged'> = { calme: 'calm', avertit: 'warning', chargee: 'charged' };
-const KINDS: readonly AnchorKind[] = ['normal', 'fragile', 'booster', 'electrique', 'eclipse', 'lanceur'];
+const KINDS: readonly AnchorKind[] = ['normal', 'fragile', 'booster', 'electrique', 'eclipse', 'lanceur', 'roue'];
 
 /** Un point à l'écran, avec le numéro de l'accroche : le grésillement le décale d'une prise à l'autre. */
 interface Spot {
@@ -525,7 +556,13 @@ interface Spot {
   readonly y: number;
 }
 
-/** Un obstacle visible, en pixels de l'écran (coin haut gauche), avec l'obstacle de la simulation dont il vient. Réutilisé d'une image à l'autre. */
+/** Une roue motorisée à l'écran : son sens de rotation (celui du moteur, y vers le haut) et si le personnage la tient. */
+interface WheelSpot extends Spot {
+  readonly spin: -1 | 1;
+  readonly held: boolean;
+}
+
+/** Un obstacle visible, en pixels de l'écran (coin haut gauche), avec l'obstacle de la simulation dont il vient. Réutilisé d'une image à l'autre. Un panneau qui glisse y est à sa place du moment, un tournant y est son carré englobant (qui ne se dessine pas). */
 interface ScreenBox {
   x: number;
   y: number;
@@ -540,6 +577,7 @@ interface ObstacleLots {
   readonly bounce: ScreenBox[];
   readonly smash: ScreenBox[];
   readonly door: ScreenBox[];
+  readonly rotor: ScreenBox[];
 }
 
 /** Un anneau de précision visible : son centre et son rayon, en pixels. */
@@ -559,6 +597,7 @@ interface LitGroups {
   readonly charged: Spot[];
   readonly eclipse: Spot[];
   readonly lanceur: Spot[];
+  readonly roue: WheelSpot[];
 }
 
 /** Ce que le dessin des accroches a besoin de savoir de l'image : tailles en pixels et horloge des effets. */
@@ -716,7 +755,7 @@ export class Renderer {
 
   /** Réservoirs des obstacles et des anneaux visibles, vidés et remplis à chaque image : pas d'allocation par image une fois chauffés. */
   private readonly boxPool: ScreenBox[] = [];
-  private readonly obstacleLots: ObstacleLots = { solid: [], bounce: [], smash: [], door: [] };
+  private readonly obstacleLots: ObstacleLots = { solid: [], bounce: [], smash: [], door: [], rotor: [] };
   private readonly ringPool: RingSpot[] = [];
   private readonly ringLots: Record<'libre' | 'traverse' | 'centre' | 'prise', RingSpot[]> = { libre: [], traverse: [], centre: [], prise: [] };
   /** Motif de fissures de chaque paroi cassable rencontrée, par numéro d'obstacle. */
@@ -1365,6 +1404,8 @@ export class Renderer {
    * Obstacles : une masse sombre au contour néon fin, sous les points et la corde. Un solide a le contour rouge-magenta : un danger se
    * lit comme tel, au rythme près (le pouls n'en change que l'intensité du halo). Les trois autres espèces (rebond, cassable, porte) gardent la masse
    * sombre, chacune dans sa teinte et avec son signe, dessinés dans cet ordre par-dessus les solides. Une paroi cassable déjà traversée n'est plus dessinée.
+   * Ce qui bouge se lit du pas de simulation : un panneau qui glisse se dessine (et se rogne hors de la vue) là où il est à ce pas, comme un mur
+   * solide ; un tournant est une barre, dont le carré englobant ne sert qu'au rognage et ne se dessine jamais.
    */
   private drawObstacles(state: SimState, camera: Camera, view: ViewBounds, tuning: Tuning): void {
     const g = this.obstacles.clear();
@@ -1374,24 +1415,28 @@ export class Renderer {
     lots.bounce.length = 0;
     lots.smash.length = 0;
     lots.door.length = 0;
+    lots.rotor.length = 0;
     let slot = 0;
     for (const box of state.obstacles) {
       if (box.broken) continue;
-      const topLeft = camera.worldToScreen({ x: box.x0, y: box.y1 });
-      const width = (box.x1 - box.x0) * scale;
-      const height = (box.y1 - box.y0) * scale;
+      // Là où l'obstacle est à ce pas : un panneau décalé de son glissement, tout autre obstacle lui-même.
+      const at = obstacleAt(box, state.step, tuning);
+      const topLeft = camera.worldToScreen({ x: at.x0, y: at.y1 });
+      const width = (at.x1 - at.x0) * scale;
+      const height = (at.y1 - at.y0) * scale;
       // Hors de la vue, ni le tracé ni son halo ne servent : on ne dessine que ce que l'écran peut montrer.
       if (topLeft.x + width < view.left - CULL_MARGIN || topLeft.x > view.right + CULL_MARGIN || topLeft.y + height < view.top - CULL_MARGIN || topLeft.y > view.bottom + CULL_MARGIN) continue;
       const item = this.screenBox(slot, box, topLeft.x, topLeft.y, width, height);
       slot += 1;
       const kind = obstacleKind(box);
-      (kind === 'rebond' ? lots.bounce : kind === 'cassable' ? lots.smash : kind === 'porte' ? lots.door : lots.solid).push(item);
+      (kind === 'rebond' ? lots.bounce : kind === 'cassable' ? lots.smash : kind === 'porte' ? lots.door : kind === 'tournant' ? lots.rotor : lots.solid).push(item);
     }
     if (slot === 0) return;
     this.paintSolids(g, lots.solid);
     this.paintBounces(g, lots.bounce);
     this.paintSmashables(g, lots.smash, canSmash(state, tuning));
     this.paintDoors(g, lots.door, state, tuning);
+    this.paintRotors(g, lots.rotor, camera, state, tuning);
   }
 
   /** Le `slot`-ième obstacle visible de l'image, tiré du réservoir (il grandit seulement si plus d'obstacles sont à l'écran en même temps). */
@@ -1590,6 +1635,35 @@ export class Renderer {
   }
 
   /**
+   * Obstacles tournants : une barre néon de bout à bout, là où elle est à ce pas (`rotorEnds`), à son épaisseur de collision. Le contour est
+   * le rouge-magenta du danger, dont le halo bat avec le cerne des autres obstacles ; la masse, sombre, a un soupçon de ce rouge ; au pivot, un
+   * disque plein, plus gros que la barre. Le carré englobant de l'obstacle (`box`) ne sert qu'à avoir écarté ce qui est hors de la vue : on
+   * ne le dessine jamais. Tous les halos avant tous les corps, pour qu'un halo ne passe jamais sur la barre d'à côté.
+   */
+  private paintRotors(g: Graphics, boxes: readonly ScreenBox[], camera: Camera, state: SimState, tuning: Tuning): void {
+    if (boxes.length === 0) return;
+    const widths = rotorWidths(camera.scale, OBSTACLE_EDGE_WIDTH);
+    const bars: { a: Vec2; b: Vec2; pivot: Vec2 }[] = [];
+    for (const box of boxes) {
+      const ends = rotorEnds(box.source, state.step, tuning);
+      if (ends && box.source.rotor) bars.push({ a: camera.worldToScreen(ends.a), b: camera.worldToScreen(ends.b), pivot: camera.worldToScreen(box.source.rotor.pivot) });
+    }
+    if (bars.length === 0) return;
+    const tube = { color: COLOR.obstacleEdge, halo: COLOR.obstacleEdge, width: widths.outer, strength: this.rim, cap: 'round' as const, join: 'round' as const };
+    const trace = (target: Graphics): void => {
+      for (const bar of bars) target.moveTo(bar.a.x, bar.a.y).lineTo(bar.b.x, bar.b.y);
+    };
+    neonStroke(g, trace, { ...tube, pass: 'halo' });
+    neonDiscs(g, bars.map((bar) => bar.pivot), widths.pivot, { color: COLOR.obstacleEdge, halo: COLOR.obstacleEdge, strength: this.rim, pass: 'halo' });
+    neonStroke(g, trace, { ...tube, pass: 'core' });
+    if (widths.body > 0) {
+      trace(g);
+      g.stroke({ width: widths.body, color: SKIN.rotorBody, cap: 'round', join: 'round' });
+    }
+    neonDiscs(g, bars.map((bar) => bar.pivot), widths.pivot, { color: COLOR.obstacleEdge, halo: COLOR.obstacleEdge, strength: 0, pass: 'core' });
+  }
+
+  /**
    * Anneaux de précision, sous les obstacles et les points : un cercle fin vert vif au rayon de l'anneau, dedans le cercle du centre et
    * son point, qui disent où viser. Le personnage qui le traverse l'allume (le centre aussi s'il passe près du milieu) ; une fois
    * traversé, il ne reste que la trace d'un néon coupé.
@@ -1737,18 +1811,19 @@ export class Renderer {
     const radius = ANCHOR_RADIUS * camera.scale;
     const paint: AnchorPaint = { scale: camera.scale, radius, ring: radius + KIND_RING_GAP, clock: effects.clock };
     const off: Anchor[] = [];
-    const groups: LitGroups = { normal: [], fragile: [], booster: [], calm: [], warning: [], charged: [], eclipse: [], lanceur: [] };
+    const groups: LitGroups = { normal: [], fragile: [], booster: [], calm: [], warning: [], charged: [], eclipse: [], lanceur: [], roue: [] };
     for (const anchor of state.anchors) {
       if (anchor.broken) continue;
       const p = camera.worldToScreen(anchor.pos);
-      // Un point hors de la vue ne se dessine pas : le parcours engendré d'avance compte bien plus de points que l'écran n'en montre. La marge couvre halo, anneaux et chevrons.
-      if (!inView(view, p, CULL_MARGIN + paint.ring)) continue;
+      // Un point hors de la vue ne se dessine pas : le parcours engendré d'avance compte bien plus de points que l'écran n'en montre. La marge couvre halo, anneaux et chevrons, et la jante d'une roue.
+      if (!inView(view, p, CULL_MARGIN + Math.max(paint.ring, anchor.kind === 'roue' ? Math.max(WHEEL_RIM_RADIUS * paint.scale, WHEEL_RIM_FLOOR) : 0))) continue;
       if (isOff(state, anchor, tuning)) {
         off.push(anchor);
         continue;
       }
       const spot = { id: anchor.id, x: p.x, y: p.y };
       if (anchor.kind === 'electrique') groups[ELECTRIC_GROUP[electricState(anchor.id, state.step, tuning)]].push(spot);
+      else if (anchor.kind === 'roue') groups.roue.push({ ...spot, spin: anchor.motor?.spin ?? 1, held: anchor.id === state.rope?.anchorId });
       else groups[anchor.kind].push(spot);
     }
     this.paintOff(g, camera, off, paint);
@@ -1794,6 +1869,50 @@ export class Renderer {
   }
 
   /**
+   * Les roues motorisées, une passe (`pass`) : le moyeu, un disque comme celui des autres espèces ; la jante, un cercle au rayon `WHEEL_RIM_RADIUS` ; les
+   * rayons, qui partent du bord du moyeu et tournent sur l'horloge des effets dans le sens du moteur ; et les chevrons de la jante, entre deux
+   * rayons, pointés dans le sens du tour. Tenue, la roue s'allume d'un cran (halo, opacité).
+   */
+  private paintWheels(g: Graphics, wheels: readonly WheelSpot[], paint: AnchorPaint, pass: 'halo' | 'core'): void {
+    const { radius, scale, clock } = paint;
+    const glow = this.species;
+    const rim = Math.max(WHEEL_RIM_RADIUS * scale, WHEEL_RIM_FLOOR);
+    const chevron = clamp(rim * WHEEL_CHEVRON_RATIO, WHEEL_CHEVRON_MIN, WHEEL_CHEVRON_MAX);
+    // Chaque sens de rotation a ses rayons et ses chevrons ; chaque état (calme, tenue) sa lumière.
+    const lots: readonly { readonly spots: readonly WheelSpot[]; readonly held: boolean }[] = [
+      { spots: wheels.filter((wheel) => !wheel.held), held: false },
+      { spots: wheels.filter((wheel) => wheel.held), held: true },
+    ];
+    for (const { spots, held } of lots) {
+      if (spots.length === 0) continue;
+      const light = held ? WHEEL_HELD_GLOW : 1;
+      const tube = { ...SPECIES_TUBE.roue, spread: MARK_SPREAD, strength: glow * light, pass };
+      neonDiscs(g, spots, radius, { ...SPECIES_TUBE.roue, strength: glow * light, pass });
+      neonRings(g, spots, () => rim, { ...tube, width: WHEEL_RIM_WIDTH, alpha: held ? 1 : WHEEL_RIM_ALPHA });
+      neonStroke(
+        g,
+        (target) => {
+          for (const spot of spots) {
+            for (const spoke of wheelSpokes(clock, spot.spin, radius + WHEEL_SPOKE_GAP, rim, WHEEL_SPOKES)) target.moveTo(spot.x + spoke.x0, spot.y + spoke.y0).lineTo(spot.x + spoke.x1, spot.y + spoke.y1);
+          }
+        },
+        { ...tube, width: WHEEL_SPOKE_WIDTH, alpha: held ? 1 : WHEEL_SPOKE_ALPHA, cap: 'round' },
+      );
+      neonStroke(
+        g,
+        (target) => {
+          for (const spot of spots) {
+            for (const [ax, ay, tx, ty, bx, by] of wheelChevrons(clock, spot.spin, rim, chevron, WHEEL_SPOKES)) {
+              target.moveTo(spot.x + ax, spot.y + ay).lineTo(spot.x + tx, spot.y + ty).lineTo(spot.x + bx, spot.y + by);
+            }
+          }
+        },
+        { ...tube, width: WHEEL_CHEVRON_WIDTH, alpha: held ? 1 : WHEEL_RIM_ALPHA, cap: 'round', join: 'round' },
+      );
+    }
+  }
+
+  /**
    * Dessine la passe `pass` (les halos, ou les cœurs) de toutes les accroches allumées.
    * Le pouls y joue deux rôles : le halo des points normaux gonfle et prend la couleur d'effet
    * (`halo`) ; celui des espèces s'allume un peu plus sur le temps (`glow`), leurs couleurs
@@ -1814,6 +1933,9 @@ export class Renderer {
     });
 
     // Lanceur : un disque vert d'eau au creux d'une coupe en « Y » ouverte vers le haut, sur un court pied : une fronde. Rien d'un propulseur, qui est un anneau fermé à chevrons.
+    // Roue motorisée : un moyeu sarcelle, une jante, des rayons qui tournent dans le sens du moteur, et des chevrons sur la jante qui disent ce sens.
+    if (groups.roue.length > 0) this.paintWheels(g, groups.roue, paint, pass);
+
     if (groups.lanceur.length > 0) {
       const cup = cupRadius(radius);
       neonDiscs(g, groups.lanceur, radius, { ...SPECIES_TUBE.lanceur, strength: glow, pass });
@@ -2227,6 +2349,8 @@ export class Renderer {
       case 'paused':
         // La partie reste visible, figée, sous le voile.
         return { kind: 'paused' };
+      case 'atelier':
+        return { kind: 'atelier', selection: frame.atelier };
     }
   }
 }
