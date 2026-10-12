@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BEAT_DECAY, SILENT_PULSE, pulseAt, syntheticRhythm, type Pulse } from '../src/audio/rhythm';
 import type { MusicFamily } from '../src/data/musique';
-import { PULSE, PUNCH_MAX, ambientHalo, cityLots, cityStroke, effectColor, fogSheetAlpha, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow } from '../src/render/pulse';
+import { LAMP, LAMP_COUNT, PULSE, PUNCH_MAX, ambientHalo, cityLots, cityStroke, effectColor, fogSheetAlpha, lampColor, lampOf, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow } from '../src/render/pulse';
 import { mixColor } from '../src/render/sling';
 import { COLOR, PALETTES, type Palette } from '../src/render/style';
 
@@ -88,6 +88,7 @@ describe('au silence, rien ne bouge', () => {
   it('la couleur d\'effet est le halo, et le halo des titres l\'accent', () => {
     for (const family of FAMILIES) {
       expect(effectColor(PALETTES[family], SILENT_PULSE)).toBe(PALETTES[family].halo);
+      for (let lamp = 0; lamp < LAMP_COUNT; lamp += 1) expect(lampColor(PALETTES[family], SILENT_PULSE, lamp)).toBe(PALETTES[family].halo);
       expect(uiGlow(PALETTES[family], SILENT_PULSE)).toBe(PALETTES[family].accent);
     }
   });
@@ -101,7 +102,7 @@ describe('bornes', () => {
       const palette = PALETTES[family];
       for (const sample of grid()) {
         const lit = pulsedPalette(palette, sample);
-        const effect = channels(effectColor(palette, sample));
+        const effect = channels(lampColor(palette, sample, LAMP.background));
         channels(palette.background).forEach((from, index) => {
           const to = channels(palette.fog)[index]!;
           const now = channels(lit.background)[index]!;
@@ -122,13 +123,14 @@ describe('bornes', () => {
         const lit = pulsedPalette(palette, sample);
         expect(Object.keys(lit).sort()).toEqual([...FIELDS].sort());
         for (const field of ['altitudeLine', 'altitudeLabel', 'tube', 'pale', 'accent', 'effectA', 'effectB', 'effectC'] as const) expect(lit[field], `${family}.${field}`).toBe(palette[field]);
-        // La dalle du toit et la nappe de brume ne vont vers la couleur d'effet que de leur part tenue, plus leur part sur le temps.
-        const effect = channels(effectColor(palette, sample));
+        // La dalle du toit et la nappe de brume ne vont vers la couleur de leur lampe que de leur part tenue, plus leur part sur le temps.
+        const roofLamp = channels(lampColor(palette, sample, LAMP.roof));
+        const fogLamp = channels(lampColor(palette, sample, LAMP.fog));
         channels(palette.roofFill).forEach((from, index) => {
-          expect(Math.abs(channels(lit.roofFill)[index]! - from), `${family} dalle canal ${index}`).toBeLessThanOrEqual(Math.abs(effect[index]! - from) * (PULSE.roof.beat * PUNCH_MAX + PULSE.roof.hold) + 0.5);
+          expect(Math.abs(channels(lit.roofFill)[index]! - from), `${family} dalle canal ${index}`).toBeLessThanOrEqual(Math.abs(roofLamp[index]! - from) * (PULSE.roof.beat * PUNCH_MAX + PULSE.roof.hold) + 0.5);
         });
         channels(palette.fog).forEach((from, index) => {
-          expect(Math.abs(channels(lit.fog)[index]! - from), `${family} brume canal ${index}`).toBeLessThanOrEqual(Math.abs(effect[index]! - from) * (PULSE.fogSheet.beat * PUNCH_MAX + PULSE.fogSheet.hold) + 0.5);
+          expect(Math.abs(channels(lit.fog)[index]! - from), `${family} brume canal ${index}`).toBeLessThanOrEqual(Math.abs(fogLamp[index]! - from) * (PULSE.fogSheet.beat * PUNCH_MAX + PULSE.fogSheet.hold) + 0.5);
         });
       }
     }
@@ -347,9 +349,33 @@ describe('le pouls dans la palette', () => {
     expect(sum(onBeat.fogEdge)).toBeGreaterThan(sum(palette.fogEdge));
     expect(sum(onBeat.background)).toBeGreaterThan(sum(trough.background));
     // Au creux, il ne reste que la part tenue de la couleur d'effet : la lumière colorée, sans le coup.
-    expect(gap(trough.background, mixColor(palette.background, effectColor(palette, beatAt(1.49)), PULSE.background.hold))).toBeLessThanOrEqual(2);
-    expect(gap(trough.fog, mixColor(palette.fog, effectColor(palette, beatAt(1.49)), PULSE.fogSheet.hold))).toBeLessThanOrEqual(2);
+    expect(gap(trough.background, mixColor(palette.background, lampColor(palette, beatAt(1.49), LAMP.background), PULSE.background.hold))).toBeLessThanOrEqual(2);
+    expect(gap(trough.fog, mixColor(palette.fog, lampColor(palette, beatAt(1.49), LAMP.fog), PULSE.fogSheet.hold))).toBeLessThanOrEqual(2);
     expect(onBeat.halo).toBe(effectColor(palette, beatAt(1)));
+  });
+
+  it('comme en discothèque : au même temps, les trois lampes ont trois couleurs différentes, et chacune change au temps suivant', () => {
+    for (const family of FAMILIES) {
+      const palette = PALETTES[family];
+      const at = (inBar: number, lamp: number): number => lampColor(palette, pulse({ beat: 0.05, strength: 1, count: 4 + inBar, inBar, bars: 1, bpm: 120 }), lamp);
+      for (let inBar = 0; inBar < 4; inBar += 1) {
+        const lamps = [0, 1, 2].map((lamp) => at(inBar, lamp));
+        expect(new Set(lamps).size, `${family} temps ${inBar}`).toBe(3);
+        for (const [i, j] of [[0, 1], [1, 2], [0, 2]] as const) expect(gap(lamps[i]!, lamps[j]!), `${family} temps ${inBar}`).toBeGreaterThan(40);
+        for (let lamp = 0; lamp < 3; lamp += 1) expect(at(inBar, lamp), `${family} lampe ${lamp}`).not.toBe(at(inBar + 1, lamp));
+        // La brume, le fond et le halo n'ont pas la même couleur au même temps.
+        const lit = pulsedPalette(palette, pulse({ beat: 0.05, strength: 1, count: 4 + inBar, inBar, bars: 1, bpm: 120 }));
+        expect(lit.halo).toBe(at(inBar, LAMP.main));
+        expect(gap(lit.fog, mixColor(palette.fog, lit.halo, PULSE.fogSheet.hold))).toBeGreaterThan(8);
+        expect(gap(lit.background, mixColor(palette.background, lit.halo, PULSE.background.hold))).toBeGreaterThan(4);
+      }
+      // La lampe principale garde sa suite A, B, C, B ; une lampe hors domaine reprend l'une des trois.
+      expect([0, 1, 2, 3].map((inBar) => at(inBar, 0))).toEqual([palette.effectA, palette.effectB, palette.effectC, palette.effectB]);
+      expect(at(0, 3)).toBe(at(0, 0));
+      expect(at(0, -1)).toBe(at(0, 2));
+    }
+    // Les numéros voisins ont des lampes différentes, les trois à tour de rôle.
+    expect([0, 1, 2, 3, 4, 5, -1].map(lampOf)).toEqual([0, 1, 2, 0, 1, 2, 2]);
   });
 
   it('la lumière est colorée et change de couleur à chaque temps : fond, brume, dalle, ville et halo diffèrent d\'un temps au suivant', () => {
@@ -374,9 +400,10 @@ describe('le pouls dans la palette', () => {
     const palette = PALETTES.biome4;
     const quiet = pulsedPalette(palette, pulse({ count: 4, inBar: 0, bpm: 120 }));
     const bassy = pulsedPalette(palette, pulse({ count: 4, inBar: 0, bass: 0.8, bpm: 120 }));
-    // La musique bat : la ville garde sa part tenue de couleur d'effet (ici A, le halo de la famille) ; les graves l'en rapprochent encore.
+    // La musique bat : la ville garde sa part tenue de la couleur de sa lampe ; les graves l'en rapprochent encore.
+    const lamp = lampColor(palette, pulse({ count: 4, inBar: 0, bpm: 120 }), LAMP.cityEven);
     expect(gap(quiet.city, palette.city)).toBeGreaterThan(0);
-    expect(gap(bassy.city, palette.halo)).toBeLessThan(gap(quiet.city, palette.halo));
+    expect(gap(bassy.city, lamp)).toBeLessThan(gap(quiet.city, lamp));
   });
 
   it('ne touche jamais les couleurs du langage du jeu, ni ne produit l\'une d\'elles', () => {
@@ -392,35 +419,37 @@ describe('le pouls dans la palette', () => {
 });
 
 describe('les structures du décor qui dansent', () => {
-  const palette = pulsedPalette(PALETTES.biome2, pulse({ beat: 1, strength: 1, count: 4, inBar: 0, bpm: 120 }));
+  const palette = PALETTES.biome2;
+  const at = (inBar: number, beat = 1, strength = 1): Pulse => pulse({ beat, strength, count: 4 + inBar, inBar, bpm: 120 });
 
-  it('les pairs s\'allument sur les temps pairs, les impairs sur les autres, avec deux couleurs au plus', () => {
-    for (const inBar of [0, 2]) {
-      const lots = cityLots(palette, pulse({ beat: 1, strength: 1, count: 4 + inBar, inBar, bpm: 120 }));
+  it('deux lots sous deux lampes, jamais de la même couleur ; les pairs s\'allument à plein sur les temps pairs, les impairs sur les autres', () => {
+    for (let inBar = 0; inBar < 4; inBar += 1) {
+      const lots = cityLots(palette, at(inBar));
       expect(lots).not.toBeNull();
       const [even, odd] = lots!;
-      expect(odd).toBe(palette.city);
-      expect(even).not.toBe(palette.city);
-      // Allumé : plus près du halo que le trait de la palette.
-      expect(gap(even, palette.halo)).toBeLessThan(gap(palette.city, palette.halo));
-    }
-    for (const inBar of [1, 3]) {
-      const lots = cityLots(palette, pulse({ beat: 1, strength: 1, count: 4 + inBar, inBar, bpm: 120 }));
-      const [even, odd] = lots!;
-      expect(even).toBe(palette.city);
-      expect(odd).not.toBe(palette.city);
+      expect(gap(even, odd), `temps ${inBar}`).toBeGreaterThan(20);
+      const evenLamp = lampColor(palette, at(inBar), LAMP.cityEven);
+      const oddLamp = lampColor(palette, at(inBar), LAMP.cityOdd);
+      // Celui dont c'est le temps est plus près de sa lampe que l'autre de la sienne.
+      const evenNear = gap(even, evenLamp);
+      const oddNear = gap(odd, oddLamp);
+      if (inBar % 2 === 0) expect(evenNear, `temps ${inBar}`).toBeLessThan(oddNear);
+      else expect(oddNear, `temps ${inBar}`).toBeLessThan(evenNear);
     }
   });
 
-  it('retombent avec le temps, et s\'éteignent d\'un coup de lot : sans temps, un seul lot', () => {
-    const lit = (beat: number): number => cityLots(palette, pulse({ beat, strength: 1, count: 4, inBar: 0, bpm: 120 }))?.[0] ?? palette.city;
-    expect(gap(lit(1), palette.city)).toBeGreaterThan(gap(lit(0.5), palette.city));
-    expect(gap(lit(0.5), palette.city)).toBeGreaterThan(gap(lit(0.1), palette.city));
-    expect(cityLots(palette, pulse({ beat: 0, strength: 1, count: 4, inBar: 0, bpm: 120 }))).toBeNull();
-    // Un temps sans force frappe encore au plancher : la ville s'allume, moins qu'à plein.
-    const weak = cityLots(palette, pulse({ beat: 1, strength: 0, count: 4, inBar: 0, bpm: 120 }))?.[0] ?? palette.city;
-    expect(gap(weak, palette.city)).toBeGreaterThan(0);
-    expect(gap(weak, palette.city)).toBeLessThan(gap(lit(1), palette.city));
+  it('retombent avec le temps vers leur part tenue, et n\'existent pas avant le premier temps', () => {
+    const even = (beat: number): number => cityLots(palette, at(0, beat))![0];
+    expect(gap(even(1), palette.city)).toBeGreaterThan(gap(even(0.5), palette.city));
+    expect(gap(even(0.5), palette.city)).toBeGreaterThan(gap(even(0.1), palette.city));
+    // Retombé : la part tenue seule, vers la lampe des pairs.
+    expect(gap(even(0), mixColor(palette.city, lampColor(palette, at(0, 0), LAMP.cityEven), PULSE.city.hold))).toBeLessThanOrEqual(1);
+    // Un temps sans force frappe encore au plancher : plus que la part tenue, moins qu'à plein.
+    const weak = cityLots(palette, at(0, 1, 0))![0];
+    expect(gap(weak, palette.city)).toBeGreaterThan(gap(even(0), palette.city));
+    expect(gap(weak, palette.city)).toBeLessThan(gap(even(1), palette.city));
+    expect(cityLots(palette, pulse({ beat: 0, strength: 1, count: -1, bpm: 120 }))).toBeNull();
+    expect(cityLots(palette, SILENT_PULSE)).toBeNull();
   });
 });
 

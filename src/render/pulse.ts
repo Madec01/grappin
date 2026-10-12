@@ -44,6 +44,11 @@ import { mixColor } from './sling';
  * et le décor en gardent une part (`hold`) pendant tout le temps, pas seulement
  * sur le coup : la lumière est colorée, et change de couleur à chaque temps.
  *
+ * Troisième retour (0.12.3) : « tous les éléments ne doivent pas forcément avoir
+ * la même couleur, un peu comme en discothèque ». D'où les lampes (`LAMP`,
+ * `lampColor`) : trois jeux de lumière de trois couleurs différentes au même
+ * instant, et chaque point normal sous la sienne.
+ *
  * Règle absolue : au silence (`SILENT_PULSE`, ou tout pouls sans temps ni graves),
  * rien ne change. Chaque multiplicateur y vaut exactement 1, chaque ajout
  * exactement 0, et `pulsedPalette` rend la palette reçue elle-même : le rendu
@@ -85,8 +90,29 @@ export const PULSE = {
   effect: { blend: 0.15 },
 } as const;
 
-/** Les couleurs d'effet de la palette, dans l'ordre des temps de la mesure : A sur le temps fort, puis B, C, B. */
-const EFFECT_SEQUENCE = ['effectA', 'effectB', 'effectC', 'effectB'] as const;
+/** Les trois couleurs d'effet de la palette, et l'indice de celle de la lampe principale à chaque temps de la mesure : A sur le temps fort, puis B, C, B. */
+const EFFECTS = ['effectA', 'effectB', 'effectC'] as const;
+const EFFECT_SEQUENCE = [0, 1, 2, 1] as const;
+
+/**
+ * Les lampes. « Comme en discothèque » (retour du propriétaire, 0.12.3) : tous
+ * les éléments n'ont pas la même couleur au même moment. Il y a trois lampes,
+ * qui montrent à tout instant les trois couleurs d'effet de la palette, chacune
+ * à son tour : la lampe `k` a la couleur qui suit de `k` crans celle de la lampe
+ * principale. À chaque temps, la principale change (A, B, C, B), et les deux
+ * autres avec elle. La principale éclaire le personnage, la corde, la visée,
+ * la crête de brume et l'interface ; la nappe de brume, la dalle et le décor
+ * pair ont la deuxième, le fond et le décor impair la troisième ; chaque point
+ * normal a la sienne, d'après son numéro (`lampOf`).
+ */
+export const LAMP_COUNT = 3;
+export const LAMP = { main: 0, fog: 1, roof: 1, cityEven: 1, background: 2, cityOdd: 2 } as const;
+
+/** La lampe d'un point normal (ou de tout élément numéroté) : les numéros voisins ont des lampes différentes. */
+export function lampOf(id: number): number {
+  const lamp = Math.floor(id) % LAMP_COUNT;
+  return lamp < 0 ? lamp + LAMP_COUNT : lamp;
+}
 
 /** Le blanc, vers lequel la crête de brume s'éclaire. */
 const WHITE = 0xffffff;
@@ -139,37 +165,50 @@ function sequenceIndex(inBar: number): number {
   return ((index % EFFECT_SEQUENCE.length) + EFFECT_SEQUENCE.length) % EFFECT_SEQUENCE.length;
 }
 
+/** La couleur d'effet de la lampe `lamp` au temps `inBar` : celle de la lampe principale, décalée de `lamp` crans parmi les trois. */
+function lampEffect(palette: Palette, inBar: number, lamp: number): number {
+  return palette[EFFECTS[(EFFECT_SEQUENCE[sequenceIndex(inBar)]! + lamp) % LAMP_COUNT]!];
+}
+
 /**
- * La couleur d'effet : elle change à chaque temps. Sur le temps fort de la
- * mesure, la couleur A de la palette ; puis B, C et B sur les trois temps
- * suivants. Au début de chaque temps, elle fond de la couleur du temps
- * précédent vers la nouvelle pendant la part `PULSE.effect.blend` du temps, puis
- * tient franche. Au silence et avant le premier temps, le halo de la palette.
- * Ce sont toujours des couleurs d'ambiance : jamais celle d'une espèce.
+ * La couleur d'une lampe : elle change à chaque temps. Pour la lampe
+ * principale, sur le temps fort de la mesure, la couleur A de la palette ; puis
+ * B, C et B sur les trois temps suivants ; les autres lampes suivent, chacune
+ * d'un cran de plus, si bien que les trois couleurs sont toujours là ensemble.
+ * Au début de chaque temps, chaque lampe fond de sa couleur du temps précédent
+ * vers la nouvelle pendant la part `PULSE.effect.blend` du temps, puis tient
+ * franche. Au silence et avant le premier temps, le halo de la palette, pour
+ * toutes. Ce sont toujours des couleurs d'ambiance : jamais celle d'une espèce.
  */
-export function effectColor(palette: Palette, pulse: Pulse): number {
+export function lampColor(palette: Palette, pulse: Pulse, lamp: number): number {
   if (pulse.count < 0) return palette.halo;
-  const index = sequenceIndex(pulse.inBar);
-  const current = palette[EFFECT_SEQUENCE[index]!];
-  const previous = palette[EFFECT_SEQUENCE[(index + EFFECT_SEQUENCE.length - 1) % EFFECT_SEQUENCE.length]!];
+  const offset = lampOf(lamp);
+  const current = lampEffect(palette, pulse.inBar, offset);
+  const previous = lampEffect(palette, pulse.inBar - 1, offset);
   if (previous === current) return current;
   const progress = beatProgress(pulse.beat) / PULSE.effect.blend;
   if (progress >= 1) return current;
   return mixColor(previous, current, smooth(progress));
 }
 
+/** La couleur d'effet de la lampe principale : personnage, corde, visée, crête de brume, interface. */
+export function effectColor(palette: Palette, pulse: Pulse): number {
+  return lampColor(palette, pulse, LAMP.main);
+}
+
 /**
  * La palette dans laquelle le pouls la plonge. Tant que la musique bat, la
- * lumière est colorée : le fond, la nappe de brume, la dalle du toit et les
- * structures du décor prennent une part (`hold`) de la couleur d'effet, qui
- * change à chaque temps ; c'est ce que le propriétaire appelle « la lumière
- * colorée qui change de couleur ». Par-dessus, sur le temps : le fond monte vers
- * la brume (jamais de plus de `PULSE.background.max`) et se teinte davantage, la
- * crête de brume prend la couleur d'effet et s'éclaire, la dalle et la nappe se
- * teintent davantage ; avec les graves, les structures du décor se teintent
- * davantage. Le halo ambiant est la couleur d'effet. Le reste (lignes
- * d'altitude, cœur du tube, accent) ne bouge pas. Au silence, la palette reçue
- * elle-même (`===`), si bien que le rendu la reconnaît à son identité.
+ * lumière est colorée, et pas d'une seule couleur : le fond, la nappe de brume,
+ * la dalle du toit et les structures du décor prennent chacun une part (`hold`)
+ * de la couleur de leur lampe (`LAMP`), qui change à chaque temps ; au même
+ * temps, la brume et le fond n'ont pas la même couleur, comme en discothèque.
+ * Par-dessus, sur le temps : le fond monte vers la brume (jamais de plus de
+ * `PULSE.background.max`) et se teinte davantage, la crête de brume prend la
+ * couleur de la lampe principale et s'éclaire, la dalle et la nappe se teintent
+ * davantage ; avec les graves, les structures du décor se teintent davantage.
+ * Le halo ambiant est la lampe principale. Le reste (lignes d'altitude, cœur du
+ * tube, accent) ne bouge pas. Au silence, la palette reçue elle-même (`===`),
+ * si bien que le rendu la reconnaît à son identité.
  */
 export function pulsedPalette(palette: Palette, pulse: Pulse): Palette {
   // La musique marque les temps : la lumière colorée est là, même au creux du temps. Avant le premier temps ou au silence, rien.
@@ -179,18 +218,19 @@ export function pulsedPalette(palette: Palette, pulse: Pulse): Palette {
   const lift = Math.min(PULSE.background.max, PULSE.background.beat * hit + PULSE.background.bass * bass);
   const edge = Math.min(1, PULSE.fogEdge.beat * hit);
   const tint = Math.min(1, PULSE.city.hold * beating + PULSE.city.bass * bass);
-  const effect = effectColor(palette, pulse);
-  if (beating === 0 && lift === 0 && edge === 0 && tint === 0 && effect === palette.halo) return palette;
-  const background = mixColor(mixColor(palette.background, palette.fog, lift), effect, Math.min(1, PULSE.background.hold * beating + PULSE.background.tint * hit));
-  const crest = mixColor(palette.fogEdge, effect, Math.min(1, PULSE.fogEdge.tint * hit));
+  const main = lampColor(palette, pulse, LAMP.main);
+  if (beating === 0 && lift === 0 && edge === 0 && tint === 0 && main === palette.halo) return palette;
+  const fogLamp = lampColor(palette, pulse, LAMP.fog);
+  const background = mixColor(mixColor(palette.background, palette.fog, lift), lampColor(palette, pulse, LAMP.background), Math.min(1, PULSE.background.hold * beating + PULSE.background.tint * hit));
+  const crest = mixColor(palette.fogEdge, main, Math.min(1, PULSE.fogEdge.tint * hit));
   return {
     ...palette,
     background,
-    roofFill: mixColor(palette.roofFill, effect, Math.min(1, PULSE.roof.hold * beating + PULSE.roof.beat * hit)),
-    fog: mixColor(palette.fog, effect, Math.min(1, PULSE.fogSheet.hold * beating + PULSE.fogSheet.beat * hit)),
+    roofFill: mixColor(palette.roofFill, lampColor(palette, pulse, LAMP.roof), Math.min(1, PULSE.roof.hold * beating + PULSE.roof.beat * hit)),
+    fog: mixColor(palette.fog, fogLamp, Math.min(1, PULSE.fogSheet.hold * beating + PULSE.fogSheet.beat * hit)),
     fogEdge: mixColor(crest, WHITE, edge),
-    city: mixColor(palette.city, effect, tint),
-    halo: effect,
+    city: mixColor(palette.city, lampColor(palette, pulse, LAMP.cityEven), tint),
+    halo: main,
   };
 }
 
@@ -272,17 +312,24 @@ export function uiGlow(palette: Palette, pulse: Pulse): number {
 }
 
 /**
- * Les deux lots de couleur du décor, pour des structures qui dansent : les
- * structures d'index pair s'allument vers la couleur d'effet sur les temps pairs
- * de la mesure (0 et 2), les impairs sur les temps impairs (1 et 3), puis
- * retombent avec le temps. `palette` est celle que le pouls a déjà teintée : son
- * halo est la couleur d'effet. Rend `[pairs, impairs]`, ou null quand rien ne
- * s'allume (au silence, ou temps retombé) : le rendu garde alors un seul lot,
- * celui de la palette, et ne paie rien de plus. Jamais plus de deux couleurs,
- * donc jamais plus de deux lots par rang.
+ * Les deux lots de couleur du décor, pour des structures qui dansent, chacun
+ * sous sa lampe : les structures d'index pair sous la deuxième lampe, les
+ * impaires sous la troisième, donc jamais de la même couleur. Tant que la
+ * musique bat, chaque lot garde une part (`hold`, plus les graves) de sa lampe ;
+ * et sur le temps, les pairs s'allument à plein sur les temps pairs de la mesure
+ * (0 et 2), les impairs sur les temps impairs (1 et 3), puis retombent.
+ * `palette` est celle de la famille, pas celle que le pouls a teintée. Rend
+ * `[pairs, impairs]`, ou null avant le premier temps et au silence : le rendu
+ * garde alors un seul lot, celui de la palette, et ne paie rien de plus. Jamais
+ * plus de deux couleurs, donc jamais plus de deux lots par rang.
  */
 export function cityLots(palette: Palette, pulse: Pulse): readonly [number, number] | null {
-  const lit = mixColor(palette.city, palette.halo, Math.min(1, PULSE.city.dance * punch(pulse)));
-  if (lit === palette.city) return null;
-  return sequenceIndex(pulse.inBar) % 2 === 0 ? [lit, palette.city] : [palette.city, lit];
+  if (pulse.count < 0) return null;
+  const hit = PULSE.city.dance * punch(pulse);
+  const held = PULSE.city.hold + PULSE.city.bass * bassKick(pulse);
+  const evenTurn = sequenceIndex(pulse.inBar) % 2 === 0;
+  return [
+    mixColor(palette.city, lampColor(palette, pulse, LAMP.cityEven), Math.min(1, held + (evenTurn ? hit : 0))),
+    mixColor(palette.city, lampColor(palette, pulse, LAMP.cityOdd), Math.min(1, held + (evenTurn ? 0 : hit))),
+  ];
 }

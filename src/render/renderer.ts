@@ -17,7 +17,7 @@ import { fragileGauge, heldKind, inReleaseWindow, isDark, isOff, shadowPoints } 
 import { alertAlpha, bannerAlpha, boostStreaks, flashAlpha, flashRadius, flicker, floatAlpha, floatRise, pulse, sizzle, type Banner, type Effects, type Flash } from './effects';
 import { formatDecimal } from './format';
 import { neonCircle, neonDiscs, neonFill, neonLine, neonRects, neonStroke, type NeonStrokeStyle } from './neon';
-import { ambientHalo, cityLots, cityStroke, fogSheetAlpha, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow, type HaloBoost } from './pulse';
+import { LAMP_COUNT, ambientHalo, cityLots, cityStroke, fogSheetAlpha, lampColor, lampOf, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow, type HaloBoost } from './pulse';
 import { Screens, type OverlayView } from './screens';
 import { SKIN, crackPattern, doorLook, ringPhase, springTeeth, type Crack, type DoorLook } from './skins';
 import { bandWidth, cupRadius, cupTips, mixColor, pullRatio, traceCup } from './sling';
@@ -686,6 +686,10 @@ export class Renderer {
 
   /** L'ambiance de la dernière image, plongée dans le pouls. Les tubes et les teintes qui en dépendent sont rafraîchis quand elle change. */
   private palette: Palette = PALETTES.menu;
+  /** La palette de la famille, avant le pouls : les lots du décor en partent, chacun sous sa lampe. */
+  private basePalette: Palette = PALETTES.menu;
+  /** La couleur de chaque lampe à cette image (`lampColor`) : les halos des points normaux, chacun sous la sienne. */
+  private lampHalos: readonly number[] = [PALETTES.menu.halo, PALETTES.menu.halo, PALETTES.menu.halo];
   /** Le halo des titres et de la bannière de la dernière image : l'accent, ou la couleur d'effet quand la musique bat. */
   private glow: number = PALETTES.menu.accent;
   /** Le pouls de la dernière image, et ce qu'il fait aux halos : tubes ambiants, espèces de prises, cerne des obstacles. */
@@ -887,6 +891,8 @@ export class Renderer {
     this.rim = rimBoost(pulse);
     const palette = pulsedPalette(base, pulse);
     const glow = uiGlow(base, pulse);
+    this.basePalette = base;
+    this.lampHalos = Array.from({ length: LAMP_COUNT }, (_, lamp) => lampColor(base, pulse, lamp));
     if (palette === this.palette && glow === this.glow) return;
     this.palette = palette;
     this.glow = glow;
@@ -963,7 +969,7 @@ export class Renderer {
     // Dans le repère du décor lointain, l'ordonnée `y` s'affiche là où le monde afficherait `y` plus ce décalage.
     const shift = (1 - CITY_PARALLAX) * camera.centerY;
     const { first, last } = bandsInView(camera.worldYAt(view.bottom) - shift, camera.worldYAt(view.top) - shift);
-    const lots = cityLots(this.palette, this.pulse);
+    const lots = cityLots(this.basePalette, this.pulse);
     // Sur le temps, les traits s'épaississent et s'opacifient : le seul endroit où le pouls touche une épaisseur, un décor, jamais une cible.
     const stroke = cityStroke(this.pulse);
     // Par rang, puis par lot de couleur : sans danse, tout est dans le premier lot, comme avant.
@@ -1797,7 +1803,12 @@ export class Renderer {
     const { halo } = this;
     const glow = this.species;
 
-    neonDiscs(g, groups.normal, radius, { ...this.normalTube, spread: halo.spread, strength: halo.strength, pass });
+    // Chaque point normal sous sa lampe : trois couleurs de halo à la fois, comme en discothèque ; le cœur reste celui du tube.
+    const byLamp: (typeof groups.normal)[] = Array.from({ length: LAMP_COUNT }, () => []);
+    for (const spot of groups.normal) byLamp[lampOf(spot.id)]!.push(spot);
+    byLamp.forEach((spots, lamp) => {
+      if (spots.length > 0) neonDiscs(g, spots, radius, { ...this.normalTube, halo: this.lampHalos[lamp] ?? this.normalTube.halo, spread: halo.spread, strength: halo.strength, pass });
+    });
 
     // Lanceur : un disque vert d'eau au creux d'une coupe en « Y » ouverte vers le haut, sur un court pied : une fronde. Rien d'un propulseur, qui est un anneau fermé à chevrons.
     if (groups.lanceur.length > 0) {

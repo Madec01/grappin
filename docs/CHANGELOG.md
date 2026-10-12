@@ -2,6 +2,16 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.12.3] — 2026-10-12 — Comme en discothèque : trois lampes
+
+Retour du propriétaire sur la 0.12.2 : « tous les éléments ne doivent pas forcément avoir la même couleur, un peu comme en discothèque ». Cause : toute la scène prenait la couleur du temps, une seule à la fois.
+
+### Modifié
+
+- **Trois lampes** (`LAMP`, `lampColor`, render/pulse.ts) : à tout instant, les trois couleurs d'effet de l'ambiance sont là ensemble, chacune sur sa lampe, et chaque lampe change de couleur à chaque temps (la principale suit A, B, C, B ; les deux autres la suivent d'un et de deux crans). La lampe principale éclaire le personnage, la corde, la visée, la crête de brume et l'interface ; la nappe de brume, la dalle du toit et le décor pair ont la deuxième ; le fond et le décor impair la troisième.
+- **Chaque point normal sous sa lampe**, d'après son numéro : trois couleurs de halo à la fois sur la paroi, voisines jamais pareilles, qui tournent à chaque temps. Le cœur des points reste celui du tube, et les prises spéciales gardent leurs couleurs.
+- Les deux lots du décor qui dansent ne sont plus « allumé ou éteint » dans une même couleur : chacun sous sa lampe, jamais de la même couleur, et celui dont c'est le temps s'allume à plein.
+
 ## [0.12.2] — 2026-10-12 — La lumière colorée change de couleur
 
 Retour du propriétaire sur la 0.12.1 : « le but de la lumière colorée, c'est que ça change de couleur aussi ». Cause : les trois couleurs d'effet de chaque ambiance étaient trois bleus voisins (ou trois verts, trois crèmes), et la teinte du fond ne durait que le coup du temps : l'œil voyait battre la lumière, pas changer sa couleur.
