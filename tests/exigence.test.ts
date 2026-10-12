@@ -236,7 +236,7 @@ describe('les scènes des usages exigés', () => {
       // Sous la glissière, le robot attend que le trou passe : un seul tir, aucun choc.
       if (scene.id === 'glissiere') expect(counts).toMatchObject({ launch: 1, bump: 0 });
     }
-    // Dix-huit scènes, chacune prouvée puis jouée quarante secondes par le robot : plus de cinq secondes quand les autres tests se partagent le processeur.
+    // Vingt-trois scènes, chacune prouvée puis jouée quarante secondes par le robot : plus de cinq secondes quand les autres tests se partagent le processeur.
   }, 30_000);
 });
 

@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { chromium, type Browser, type Page } from '@playwright/test';
 import gifenc from 'gifenc';
 import { PNG } from 'pngjs';
+import { createProfile } from '../src/meta/profile';
 import { doorGauge, doorState } from '../src/sim/cycles';
 import { ACCORDION_PERIOD } from '../src/sim/generator';
 import { rotorTurns, slideOffset } from '../src/sim/moving';
@@ -44,7 +45,7 @@ const PORT = 4175;
 const VIEWPORT = { width: 390, height: 844 };
 const outDir = resolve(process.argv[2] ?? 'captures');
 const seed = Number(process.argv[3] ?? '1');
-/** `scenes` en troisième argument : seulement les prises des scènes des lots 2, 3 et 5, pour les revoir sans rejouer tout le banc. */
+/** `scenes` en troisième argument : seulement les prises des scènes des lots 2, 3, 5 et 5 B, pour les revoir sans rejouer tout le banc. */
 const onlyScenes = process.argv[4] === 'scenes';
 /** Après `scenes`, des noms de scènes (`courant derive`) pour ne rejouer que celles-là ; aucun nom, toutes les scènes. */
 const sceneFilter = onlyScenes ? process.argv.slice(5) : [];
@@ -248,6 +249,22 @@ const RAIL_AFTER_FRAMES = 3;
 const ELASTIC_SHOT_STRETCH = 1.5;
 const EVASION_SHOT_SECONDS = 1.4;
 
+/**
+ * Le lot 5 B (0.16.0). Le plafond : l'image est prise pendant l'inversion, quand la gravité a pris `PLAFOND_SHOT_GRAVITY` de sa force vers le haut, le personnage tenu
+ * à une prise (au-dessus d'elle) ; il faut du temps au pilote pour y monter (le plafond commence à 24 m). La faille : `FAULT_SHOT_SECONDS` secondes après le
+ * déclenchement, le vide bien ouvert. Le carrousel : le personnage porté depuis `CAROUSEL_SHOT_SECONDS` secondes par une prise de la couronne. La structure
+ * dépliante : le panneau à `UNFOLD_SHOT_RATIO` de son ouverture, la prise tenue ; et, plus tard, la prise lâchée depuis `UNFOLD_GAUGE_SECONDS` secondes,
+ * le panneau ouvert, sa jauge au tiers (sur les quatre secondes du délai). Le convoyeur : le personnage tenu à la seconde plateforme depuis `CONVEYOR_SHOT_SECONDS` secondes, la première
+ * derrière lui et le lanceur au-dessus.
+ */
+const PLAFOND_SHOT_GRAVITY = 0.7;
+const PLAFOND_FRAMES = 2400;
+const FAULT_SHOT_SECONDS = 3.6;
+const CAROUSEL_SHOT_SECONDS = 1.4;
+const UNFOLD_SHOT_RATIO = 0.5;
+const UNFOLD_GAUGE_SECONDS = 1.5;
+const CONVEYOR_SHOT_SECONDS = 0.8;
+
 /** Mène l'horloge figée de la page jusqu'au pas de simulation `target` (à un pas ou deux près, par excès), par grands bonds puis image par image. */
 async function advanceToStep(page: Page, target: number): Promise<number> {
   for (let guard = 0; guard < 1000; guard += 1) {
@@ -259,9 +276,13 @@ async function advanceToStep(page: Page, target: number): Promise<number> {
   throw new Error(`Le pas ${target} n'est jamais atteint`);
 }
 
+/** Les conseils du tutoriel (`src/app/coach.ts`) : avec `quiet`, une page neuve les a déjà tous vus, et aucun ne recouvre la prise. */
+const COACH_TIPS = ['grab', 'window', 'catch', 'launcher', 'perfect'];
+
 /** Une page neuve sur la scène `id`, l'horloge figée et la bannière d'intro encore intacte (à l'image 0). */
-async function openScene(browser: Browser, id: string): Promise<{ page: Page; close: () => Promise<void> }> {
+async function openScene(browser: Browser, id: string, quiet = false): Promise<{ page: Page; close: () => Promise<void> }> {
   const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  if (quiet) await context.addInitScript((profile) => window.localStorage.setItem('grappin.profil', profile), JSON.stringify({ ...createProfile(), tips: COACH_TIPS }));
   const page = await context.newPage();
   await page.clock.install({ time: 0 });
   await page.goto(`http://localhost:${PORT}/?graine=${seed}&fogBaseSpeed=${SCENE_FOG}`);
@@ -325,6 +346,11 @@ const ZONE_SHOTS: readonly { readonly id: string; readonly file: string; readonl
  *  - 43-scene-rail : le rail tenu, un doigt glissé de côté : le curseur au bout de l'arc, la flèche de la direction du lancer, l'ombre qui la prolonge ;
  *    44-scene-elastique : le lien tenu et bien étiré (1,5 m au moins sur 2), le trait épais et clair entre ses deux cercles tiretés ;
  *  - 45-scene-evasion : le couloir qui se referme, 1,4 s après l'entrée : les panneaux de sortie en route, leur liseré et leur jauge, la bannière « Le passage se referme ! ».
+ *  - 46-scene-plafond : la gravité inversée aux sept dixièmes, le personnage tenu à une prise, au-dessus d'elle, un plafond à trou plus haut ; le fond tombe vers le haut
+ *    (particules à traînée, halo du bord haut) ; 47-scene-faille : trois secondes et demie après le déclenchement, le vide bien ouvert entre les deux ensembles de prises ;
+ *  - 48-scene-carrousel : le personnage porté par une prise de la couronne, dans sa coque de pierres pâles, le rayon tenu allumé ; 49-scene-depliante : le panneau à moitié
+ *    déplié, tenu à la prise interrupteur (flèche en arc, pointillé vers la charnière) ; 49-scene-depliante-jauge : la prise lâchée depuis une seconde et demie, le panneau déplié, sa jauge
+ *    au tiers ; 50-scene-convoyeur : le personnage pendu à la seconde plateforme, sa surface d'acier au-dessus, le rail, la tige, le lanceur plus haut.
  * Une prise que le parcours ne permet plus (réglages changés) est omise avec un avertissement, sans bloquer le banc.
  */
 async function captureScenes(browser: Browser): Promise<void> {
@@ -784,6 +810,146 @@ async function captureScenes(browser: Browser): Promise<void> {
       console.log(`45-scene-evasion : déclenché depuis ${((s.step - s.triggered[0]!.step) * DEFAULT_TUNING.stepSeconds).toFixed(1)} s, personnage en (${s.pos.x.toFixed(1)}, ${s.pos.y.toFixed(1)}) m, pas ${s.step}`);
     }
     await close();
+  }
+
+  // Le plafond : le pilote monte la chaîne, le plafond commence à 24 m ; l'image est prise pendant l'inversion, la gravité tirant déjà vers le haut, le personnage tenu
+  // à une prise, au-dessus d'elle (la corde part vers le bas), un plafond à trou plus haut dans la vue.
+  if (wanted('plafond')) {
+    const world = sceneWorld('plafond', seed);
+    const { page, close } = await openScene(browser, 'plafond', true);
+    await page.clock.runFor(PULSE_INTRO_MS);
+    const live = new Map<number, { y: number }>(world.anchors.map((a) => [a.id, { y: a.pos.y }]));
+    const hanging = await climbUntil(
+      page,
+      (s, memory) => s.inverted && s.gravityY >= PLAFOND_SHOT_GRAVITY && s.attached && memory.heldId !== null && s.pos.y > (live.get(memory.heldId)?.y ?? Infinity) + 0.5,
+      { world },
+      PLAFOND_FRAMES,
+    );
+    if (!hanging) console.warn('46-scene-plafond : le personnage n\'est jamais tenu au-dessus d\'une prise pendant l\'inversion, prise omise');
+    else {
+      const s = await page.evaluate(() => window.__grappin!.state());
+      await page.screenshot({ path: join(outDir, '46-scene-plafond.png') });
+      console.log(`46-scene-plafond : gravité (${s.gravityX.toFixed(2)} ; ${s.gravityY.toFixed(2)}), inversé ${s.inverted}, tenu (${s.pos.x.toFixed(1)}, ${s.pos.y.toFixed(1)}) m, pas ${s.step}`);
+    }
+    await close();
+  }
+
+  // La faille : le pilote entre dans la faille (elle se déclenche un mètre au-dessus du second point), et l'image est prise `FAULT_SHOT_SECONDS` secondes plus
+  // tard : le vide bien ouvert entre les deux ensembles, la bannière encore là.
+  if (wanted('faille')) {
+    const world = sceneWorld('faille', seed);
+    const { page, close } = await openScene(browser, 'faille', true);
+    await page.clock.runFor(PULSE_INTRO_MS);
+    const open = await climbUntil(page, (s) => s.faultOpen && s.rifts.length > 0 && (s.step - s.rifts[0]!.step) * DEFAULT_TUNING.stepSeconds >= FAULT_SHOT_SECONDS, { world });
+    if (!open) console.warn('47-scene-faille : la faille ne s\'ouvre pas, prise omise');
+    else {
+      const s = await page.evaluate(() => window.__grappin!.state());
+      await page.screenshot({ path: join(outDir, '47-scene-faille.png') });
+      console.log(`47-scene-faille : ouverte depuis ${((s.step - s.rifts[0]!.step) * DEFAULT_TUNING.stepSeconds).toFixed(1)} s, personnage en (${s.pos.x.toFixed(1)}, ${s.pos.y.toFixed(1)}) m, pas ${s.step}`);
+    }
+    await close();
+  }
+
+  // Le carrousel : le pilote entre par le bas, la prise tenue le porte autour du pivot ; l'image est prise `CAROUSEL_SHOT_SECONDS` secondes après l'accroche à une prise de la couronne.
+  if (wanted('carrousel')) {
+    const world = sceneWorld('carrousel', seed);
+    const crown = new Set(world.anchors.flatMap((a) => (a.orbit === undefined ? [] : [a.id])));
+    const { page, close } = await openScene(browser, 'carrousel', true);
+    await page.clock.runFor(PULSE_INTRO_MS);
+    let since = -1;
+    const carried = await climbUntil(
+      page,
+      (s, memory) => {
+        const held = s.attached && memory.heldId !== null && crown.has(memory.heldId);
+        if (!held) since = -1;
+        else if (since < 0) since = s.step;
+        return held && (s.step - since) * DEFAULT_TUNING.stepSeconds >= CAROUSEL_SHOT_SECONDS;
+      },
+      { world, keep: (s, memory) => s.attached && memory.heldId !== null && crown.has(memory.heldId) },
+    );
+    if (!carried) console.warn('48-scene-carrousel : le pilote n\'est jamais porté par la couronne, prise omise');
+    else {
+      const s = await page.evaluate(() => window.__grappin!.state());
+      await page.screenshot({ path: join(outDir, '48-scene-carrousel.png') });
+      console.log(`48-scene-carrousel : porté depuis ${((s.step - since) * DEFAULT_TUNING.stepSeconds).toFixed(1)} s, personnage en (${s.pos.x.toFixed(1)}, ${s.pos.y.toFixed(1)}) m, pas ${s.step}`);
+    }
+    await close();
+  }
+
+  // La structure dépliante : le pilote tient la prise interrupteur, le panneau se déplie ; première image à `UNFOLD_SHOT_RATIO` de son ouverture (la flèche en arc, le
+  // pointillé qui le relie à sa prise) ; seconde, la prise lâchée depuis `UNFOLD_GAUGE_SECONDS` secondes, le personnage en route vers la prise suivante, le panneau ouvert, sa jauge au tiers.
+  if (wanted('depliante')) {
+    const world = sceneWorld('depliante', seed);
+    const lever = world.anchors.find((a) => a.kind === 'interrupteur');
+    if (!lever) console.warn('49-scene-depliante : pas d\'interrupteur dans la scène, prise omise');
+    else {
+      {
+        const { page, close } = await openScene(browser, 'depliante', true);
+        await page.clock.runFor(PULSE_INTRO_MS);
+        const folding = await climbUntil(page, (s) => s.heldKind === 'interrupteur' && s.unfolded >= UNFOLD_SHOT_RATIO, { world, keep: (s) => s.heldKind === 'interrupteur' });
+        if (!folding) console.warn('49-scene-depliante : le panneau ne se déplie pas, prise omise');
+        else {
+          const s = await page.evaluate(() => window.__grappin!.state());
+          await page.screenshot({ path: join(outDir, '49-scene-depliante.png') });
+          console.log(`49-scene-depliante : panneau ouvert à ${(s.unfolded * 100).toFixed(0)} %, personnage en (${s.pos.x.toFixed(1)}, ${s.pos.y.toFixed(1)}) m, pas ${s.step}`);
+        }
+        await close();
+      }
+      {
+        const { page, close } = await openScene(browser, 'depliante', true);
+        await page.clock.runFor(PULSE_INTRO_MS);
+        let held = false;
+        let releasedStep = -1;
+        const sinceRelease = (s: Seen): number => (releasedStep < 0 ? 0 : (s.step - releasedStep) * DEFAULT_TUNING.stepSeconds);
+        const gauged = await climbUntil(
+          page,
+          (s) => {
+            if (s.heldKind === 'interrupteur') held = true;
+            else if (held && releasedStep < 0) releasedStep = s.step;
+            return releasedStep >= 0 && s.unfolded >= 1 && sinceRelease(s) >= UNFOLD_GAUGE_SECONDS;
+          },
+          { world, keep: (s) => releasedStep >= 0 && sinceRelease(s) < UNFOLD_GAUGE_SECONDS },
+        );
+        if (!gauged) console.warn('49-scene-depliante-jauge : le panneau n\'est pas déplié deux secondes après le lâcher, prise omise');
+        else {
+          const s = await page.evaluate(() => window.__grappin!.state());
+          await page.screenshot({ path: join(outDir, '49-scene-depliante-jauge.png') });
+          console.log(`49-scene-depliante-jauge : lâchée depuis ${sinceRelease(s).toFixed(1)} s, panneau ouvert à ${(s.unfolded * 100).toFixed(0)} %, personnage en (${s.pos.x.toFixed(1)}, ${s.pos.y.toFixed(1)}) m, pas ${s.step}`);
+        }
+        await close();
+      }
+    }
+  }
+
+  // Le convoyeur : le pilote se laisse porter ; l'image est prise `CONVEYOR_SHOT_SECONDS` secondes après l'accroche à la seconde plateforme (sa surface au-dessus de lui,
+  // la première plus bas, le lanceur de la dernière plus haut).
+  if (wanted('convoyeur')) {
+    const world = sceneWorld('convoyeur', seed);
+    const platforms = world.anchors.filter((a) => a.cable !== undefined).sort((a, b) => a.pos.y - b.pos.y);
+    const second = platforms[1];
+    if (!second) console.warn('50-scene-convoyeur : moins de deux plateformes dans la scène, prise omise');
+    else {
+      const { page, close } = await openScene(browser, 'convoyeur', true);
+      await page.clock.runFor(PULSE_INTRO_MS);
+      let since = -1;
+      const under = await climbUntil(
+        page,
+        (s, memory) => {
+          const held = s.attached && memory.heldId === second.id;
+          if (!held) since = -1;
+          else if (since < 0) since = s.step;
+          return held && (s.step - since) * DEFAULT_TUNING.stepSeconds >= CONVEYOR_SHOT_SECONDS;
+        },
+        { world, keep: (s, memory) => s.attached && memory.heldId === second.id },
+      );
+      if (!under) console.warn('50-scene-convoyeur : le pilote n\'est jamais pendu à la seconde plateforme, prise omise');
+      else {
+        const s = await page.evaluate(() => window.__grappin!.state());
+        await page.screenshot({ path: join(outDir, '50-scene-convoyeur.png') });
+        console.log(`50-scene-convoyeur : pendu depuis ${((s.step - since) * DEFAULT_TUNING.stepSeconds).toFixed(1)} s, personnage en (${s.pos.x.toFixed(1)}, ${s.pos.y.toFixed(1)}) m, pas ${s.step}`);
+      }
+      await close();
+    }
   }
 }
 

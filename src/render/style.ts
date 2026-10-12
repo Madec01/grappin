@@ -89,6 +89,16 @@ export const COLOR = {
    * qui bouge, pas une zone : ils n'ont rien du lavande de la poche ni de l'indigo de la porte, et se lisent sur toutes les musiques.
    */
   accordion: 0x3a5bff,
+  /**
+   * Terrain avancé du lot 5 B (version 0.16.0). Trois teintes de plus, toutes tirées de ce que le reste du jeu laisse libre : des tons moyens et
+   * adoucis, loin de toute espèce de prise, de toute zone et de toute ambiance. Faille : un rose d'argile, la lumière de la fente qui s'ouvre et
+   * le liseré de la roche fendue. Couronne du carrousel : un sable pâle, des pierres. Plateforme de convoyeur : un bleu d'acier, froid et mat.
+   * Le plafond n'a pas de couleur à lui (il retourne l'ambiance : voir `render/skins.ts`, `skyLook`), ni la structure dépliante, qui reste ambre
+   * comme l'interrupteur qui la commande.
+   */
+  rift: 0xdca3c8,
+  crown: 0xc9bd72,
+  conveyor: 0x84b4dc,
 
   /** Interface : textes blancs. */
   text: 0xf4f8ff,

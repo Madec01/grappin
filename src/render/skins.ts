@@ -1,9 +1,11 @@
+import type { Vec2 } from '../core/math/vec2';
 import { doorGauge, doorState, switchGauge } from '../sim/cycles';
 import { cablePosition } from '../sim/events';
+import { CEILING_HOOK_BELOW, CONVEYOR_ANCHOR_BELOW } from '../sim/generator';
 import { ELASTIC_MAX_STRETCH, SWITCH_HOLD_SECONDS, railPoint } from '../sim/holds';
-import { ROTOR_THICKNESS, closerState, type CloserState } from '../sim/moving';
+import { ROTOR_THICKNESS, closerState, riftProgress, slideOffset, type CloserState } from '../sim/moving';
 import { RING_CENTRE_RATIO } from '../sim/rules';
-import type { Anchor, Obstacle, Rail, Ring, SimState } from '../sim/state';
+import type { Anchor, Obstacle, Rail, Ring, Slide, SimState } from '../sim/state';
 import type { Tuning } from '../sim/tuning';
 import { noise } from './effects';
 import { mixColor } from './sling';
@@ -12,9 +14,10 @@ import { COLOR } from './style';
 /**
  * Habillages des obstacles à comportement (surface de rebond, paroi cassable,
  * porte, barre tournante, verrou d'interrupteur, passage qui se referme), des
- * anneaux de précision, de la roue motorisée, des bandes de l'accordéon et des
- * prises du lot 5 (aimant, rail, lien élastique) : ce qui, dans leur dessin, se
- * calcule de l'état sans PixiJS ni temps réel. Le
+ * anneaux de précision, de la roue motorisée, des bandes de l'accordéon, des
+ * prises du lot 5 (aimant, rail, lien élastique) et du terrain avancé du lot 5 B
+ * (plafond, faille, carrousel, structure dépliante, convoyeur) : ce qui, dans
+ * leur dessin, se calcule de l'état sans PixiJS ni temps réel. Le
  * rendu (`renderer.ts`) pose les formes, ce fichier dit quoi poser et dans quel
  * état.
  *
@@ -62,6 +65,19 @@ export const SKIN = {
   rotorBody: mixColor(COLOR.obstacle, COLOR.obstacleEdge, 0.16),
   /** Le cœur des traits d'une bande d'accordéon (son bord intérieur, ses chevrons) : sa teinte éclaircie vers le blanc, comme le cœur presque blanc d'un tube de néon. */
   bandCore: mixColor(COLOR.accordion, COLOR.white, 0.5),
+  /** Faille : la lumière de la fente (cœur presque blanc), le vide qui s'ouvre (plus sombre que le fond), la roche des surfaces (masse un soupçon rosée, fêlures pâles). */
+  riftCore: mixColor(COLOR.rift, COLOR.white, 0.6),
+  riftVoid: 0x03020a,
+  riftBody: mixColor(COLOR.obstacle, COLOR.rift, 0.1),
+  riftStone: mixColor(COLOR.rift, COLOR.obstacle, 0.25),
+  /** Couronne d'un carrousel : des pierres pâles (masse chaude, un cran plus claire que les solides), et le cœur éclairci des rayons, du moyeu, du rayon tenu. */
+  crownBody: mixColor(COLOR.obstacle, COLOR.crown, 0.3),
+  crownCore: mixColor(COLOR.crown, COLOR.white, 0.45),
+  /** Panneau dépliant : la masse et le pâle du verrou (c'est un panneau de l'interrupteur), un cran plus chaude. */
+  panelBody: mixColor(COLOR.obstacle, COLOR.switch, 0.28),
+  /** Plateforme de convoyeur : masse acier sombre, et cœur éclairci des chevrons, de la tige et du rail. */
+  conveyorBody: mixColor(COLOR.obstacle, COLOR.conveyor, 0.22),
+  conveyorCore: mixColor(COLOR.conveyor, COLOR.white, 0.45),
 } as const;
 
 /** Le cycle d'une onde de pas : de 0 à 1, `hz` fois par seconde de simulation (jamais de temps réel). */
@@ -500,4 +516,343 @@ export function closerLook(box: Obstacle, step: number, tuning: Tuning): CloserL
   if (phase === 'se ferme') return { phase, gauge: Math.min(1, elapsed / closer.closeSeconds), beat: stepWave(step, tuning.stepSeconds, CLOSER_BLINK_HZ) };
   if (phase === 'ferme') return { phase, gauge: 1, beat: 1 };
   return { phase, gauge: Math.max(0, 1 - (elapsed - closer.closeSeconds - closer.shutSeconds) / closer.closeSeconds), beat: 1 };
+}
+
+/*
+ * Le terrain avancé du lot 5 B (version 0.16.0). Tout se lit de l'état de la simulation ; ne sont du temps de l'écran que le flottement des
+ * particules du plafond, leur dérive (intégrée de la gravité du moment) et le défilement de quelques pointillés, qui ne sont que du mouvement de
+ * décor.
+ */
+
+const TAU = 2 * Math.PI;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/* ---- Plafond : la gravité se retourne ---- */
+
+/**
+ * Le plafond retourne la gravité sans tourner la caméra : on tombe vers le haut de l'écran. Pour que le sens de la chute saute aux yeux, le fond
+ * s'anime : des particules de décor qui tombent dans le sens de la gravité du moment (vers le bas d'abord, puis elles ralentissent, flottent à
+ * l'apesanteur, et montent), et un halo au bord haut de l'écran, qui s'allume quand le haut devient le bas.
+ */
+export const SKY_MOTES = 48;
+/** Vitesse de dérive à pleine gravité, en hauteurs de vue par seconde, pour une particule de rapidité 1. */
+export const SKY_SPEED = 0.2;
+/** Longueur de la traînée d'une particule à pleine gravité, en pixels, pour une particule de rapidité 1 : elle dit le sens de la chute. */
+export const SKY_STREAK = 22;
+/** Au-delà de ce niveau d'inversion (0 gravité ordinaire, 1 inversée), le fond est pleinement là : il apparaît dès que la gravité s'amollit. */
+const SKY_FADE_LEVEL = 0.3;
+/** Le halo du bord haut : bandes de cette hauteur (pixels), en nombre fixe, de l'opacité maximale `SKY_GLOW_ALPHA` au bord. */
+export const SKY_BANDS = 12;
+export const SKY_BAND_HEIGHT = 15;
+export const SKY_GLOW_ALPHA = 0.4;
+/** Flottement à l'apesanteur : écart maximal d'une particule autour de son point, en pixels. */
+const SKY_SWAY = 9;
+
+/** Une particule de décor : sa place dans la vue (parts de la largeur et de la hauteur depuis le haut), sa taille (trois rangs), sa rapidité relative et sa phase de flottement. */
+export interface SkyMote {
+  readonly x: number;
+  readonly y: number;
+  readonly tier: 0 | 1 | 2;
+  readonly pace: number;
+  readonly sway: number;
+}
+
+/** Les particules du ciel, tirées une fois pour toutes d'un bruit d'empreinte : les mêmes à chaque partie. */
+export const SKY_FIELD: readonly SkyMote[] = Array.from({ length: SKY_MOTES }, (_, i) => ({
+  x: noise(i * 7 + 1),
+  y: noise(i * 7 + 2),
+  tier: Math.min(2, Math.floor(noise(i * 7 + 3) * 3)) as 0 | 1 | 2,
+  pace: 0.6 + 0.8 * noise(i * 7 + 4),
+  sway: noise(i * 7 + 5),
+}));
+
+/** Rayon (pixels) et opacité de chaque rang de particules. */
+export const SKY_RADII: readonly number[] = [1.3, 1.9, 2.6];
+export const SKY_ALPHAS: readonly number[] = [0.45, 0.7, 0.95];
+
+/** Ce que le fond du plafond montre à cette gravité. */
+export interface SkyLook {
+  /** Visibilité de tout le fond, de 0 (absent, gravité ordinaire) à 1. */
+  readonly show: number;
+  /** Le sens et la force de la chute, de -1 (vers le bas de l'écran) à 1 (vers le haut) : la composante verticale de la gravité du monde. */
+  readonly lift: number;
+  /** L'apesanteur, de 0 (la gravité tire à plein, dans un sens ou l'autre) à 1 (rien ne pèse) : les particules flottent. */
+  readonly float: number;
+}
+
+/** Le fond du plafond à la gravité verticale `gravityY` (-1 : ordinaire, +1 : inversée), tant que `inverted` dit que l'inversion est en cours. */
+export function skyLook(gravityY: number, inverted: boolean): SkyLook {
+  if (!inverted) return { show: 0, lift: 0, float: 0 };
+  const level = clamp((gravityY + 1) / 2, 0, 1);
+  const lift = clamp(gravityY, -1, 1);
+  return { show: clamp(level / SKY_FADE_LEVEL, 0, 1), lift, float: 1 - Math.abs(lift) };
+}
+
+/** La ligne (de 0 en haut à 1 en bas, de la vue) d'une particule quand le champ a dérivé de `drift` hauteurs vers le haut : elle reboucle de l'autre côté. */
+export function skyMoteRow(mote: SkyMote, drift: number): number {
+  const row = mote.y - drift * mote.pace;
+  return row - Math.floor(row);
+}
+
+/** Le flottement d'une particule, en pixels, à l'instant `clock` de l'horloge des effets : plein à l'apesanteur (`floating` à 1), nul quand la gravité tire. */
+export function skyMoteSway(mote: SkyMote, clock: number, floating: number): Vec2 {
+  const amplitude = SKY_SWAY * floating;
+  const phase = clock * (0.5 + 0.6 * mote.pace) + mote.sway * TAU;
+  return { x: amplitude * Math.sin(phase), y: amplitude * 0.6 * Math.cos(phase * 0.8) };
+}
+
+/** La longueur de la traînée d'une particule, en pixels : nulle à l'apesanteur, et croissante avec la force de la chute (`lift`, dans un sens ou l'autre). */
+export function skyStreak(mote: SkyMote, lift: number): number {
+  const strength = Math.max(0, (Math.abs(lift) - 0.2) / 0.8);
+  return SKY_STREAK * strength * mote.pace * (0.6 + 0.2 * mote.tier);
+}
+
+/**
+ * Sur chaque bord de l'écran, une colonne de grands chevrons pâles qui défilent dans le sens de la chute (vers le haut quand la gravité est inversée) :
+ * une flèche, pour ceux à qui les particules ne diraient pas assez. `SKY_ARROWS` par colonne, répartis sur la hauteur de la vue.
+ */
+export const SKY_ARROWS = 5;
+export const SKY_ARROW_ALPHA = 0.28;
+
+/** La ligne (de 0 en haut à 1 en bas de la vue) du chevron `index` d'une colonne, quand le champ a dérivé de `drift` hauteurs vers le haut. */
+export function skyArrowRow(index: number, drift: number): number {
+  const row = index / SKY_ARROWS - drift * 0.6;
+  return row - Math.floor(row);
+}
+
+/** L'opacité de la bande `band` du halo du bord haut (0 au bord, `SKY_BANDS - 1` au plus loin), quand le fond est visible à `show`. */
+export function skyGlowAlpha(band: number, show: number): number {
+  const fade = 1 - (band + 0.5) / SKY_BANDS;
+  return SKY_GLOW_ALPHA * show * fade * fade;
+}
+
+/**
+ * Un crochet : une prise ordinaire suspendue sous un plafond, à `CEILING_HOOK_BELOW` mètres de son dessous (voir le générateur). Rend le bord bas
+ * du plafond qui la porte, ou null si la prise n'est pas un crochet. Une prise qui bouge n'en est pas un.
+ */
+export function ceilingOf(anchor: Anchor, obstacles: readonly Obstacle[]): Obstacle | null {
+  if (anchor.kind !== 'normal' || anchor.cable !== undefined || anchor.orbit !== undefined || anchor.rift !== undefined) return null;
+  for (const box of obstacles) {
+    if (box.kind !== undefined || box.broken || box.rotor !== undefined || box.slide !== undefined || box.closer !== undefined || box.rift !== undefined || box.hinge !== undefined) continue;
+    if (Math.abs(box.y0 - anchor.pos.y - CEILING_HOOK_BELOW) < 1e-6 && anchor.pos.x >= box.x0 && anchor.pos.x <= box.x1) return box;
+  }
+  return null;
+}
+
+/* ---- Faille : deux ensembles qui s'écartent ---- */
+
+/** Le vide d'une faille se pince à ses deux bouts sur cette hauteur (mètres) : c'est une fente, pas une bande. */
+export const RIFT_TAPER = 3;
+/** Le bord du vide, ouvert en grand, reste à cette distance (mètres) en deçà de la prise la plus proche du milieu : on ne dessine jamais le vide sous une prise. */
+export const RIFT_EDGE_INSET = 0.3;
+/** Les bords du vide sont déchiquetés : un sommet tous les `RIFT_JAG_STEP` mètres, écarté de `RIFT_JAG` mètres au plus. */
+export const RIFT_JAG_STEP = 0.8;
+export const RIFT_JAG = 0.14;
+
+/** Une faille telle que l'état la montre : sa fente (milieu, bas, haut), la portée du vide ouvert en grand, et où elle en est. */
+export interface RiftView {
+  readonly triggerY: number;
+  /** Abscisse du milieu, entre les deux ensembles, et ordonnées de la base et de la cime de leurs surfaces. */
+  readonly midX: number;
+  readonly bottom: number;
+  readonly top: number;
+  /** Demi-largeur du vide ouvert en grand, en mètres. */
+  readonly reach: number;
+  /** Demi-écart au milieu des prises les plus proches de la fente au repos, et glissement de chaque ensemble. */
+  readonly innerHalf: number;
+  readonly travel: number;
+  /** Ouverture, de 0 (fermée) à 1 (ouverte en grand), et si elle est déclenchée. */
+  readonly progress: number;
+  readonly triggered: boolean;
+}
+
+/** Les failles de la scène (une par ligne de déclenchement), de la plus basse à la plus haute. Aucune sans surface ni prise de faille. */
+export function riftViews(obstacles: readonly Obstacle[], anchors: readonly Anchor[], step: number, tuning: Tuning): RiftView[] {
+  interface Group {
+    walls: Obstacle[];
+    spots: Anchor[];
+  }
+  const groups = new Map<number, Group>();
+  const groupOf = (triggerY: number): Group => {
+    let group = groups.get(triggerY);
+    if (!group) {
+      group = { walls: [], spots: [] };
+      groups.set(triggerY, group);
+    }
+    return group;
+  };
+  for (const box of obstacles) if (box.rift && !box.broken) groupOf(box.rift.triggerY).walls.push(box);
+  for (const anchor of anchors) if (anchor.rift && !anchor.broken) groupOf(anchor.rift.triggerY).spots.push(anchor);
+  const views: RiftView[] = [];
+  for (const [triggerY, group] of groups) {
+    const bottoms = group.walls.map((box) => box.y0);
+    const tops = group.walls.map((box) => box.y1);
+    for (const anchor of group.spots) {
+      bottoms.push(anchor.pos.y - 1);
+      tops.push(anchor.pos.y + 1);
+    }
+    // L'intérieur de chaque ensemble au repos : la prise la plus proche du milieu, sinon la surface.
+    const lefts = group.spots.filter((a) => a.rift!.dx < 0).map((a) => a.rift!.rest.x);
+    const rights = group.spots.filter((a) => a.rift!.dx > 0).map((a) => a.rift!.rest.x);
+    if (lefts.length === 0) for (const box of group.walls) if (box.rift!.dx < 0) lefts.push(box.x1);
+    if (rights.length === 0) for (const box of group.walls) if (box.rift!.dx > 0) rights.push(box.x0);
+    if (bottoms.length === 0 || lefts.length === 0 || rights.length === 0) continue;
+    const innerLeft = Math.max(...lefts);
+    const innerRight = Math.min(...rights);
+    const travel = Math.max(...[...group.walls.map((b) => Math.abs(b.rift!.dx)), ...group.spots.map((a) => Math.abs(a.rift!.dx))]);
+    const innerHalf = Math.max(0, (innerRight - innerLeft) / 2);
+    let progress = 0;
+    let triggered = false;
+    for (const box of group.walls) {
+      progress = Math.max(progress, riftProgress(box.rift!, box.riftStep, step, tuning));
+      triggered ||= box.riftStep !== undefined;
+    }
+    for (const anchor of group.spots) {
+      progress = Math.max(progress, riftProgress(anchor.rift!, anchor.riftStep, step, tuning));
+      triggered ||= anchor.riftStep !== undefined;
+    }
+    views.push({ triggerY, midX: (innerLeft + innerRight) / 2, bottom: Math.min(...bottoms), top: Math.max(...tops), reach: Math.max(0.2, innerHalf + travel - RIFT_EDGE_INSET), innerHalf, travel, progress, triggered });
+  }
+  return views.sort((a, b) => a.bottom - b.bottom);
+}
+
+/** La demi-largeur du vide à la hauteur `y` : nulle fermée, `reach` au plus ouvert en grand, pincée à la base et à la cime. */
+export function riftHalfWidth(view: RiftView, y: number): number {
+  const t = clamp(Math.min((y - view.bottom) / RIFT_TAPER, (view.top - y) / RIFT_TAPER), 0, 1);
+  return view.reach * view.progress * t * t * (3 - 2 * t);
+}
+
+/**
+ * Le bord `side` (-1 gauche, 1 droite) du vide, de la base à la cime : des sommets en mètres du monde, déchiquetés d'un bruit tiré de la hauteur
+ * de déclenchement (la même fente à chaque image). Chaque sommet est à la hauteur d'un multiple de `RIFT_JAG_STEP` depuis la base, la cime comprise.
+ */
+export function riftEdge(view: RiftView, side: -1 | 1): Vec2[] {
+  const seed = Math.round(view.triggerY * 10) * 131 + (side > 0 ? 1 : 0);
+  const count = Math.max(2, Math.ceil((view.top - view.bottom) / RIFT_JAG_STEP) + 1);
+  const points: Vec2[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const y = i === count - 1 ? view.top : view.bottom + i * RIFT_JAG_STEP;
+    const half = riftHalfWidth(view, y);
+    const jag = half > 0 ? (noise(seed + i * 17) - 0.5) * 2 * RIFT_JAG * Math.min(1, half / 0.5) : 0;
+    points.push({ x: view.midX + side * (half + jag), y });
+  }
+  return points;
+}
+
+/* ---- Carrousel : une couronne qui tourne dans sa coque ---- */
+
+/** Un plot de la coque est un carré de ce côté (mètres) : aucune autre dalle du jeu n'a cette taille, c'est ainsi qu'on les reconnaît. */
+export const CROWN_STUD = 0.5;
+
+/** Vrai pour un plot de la coque d'un carrousel : un solide ordinaire, carré de `CROWN_STUD` mètres. */
+export function isCrownStud(box: Obstacle): boolean {
+  if (box.kind !== undefined || box.broken || box.rotor !== undefined || box.slide !== undefined || box.closer !== undefined || box.rift !== undefined || box.hinge !== undefined) return false;
+  return Math.abs(box.x1 - box.x0 - CROWN_STUD) < 1e-6 && Math.abs(box.y1 - box.y0 - CROWN_STUD) < 1e-6;
+}
+
+/** Une couronne : son pivot, son rayon, son sens (le signe de la vitesse : positif, sens trigonométrique) et ses prises, qui tournent ensemble. */
+export interface CarouselView {
+  readonly pivot: Vec2;
+  readonly radius: number;
+  readonly spin: -1 | 1;
+  readonly anchors: readonly Anchor[];
+}
+
+/** Les couronnes de la scène : les prises en orbite d'un même pivot. */
+export function carouselViews(anchors: readonly Anchor[]): CarouselView[] {
+  const groups = new Map<string, { pivot: Vec2; radius: number; spin: -1 | 1; anchors: Anchor[] }>();
+  for (const anchor of anchors) {
+    const orbit = anchor.orbit;
+    if (!orbit || anchor.broken) continue;
+    const key = `${orbit.pivot.x},${orbit.pivot.y}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = { pivot: orbit.pivot, radius: orbit.radius, spin: orbit.spin < 0 ? -1 : 1, anchors: [] };
+      groups.set(key, group);
+    }
+    group.anchors.push(anchor);
+  }
+  return [...groups.values()];
+}
+
+/* ---- Structure dépliante : un panneau à charnière que l'interrupteur commande ---- */
+
+/** Le rayon de l'anneau de la charnière, en mètres : plus gros que le pivot d'une barre tournante. */
+export const HINGE_RING_RADIUS = 0.34;
+
+export interface PanelLook {
+  /** Ouverture, de 0 (fermé, couché sur le vol) à 1 (déplié de l'autre côté de sa charnière). */
+  readonly progress: number;
+  /** La prise qui le commande est tenue, ou son délai court encore. */
+  readonly commanded: boolean;
+  /** Tenue en ce moment : rien ne s'écoule, il est déplié autant que le temps le permet. */
+  readonly held: boolean;
+  /** 1 s'il se déplie, -1 s'il se replie, 0 immobile. */
+  readonly moving: -1 | 0 | 1;
+  /** La part du délai écoulée depuis le lâcher (`switchGauge`) : 0 tenu ou tout juste lâché, 1 quand il se replie. */
+  readonly gauge: number;
+  /** Clignotement de 0 à 1 pendant la dernière seconde du délai, 1 ailleurs. */
+  readonly beat: number;
+}
+
+/** Ce qu'il faut dessiner d'un panneau dépliant à ce pas. */
+export function panelLook(box: Pick<Obstacle, 'id' | 'switchedBy' | 'openUntilStep' | 'hingeProgress'>, state: Pick<SimState, 'step' | 'rope'>, tuning: Tuning): PanelLook {
+  const progress = box.hingeProgress ?? 0;
+  const commanded = box.openUntilStep !== undefined && state.step < box.openUntilStep;
+  const held = box.switchedBy !== undefined && state.rope?.anchorId === box.switchedBy;
+  const moving = commanded ? (progress < 1 ? 1 : 0) : progress > 0 ? -1 : 0;
+  const gauge = switchGauge(box, state.step, tuning, SWITCH_HOLD_SECONDS);
+  const remaining = commanded ? ((box.openUntilStep ?? 0) - state.step) * tuning.stepSeconds : 0;
+  const beat = commanded && !held && remaining <= SWITCH_WARNING_SECONDS ? stepWave(state.step, tuning.stepSeconds, DOOR_BLINK_HZ) : 1;
+  return { progress, commanded, held, moving, gauge, beat };
+}
+
+/**
+ * Le point de l'arc que la charnière balaie, au quotient `u` du chemin (0 : panneau fermé, 1 : déplié) : relatif à la charnière, en pixels de
+ * l'écran (y vers le bas) pour un rayon de `radius` pixels. Le panneau fait un demi-tour par le haut : l'arc passe au-dessus de la charnière.
+ */
+export function hingePoint(hinge: NonNullable<Obstacle['hinge']>, u: number, radius: number): Vec2 {
+  const turns = hinge.closedTurns + (hinge.openTurns - hinge.closedTurns) * u;
+  return { x: radius * Math.cos(turns * TAU), y: -radius * Math.sin(turns * TAU) };
+}
+
+/** Les `segments + 1` points de l'arc de `u0` à `u1` (dans cet ordre), par `hingePoint`. */
+export function hingeArc(hinge: NonNullable<Obstacle['hinge']>, radius: number, segments: number, u0 = 0, u1 = 1): Vec2[] {
+  return Array.from({ length: segments + 1 }, (_, i) => hingePoint(hinge, u0 + ((u1 - u0) * i) / segments, radius));
+}
+
+/* ---- Convoyeur : des plateformes qui vont et viennent ---- */
+
+/** Vrai pour la surface d'une plateforme de convoyeur : un panneau qui glisse que le vérificateur joue à chacune de ses positions. */
+export function isPlatformSlab(box: Obstacle): boolean {
+  return box.slide?.proven === true && !box.broken;
+}
+
+/** Le sens où un panneau qui glisse va à ce pas : -1 vers la gauche, 1 vers la droite. */
+export function slabHeading(slide: Slide, step: number, tuning: Tuning): -1 | 0 | 1 {
+  const delta = slideOffset(slide, step + 1, tuning) - slideOffset(slide, step, tuning);
+  return delta > 0 ? 1 : delta < 0 ? -1 : 0;
+}
+
+/**
+ * La surface de la plateforme dont `anchor` est la prise : un panneau prouvé qui glisse à `CONVEYOR_ANCHOR_BELOW` mètres au-dessus du câble de la
+ * prise, centré sur lui. Null si la prise n'en porte pas (la plateforme du lanceur, ou une prise sur câble ordinaire).
+ */
+export function platformSlab(anchor: Anchor, obstacles: readonly Obstacle[]): Obstacle | null {
+  if (!anchor.cable || anchor.band !== undefined) return null;
+  const centre = (anchor.cable.from.x + anchor.cable.to.x) / 2;
+  for (const box of obstacles) {
+    if (!isPlatformSlab(box) || Math.abs(box.y0 - anchor.cable.from.y - CONVEYOR_ANCHOR_BELOW) > 1e-6) continue;
+    if (Math.abs((box.x0 + box.x1) / 2 - centre) < 1e-6) return box;
+  }
+  return null;
+}
+
+/** Vrai pour la prise d'une plateforme de convoyeur : sur câble, avec sa surface au-dessus, ou le lanceur qui roule sur son câble (aucun autre lanceur ne glisse). */
+export function isConveyorAnchor(anchor: Anchor, obstacles: readonly Obstacle[]): boolean {
+  if (!anchor.cable || anchor.band !== undefined) return false;
+  return anchor.kind === 'lanceur' || platformSlab(anchor, obstacles) !== null;
 }

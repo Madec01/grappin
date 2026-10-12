@@ -20,29 +20,55 @@ import { electricState, switchGauge, type ElectricState } from '../sim/cycles';
 import { fragileGauge, heldKind, inReleaseWindow, isDark, isOff, shadowPoints } from './cues';
 import { alertAlpha, bannerAlpha, boostStreaks, flashAlpha, flashRadius, flicker, floatAlpha, floatRise, pulse, sizzle, type Banner, type Effects, type Flash } from './effects';
 import { formatDecimal } from './format';
-import { neonCircle, neonDiscs, neonFill, neonLine, neonRects, neonStroke, type NeonStrokeStyle } from './neon';
+import { neonCircle, neonDiscs, neonFill, neonLine, neonPolyline, neonRects, neonStroke, type NeonStrokeStyle } from './neon';
 import { LAMP_COUNT, ambientHalo, cityLots, cityStroke, fogSheetAlpha, lampColor, lampOf, multiplierPop, pulsedPalette, rimBoost, speciesGlow, starSparkle, uiGlow, type HaloBoost } from './pulse';
 import { Screens, type OverlayView } from './screens';
 import {
+  HINGE_RING_RADIUS,
   MAGNET_RING_COUNT,
   RAIL_SEGMENTS,
   SKIN,
+  SKY_ALPHAS,
+  SKY_ARROWS,
+  SKY_ARROW_ALPHA,
+  SKY_BANDS,
+  SKY_BAND_HEIGHT,
+  SKY_FIELD,
+  SKY_RADII,
+  SKY_SPEED,
   WHEEL_RIM_RADIUS,
   WHEEL_SPOKES,
   accordionBands,
   arrowWings,
   bandChevronCount,
+  carouselViews,
+  ceilingOf,
   closerLook,
   crackPattern,
   doorLook,
   elasticLook,
+  hingeArc,
+  isConveyorAnchor,
+  isCrownStud,
+  isPlatformSlab,
   lockLook,
   magnetPhase,
   magnetRing,
+  panelLook,
+  platformSlab,
   railArc,
   rectEdgePoint,
   ringPhase,
+  riftEdge,
+  riftViews,
   rotorWidths,
+  skyArrowRow,
+  skyGlowAlpha,
+  skyLook,
+  skyMoteRow,
+  skyMoteSway,
+  skyStreak,
+  slabHeading,
   springTeeth,
   strandOffset,
   strandPhase,
@@ -50,6 +76,7 @@ import {
   wheelSpokes,
   type Crack,
   type DoorLook,
+  type RiftView,
 } from './skins';
 import { bandWidth, cupRadius, cupTips, mixColor, pullRatio, traceCup } from './sling';
 import { COLOR, GlowText, PALETTES, makeText, readSafeInset, starPoints, type Palette } from './style';
@@ -153,6 +180,19 @@ import {
  * jusqu'au blanc, qui ondule quand il est mou, entre deux cercles tiretés (la longueur de repos et la butée). Le passage qui se referme : ses panneaux sont des
  * solides qui glissent, avec un liseré d'avertissement (chevrons, bord qui pulse, jauge de fermeture) et, avant l'entrée, un pointillé sur la ligne qui le
  * déclenche. Tout se lit du pas de simulation, sauf le défilement des anneaux du champ et des tirets, qui suit l'horloge des effets.
+ *
+ * Le terrain avancé du lot 5 B (0.16.0), chaque nouveauté à sa manière (voir `skins.ts` pour ce qui se calcule de l'état). Le plafond retourne la gravité
+ * sans tourner la caméra : pour que le sens de la chute saute aux yeux, des particules de décor tombent dans le sens de la gravité du moment (vers le bas,
+ * puis plus lentement, elles flottent à l'apesanteur, puis montent, avec une traînée qui dit le sens) et un halo s'allume au bord haut de l'écran ; les
+ * plafonds sont des obstacles ordinaires, et le crochet qui pend sous chacun, une prise ordinaire que sa tige et son hameçon rattachent au plafond. La faille :
+ * avant le déclenchement, une fente lumineuse au milieu des deux ensembles, ses chevrons qui pointent vers l'extérieur et le pointillé de la ligne qui la
+ * déclenche ; ensuite un vide qui s'ouvre de la fente vers les bords, pincé à ses deux bouts, aux bords déchiquetés et lumineux, qui suit l'écartement des
+ * prises ; ses surfaces sont de la roche fendue au liseré lumineux du côté du vide. Le carrousel : un moyeu au pivot, trois rayons jusqu'aux prises, une
+ * couronne tiretée et des chevrons qui tournent avec elles, le rayon de la prise tenue allumé ; les plots de sa coque sont des pierres pâles. La structure
+ * dépliante : un panneau ambre à nervures, plus lourd qu'une barre tournante, à la charnière dessinée au pivot, relié par un pointillé à sa prise
+ * interrupteur, qu'une jauge parcourt pendant le délai et qui clignote avant de se replier, et une flèche en arc au-dessus de la charnière dit le sens où il
+ * bascule. Le convoyeur : chaque plateforme est une surface d'acier à chevrons qui disent le sens où elle va, rattachée à sa prise par une tige et à son rail
+ * par des butées ; le lanceur de la dernière roule dans un petit chariot sur son rail.
  *
  * Deux aides du tutoriel se dessinent ici, discrètement. La fenêtre de lâcher
  * (`inReleaseWindow`) : tant que lâcher serait parfait, la corde et le halo du
@@ -735,6 +775,103 @@ const CLOSER_GATE_GAP = 6;
 const CLOSER_GATE_WIDTH = 1.5;
 const CLOSER_GATE_ALPHA = 0.4;
 
+/**
+ * Le terrain avancé du lot 5 B (0.16.0). Plafond : les particules du fond (traînée d'une largeur de `SKY_STREAK_WIDTH`), le liseré du bord haut ;
+ * le crochet (tige fine, platine au plafond, hameçon qui berce la prise). Faille : la fente (cœur de `RIFT_SEAM_WIDTH`, chevrons tous les
+ * `RIFT_CHEVRON_SPACING` mètres), le pointillé de déclenchement, les bords du vide, les fêlures et le liseré de la roche. Carrousel : la couronne
+ * tiretée, les rayons, le moyeu, les chevrons du sens, les plots. Panneau dépliant : l'épaisseur en plus, les nervures, la jauge, la charnière, l'arc
+ * du sens. Convoyeur : les chevrons de la surface, le rail et ses butées, la tige, le chariot du lanceur.
+ */
+const SKY_STREAK_WIDTH = 1.6;
+const SKY_LINE_WIDTH = 2;
+const SKY_LINE_ALPHA = 0.8;
+const SKY_ARROW_MARGIN = 18;
+const SKY_ARROW_HALF = 11;
+const SKY_ARROW_DEPTH = 6;
+const SKY_ARROW_FADE = 0.3;
+const HOOK_WIDTH = 1.5;
+const HOOK_STEM_ALPHA = 0.4;
+const HOOK_MOUNT_HALF = 7;
+const HOOK_GAP = 3;
+const HOOK_BARB = 5;
+
+const RIFT_SEAM_WIDTH = 2;
+const RIFT_SEAM_HZ = 0.8;
+const RIFT_SEAM_CAP = 8;
+const RIFT_CHEVRON_SPACING = 2.4;
+const RIFT_CHEVRON_GAP = 12;
+const RIFT_CHEVRON_SIZE = 5;
+const RIFT_CHEVRON_ALPHA = 0.45;
+const RIFT_GATE_DASH = 6;
+const RIFT_GATE_GAP = 6;
+const RIFT_GATE_WIDTH = 1.5;
+const RIFT_GATE_ALPHA = 0.45;
+const RIFT_EDGE_WIDTH = 2;
+const RIFT_EDGE_HALO = 1.1;
+const RIFT_VOID_ALPHA = 0.94;
+const RIFT_SEAM_FADE = 3;
+const RIFT_FRACTURE_WIDTH = 1.25;
+const RIFT_FRACTURE_ALPHA = 0.8;
+const RIFT_WALL_TINT_ALPHA = 0.75;
+const RIFT_LISERE_WIDTH = 2.5;
+const RIFT_LISERE_HALO = 1.2;
+const RIFT_LISERE_INSET = 1;
+
+const CROWN_DASHES = 36;
+const CROWN_DASH_FILL = 0.5;
+const CROWN_WIDTH = 1.5;
+const CROWN_ALPHA = 0.5;
+const CROWN_SPOKE_WIDTH = 1.5;
+const CROWN_SPOKE_ALPHA = 0.55;
+const CROWN_SPOKE_HELD_WIDTH = 3;
+const CROWN_SPOKE_HELD_GLOW = 1.5;
+const CROWN_HUB_RADIUS = 0.3;
+const CROWN_HUB_MIN = 5;
+const CROWN_HUB_RING_GAP = 4;
+const CROWN_HUB_WIDTH = 2;
+const CROWN_CHEVRON_SIZE = 6;
+const CROWN_CHEVRON_WIDTH = 2;
+const CROWN_CHEVRON_ALPHA = 0.7;
+const CROWN_SPOKE_GAP = 3;
+const STUD_INNER_INSET = 4;
+const STUD_INNER_MIN = 12;
+const STUD_INNER_ALPHA = 0.45;
+
+const PANEL_EDGE_EXTRA = 3;
+const PANEL_MIN_THICKNESS = 12;
+const PANEL_RIB_SPACING = 14;
+const PANEL_RIB_WIDTH = 1.5;
+const PANEL_RIB_ALPHA = 0.5;
+const PANEL_GAUGE_WIDTH = 4;
+const PANEL_GAUGE_ALPHA = 0.9;
+const PANEL_HELD_GLOW = 1.6;
+const PANEL_ARC_RADIUS = 1.3;
+const PANEL_ARC_SEGMENTS = 18;
+const PANEL_ARC_FAINT_ALPHA = 0.28;
+const PANEL_ARC_WIDTH = 2.5;
+const PANEL_ARC_HEAD = 8;
+const PANEL_HINGE_WIDTH = 2.5;
+const PANEL_HINGE_DOT = 3;
+const PANEL_HINGE_MIN = 7;
+
+const BELT_CHEVRON_SPACING = 18;
+const BELT_CHEVRON_WIDTH = 2;
+const BELT_CHEVRON_ALPHA = 0.85;
+const BELT_CHEVRON_DEPTH = 3;
+const BELT_CHEVRON_MAX_HALF = 4;
+const CONVEYOR_RAIL_DASH = 6;
+const CONVEYOR_RAIL_GAP = 5;
+const CONVEYOR_RAIL_WIDTH = 1.5;
+const CONVEYOR_RAIL_ALPHA = 0.7;
+const CONVEYOR_RAIL_GLOW_WIDTH = 7;
+const CONVEYOR_RAIL_GLOW_ALPHA = 0.1;
+const CONVEYOR_STOP_HALF = 8;
+const CONVEYOR_STOP_WIDTH = 2;
+const CONVEYOR_ROD_WIDTH = 2;
+const CARRIAGE_HALF = 0.55;
+const CARRIAGE_WIDTH = 3;
+const CARRIAGE_WHEEL = 2.5;
+
 const DEATH_MESSAGES: Record<DeathCause, string> = {
   fog: "La brume t'a rattrapé",
   fall: 'Tombé dans le vide',
@@ -801,6 +938,12 @@ interface ObstacleLots {
   readonly rotor: ScreenBox[];
   /** Les panneaux de passage qui se referme : déjà rangés parmi les solides, ils reçoivent en plus leur liseré d'avertissement. */
   readonly closer: ScreenBox[];
+  /** Les surfaces d'une faille : déjà rangées parmi les solides, elles reçoivent en plus leurs fêlures et leur liseré. */
+  readonly rift: ScreenBox[];
+  /** Les panneaux dépliants (hors des tournants : ils ont leur habillage), les surfaces des plateformes de convoyeur et les plots de la coque d'un carrousel (hors des solides). */
+  readonly panel: ScreenBox[];
+  readonly platform: ScreenBox[];
+  readonly stud: ScreenBox[];
 }
 
 /** Un anneau de précision visible : son centre et son rayon, en pixels. */
@@ -932,10 +1075,25 @@ function dashedLine(g: Graphics, from: Vec2, to: Vec2, dash: number, gap: number
   }
 }
 
+/** Le point du cercle de rayon `radius` autour de `centre` qui regarde `toward` : là où un trait qui vient de `toward` touche le cercle. Le centre lui-même s'ils sont confondus. */
+function ringEdgePoint(centre: Vec2, toward: Vec2, radius: number): Vec2 {
+  const length = Math.hypot(toward.x - centre.x, toward.y - centre.y);
+  if (length < 1e-6) return centre;
+  return { x: centre.x + ((toward.x - centre.x) / length) * radius, y: centre.y + ((toward.y - centre.y) / length) * radius };
+}
+
 /** Ajoute au tracé un cercle de rayon `radius` autour de (`x`, `y`) fait de `dashes` tirets, chacun couvrant la part `fill` de son arc. */
 function dashedCircle(g: Graphics, x: number, y: number, radius: number, dashes: number, fill: number): void {
   for (let dash = 0; dash < dashes; dash += 1) {
     const start = (dash / dashes) * TAU;
+    g.moveTo(x + radius * Math.cos(start), y + radius * Math.sin(start)).arc(x, y, radius, start, start + (fill / dashes) * TAU);
+  }
+}
+
+/** Comme `dashedCircle`, tourné de `rotation` radians (repère de l'écran) : les tirets d'une couronne qui tourne. */
+function dashedRing(g: Graphics, x: number, y: number, radius: number, dashes: number, fill: number, rotation: number): void {
+  for (let dash = 0; dash < dashes; dash += 1) {
+    const start = rotation + (dash / dashes) * TAU;
     g.moveTo(x + radius * Math.cos(start), y + radius * Math.sin(start)).arc(x, y, radius, start, start + (fill / dashes) * TAU);
   }
 }
@@ -952,7 +1110,11 @@ export class Renderer {
   private readonly altitudeLines = new Graphics();
   private readonly altitudeLabelLayer = new Container();
   private readonly windStreaks = new Graphics();
+  /** Le plafond : le halo du bord haut et les particules qui tombent dans le sens de la gravité. */
+  private readonly sky = new Graphics();
   private readonly zoneField = new Graphics();
+  /** La faille : sa fente, puis le vide qui s'ouvre. */
+  private readonly riftLayer = new Graphics();
   private readonly finishLine = new Graphics();
   private readonly rings = new Graphics();
   private readonly obstacles = new Graphics();
@@ -1030,7 +1192,7 @@ export class Renderer {
 
   /** Réservoirs des obstacles et des anneaux visibles, vidés et remplis à chaque image : pas d'allocation par image une fois chauffés. */
   private readonly boxPool: ScreenBox[] = [];
-  private readonly obstacleLots: ObstacleLots = { solid: [], bounce: [], smash: [], door: [], rotor: [], closer: [] };
+  private readonly obstacleLots: ObstacleLots = { solid: [], bounce: [], smash: [], door: [], rotor: [], closer: [], rift: [], panel: [], platform: [], stud: [] };
   /** Les prises du lot 5 de l'image, vidées et remplies à chaque image. */
   private readonly holdLots: Record<HoldKind, HoldLot> = {
     aimant: { idle: [], on: [] },
@@ -1041,7 +1203,12 @@ export class Renderer {
   private readonly ringPool: RingSpot[] = [];
   private readonly ringLots: Record<'libre' | 'traverse' | 'centre' | 'prise', RingSpot[]> = { libre: [], traverse: [], centre: [], prise: [] };
   /** Motif de fissures de chaque paroi cassable rencontrée, par numéro d'obstacle. */
-  private readonly crackCache = new Map<number, Crack[]>();
+  private readonly crackCache = new Map<number, { readonly length: number; readonly cracks: Crack[] }>();
+  /** Plafond : la dérive du fond (hauteurs de vue, positive vers le haut), intégrée de la gravité à chaque image, et l'instant de l'horloge des effets où elle l'a été. */
+  private skyDrift = 0;
+  private skyClock = 0;
+  /** Le plafond qui porte chaque prise rencontrée, ou null si la prise n'est pas un crochet : par prise elle-même (les numéros se réutilisent d'une partie à l'autre), il s'oublie avec elle. */
+  private readonly hookCache = new WeakMap<Anchor, Obstacle | null>();
   /** Ce que le rendu retient de chaque zone (sens, dimensions, traînées), par zone : il s'oublie avec elle. Et les objets de travail de leur dessin, réutilisés d'une image à l'autre. */
   private readonly zoneKits = new WeakMap<Zone, ZoneKit>();
   private readonly zonePaint: ZonePaint = {
@@ -1093,7 +1260,9 @@ export class Renderer {
       this.altitudeLines,
       this.altitudeLabelLayer,
       this.windStreaks,
+      this.sky,
       this.zoneField,
+      this.riftLayer,
       this.finishLine,
       this.finishLabel,
       this.rings,
@@ -1182,7 +1351,9 @@ export class Renderer {
     this.drawCityEdges(camera, view);
     this.drawAltitude(state, camera, view);
     this.drawWind(effects, state.env.wind.x, view);
+    this.drawSky(state, view, effects);
     this.drawZones(state, camera, view, effects);
+    this.drawRift(state, camera, view, tuning, effects);
     this.drawFinish(state, camera, view);
     this.drawRings(state, camera, view);
     this.drawObstacles(state, camera, view, tuning);
@@ -1404,6 +1575,130 @@ export class Renderer {
       },
       { color: this.palette.pale, halo: this.palette.pale, width: WIND_WIDTH, alpha: WIND_ALPHA, strength: 0.6, spread: 0.7, cap: 'round' },
     );
+  }
+
+  /**
+   * Le plafond, vu du fond : la gravité se retourne mais la caméra ne tourne pas, alors le décor dit le nouveau sens de la chute. Des particules
+   * (les mêmes à chaque partie) dérivent dans le sens de la gravité du moment : vers le bas au début de l'inversion, de plus en plus lentement, puis
+   * elles flottent sur place à l'apesanteur, puis montent de plus en plus vite ; leur traînée, tracée derrière elles, dit le sens même sur une image
+   * fixe. Et un halo s'allume au bord haut de l'écran : le haut devient le bas. Tout s'efface quand la gravité redevient ordinaire. La dérive est
+   * l'intégrale de la gravité sur l'horloge des effets : un mouvement du décor, jamais un état du jeu.
+   */
+  private drawSky(state: SimState, view: ViewBounds, effects: Effects): void {
+    const g = this.sky.clear();
+    const elapsed = clamp(effects.clock - this.skyClock, 0, 0.1);
+    this.skyClock = effects.clock;
+    const look = skyLook(state.env.gravityDir.y, state.env.inverted === true);
+    if (look.show <= 0) return;
+    this.skyDrift += look.lift * elapsed * SKY_SPEED;
+    const width = view.right - view.left;
+    const height = view.bottom - view.top;
+    for (let band = 0; band < SKY_BANDS; band += 1) {
+      g.rect(view.left, view.top + band * SKY_BAND_HEIGHT, width, SKY_BAND_HEIGHT).fill({ color: this.palette.halo, alpha: skyGlowAlpha(band, look.show) });
+    }
+    neonLine(g, { x: view.left, y: view.top + 1 }, { x: view.right, y: view.top + 1 }, { color: this.palette.tube, halo: this.palette.halo, width: SKY_LINE_WIDTH, alpha: SKY_LINE_ALPHA * look.show, strength: look.show * this.halo.strength, spread: this.halo.spread });
+    // Les particules, rang par rang (trois tailles, trois opacités) : d'abord les disques, puis les traînées, de l'autre côté du mouvement.
+    for (let tier = 0; tier < SKY_RADII.length; tier += 1) {
+      let drawn = false;
+      for (const mote of SKY_FIELD) {
+        if (mote.tier !== tier) continue;
+        const sway = skyMoteSway(mote, effects.clock, look.float);
+        g.circle(view.left + mote.x * width + sway.x, view.top + skyMoteRow(mote, this.skyDrift) * height + sway.y, SKY_RADII[tier]!);
+        drawn = true;
+      }
+      if (drawn) g.fill({ color: this.palette.pale, alpha: SKY_ALPHAS[tier]! * look.show });
+    }
+    // En montant (`lift` positif), la traînée reste en dessous de la particule ; en tombant, au-dessus.
+    const tail = look.lift > 0 ? 1 : -1;
+    let streaked = false;
+    for (const mote of SKY_FIELD) {
+      const length = skyStreak(mote, look.lift);
+      if (length < 1) continue;
+      const sway = skyMoteSway(mote, effects.clock, look.float);
+      const x = view.left + mote.x * width + sway.x;
+      const y = view.top + skyMoteRow(mote, this.skyDrift) * height + sway.y;
+      g.moveTo(x, y).lineTo(x, y + tail * length);
+      streaked = true;
+    }
+    if (streaked) g.stroke({ width: SKY_STREAK_WIDTH, color: this.palette.pale, alpha: 0.65 * look.show, cap: 'round' });
+    // Les chevrons du bord : une colonne de chaque côté, qui pointe et défile dans le sens de la chute ; ils s'effacent quand la gravité s'amollit.
+    const pull = Math.abs(look.lift);
+    if (pull < SKY_ARROW_FADE) return;
+    const way = look.lift > 0 ? -1 : 1;
+    for (const x of [view.left + SKY_ARROW_MARGIN, view.right - SKY_ARROW_MARGIN]) {
+      for (let k = 0; k < SKY_ARROWS; k += 1) {
+        const y = view.top + skyArrowRow(k, this.skyDrift) * height;
+        g.moveTo(x - SKY_ARROW_HALF, y - way * SKY_ARROW_DEPTH).lineTo(x, y + way * SKY_ARROW_DEPTH).lineTo(x + SKY_ARROW_HALF, y - way * SKY_ARROW_DEPTH);
+      }
+    }
+    g.stroke({ width: 2, color: this.palette.pale, alpha: SKY_ARROW_ALPHA * look.show * clamp((pull - SKY_ARROW_FADE) / (1 - SKY_ARROW_FADE), 0, 1), cap: 'round', join: 'round' });
+  }
+
+  /**
+   * La faille. Avant son déclenchement : une fente lumineuse verticale au milieu des deux ensembles, de la base à la cime de leurs surfaces, dont
+   * une lueur plus vive monte le long du trait, ses chevrons pâles qui pointent vers l'extérieur (c'est de là que les deux côtés vont s'écarter),
+   * et un pointillé en travers à la hauteur qui la déclenche. Ensuite un vide qui s'ouvre de la fente vers les bords, au rythme de l'écartement des
+   * prises (`riftViews`) : pincé à ses deux bouts, aux bords déchiquetés et lumineux, d'un noir plus profond que le fond, sous les prises et les
+   * surfaces, qui s'écartent avec lui. La fente s'efface à mesure qu'il s'élargit.
+   */
+  private drawRift(state: SimState, camera: Camera, view: ViewBounds, tuning: Tuning, effects: Effects): void {
+    const g = this.riftLayer.clear();
+    const scale = camera.scale;
+    for (const rift of riftViews(state.obstacles, state.anchors, state.step, tuning)) {
+      const base = camera.worldToScreen({ x: rift.midX, y: rift.bottom });
+      const crest = camera.worldToScreen({ x: rift.midX, y: rift.top });
+      const reach = (rift.innerHalf + rift.travel) * scale + CULL_MARGIN;
+      if (base.y < view.top - CULL_MARGIN || crest.y > view.bottom + CULL_MARGIN || base.x + reach < view.left || base.x - reach > view.right) continue;
+      const seam = 1 - clamp(rift.progress * RIFT_SEAM_FADE, 0, 1);
+      if (seam > 0) this.paintRiftSeam(g, rift, base, crest, seam, scale, effects.clock, camera);
+      if (rift.progress > 0) this.paintRiftVoid(g, rift, camera);
+    }
+  }
+
+  /** La fente d'une faille de `base` à `crest` à l'écran, à l'opacité `seam` ; les chevrons et le pointillé de déclenchement tant qu'elle n'est pas déclenchée. */
+  private paintRiftSeam(g: Graphics, rift: RiftView, base: Vec2, crest: Vec2, seam: number, scale: number, clock: number, camera: Camera): void {
+    const glow = pulse(clock, RIFT_SEAM_HZ, 0.55);
+    const tube = { color: SKIN.riftCore, halo: COLOR.rift, cap: 'round' as const };
+    neonLine(g, base, crest, { ...tube, width: RIFT_SEAM_WIDTH, alpha: 0.6 * seam, strength: (0.7 + 0.7 * glow) * seam * this.species });
+    // Une lueur plus vive qui monte le long de la fente : le sens d'où elle va s'ouvrir, de la base à la cime.
+    neonStroke(g, (target) => dashedLine(target, base, crest, 18, 46, clock * 70), { ...tube, width: RIFT_SEAM_WIDTH + 1, alpha: seam, strength: 0 });
+    neonStroke(
+      g,
+      (target) => {
+        for (const end of [base, crest]) target.moveTo(end.x - RIFT_SEAM_CAP, end.y).lineTo(end.x + RIFT_SEAM_CAP, end.y);
+      },
+      { ...tube, width: RIFT_SEAM_WIDTH, alpha: seam, strength: 0 },
+    );
+    if (rift.triggered) return;
+    neonStroke(
+      g,
+      (target) => {
+        for (let y = rift.bottom + RIFT_CHEVRON_SPACING / 2; y < rift.top - 0.5; y += RIFT_CHEVRON_SPACING) {
+          const at = camera.worldToScreen({ x: rift.midX, y });
+          for (const side of [-1, 1]) {
+            const x = at.x + side * RIFT_CHEVRON_GAP;
+            target.moveTo(x - (side * RIFT_CHEVRON_SIZE) / 2, at.y - RIFT_CHEVRON_SIZE).lineTo(x + (side * RIFT_CHEVRON_SIZE) / 2, at.y).lineTo(x - (side * RIFT_CHEVRON_SIZE) / 2, at.y + RIFT_CHEVRON_SIZE);
+          }
+        }
+      },
+      { ...tube, width: 1.5, alpha: RIFT_CHEVRON_ALPHA, strength: 0, join: 'round' },
+    );
+    const gate = camera.worldToScreen({ x: rift.midX, y: rift.triggerY });
+    const half = (rift.innerHalf + rift.travel) * scale;
+    dashedLine(g, { x: gate.x - half, y: gate.y }, { x: gate.x + half, y: gate.y }, RIFT_GATE_DASH, RIFT_GATE_GAP);
+    g.stroke({ width: RIFT_GATE_WIDTH, color: COLOR.rift, alpha: RIFT_GATE_ALPHA });
+  }
+
+  /** Le vide d'une faille ouverte à `rift.progress` : la lentille noire entre ses deux bords déchiquetés, plus profonde au milieu, et la lumière de chaque bord. */
+  private paintRiftVoid(g: Graphics, rift: RiftView, camera: Camera): void {
+    const left = riftEdge(rift, -1).map((point) => camera.worldToScreen(point));
+    const right = riftEdge(rift, 1).map((point) => camera.worldToScreen(point));
+    const mid = left.map((point, i) => ({ x: (point.x + right[i]!.x) / 2, y: point.y }));
+    const polygon = (inner: number): number[] => [...left.map((p, i) => [mid[i]!.x + (p.x - mid[i]!.x) * inner, p.y]), ...right.map((p, i) => [mid[i]!.x + (p.x - mid[i]!.x) * inner, p.y]).reverse()].flat();
+    const open = clamp(rift.progress * 4, 0, 1);
+    g.poly(polygon(1)).fill({ color: SKIN.riftVoid, alpha: RIFT_VOID_ALPHA * open });
+    g.poly(polygon(0.55)).fill({ color: 0x000000, alpha: 0.5 * open });
+    for (const edge of [left, right]) neonPolyline(g, edge, { color: SKIN.riftCore, halo: COLOR.rift, width: RIFT_EDGE_WIDTH, alpha: open, strength: RIFT_EDGE_HALO * this.species * open, cap: 'round', join: 'round' });
   }
 
   /**
@@ -1782,6 +2077,10 @@ export class Renderer {
     lots.door.length = 0;
     lots.rotor.length = 0;
     lots.closer.length = 0;
+    lots.rift.length = 0;
+    lots.panel.length = 0;
+    lots.platform.length = 0;
+    lots.stud.length = 0;
     let slot = 0;
     for (const box of state.obstacles) {
       if (box.broken) continue;
@@ -1795,8 +2094,12 @@ export class Renderer {
       const item = this.screenBox(slot, box, topLeft.x, topLeft.y, width, height);
       slot += 1;
       const kind = obstacleKind(box);
-      (kind === 'rebond' ? lots.bounce : kind === 'cassable' ? lots.smash : kind === 'porte' ? lots.door : kind === 'tournant' ? lots.rotor : lots.solid).push(item);
+      // Le panneau dépliant est un tournant à charnière, la surface d'une plateforme de convoyeur un panneau qui glisse, un plot de coque un solide carré : chacun son habillage.
+      const lot = box.hinge ? lots.panel : isPlatformSlab(box) ? lots.platform : kind === 'rebond' ? lots.bounce : kind === 'cassable' ? lots.smash : kind === 'porte' ? lots.door : kind === 'tournant' ? lots.rotor : isCrownStud(box) ? lots.stud : lots.solid;
+      lot.push(item);
       if (box.closer) lots.closer.push(item);
+      // Les surfaces d'une faille sont des solides ordinaires, auxquels on ajoute les fêlures et le liseré.
+      if (box.rift) lots.rift.push(item);
     }
     if (slot === 0) return;
     this.paintSolids(g, lots.solid);
@@ -1805,6 +2108,10 @@ export class Renderer {
     this.paintDoors(g, lots.door, state, tuning);
     this.paintRotors(g, lots.rotor, camera, state, tuning);
     this.paintClosers(g, lots.closer, camera, state, tuning);
+    this.paintRiftWalls(g, lots.rift);
+    this.paintStuds(g, lots.stud);
+    this.paintPlatforms(g, lots.platform, state, tuning);
+    this.paintPanels(g, lots.panel, camera, state, tuning);
   }
 
   /** Le `slot`-ième obstacle visible de l'image, tiré du réservoir (il grandit seulement si plus d'obstacles sont à l'écran en même temps). */
@@ -1912,12 +2219,13 @@ export class Renderer {
 
   /** Le motif de fissures de la paroi : calculé une fois par paroi (il ne dépend que de son numéro et de sa longueur). */
   private cracksOf(box: Obstacle): Crack[] {
-    let cracks = this.crackCache.get(box.id);
-    if (!cracks) {
-      if (this.crackCache.size >= CRACK_CACHE_MAX) this.crackCache.clear();
-      cracks = crackPattern(box.id, Math.max(box.x1 - box.x0, box.y1 - box.y0));
-      this.crackCache.set(box.id, cracks);
-    }
+    // Les numéros d'obstacle se réutilisent d'une partie à l'autre : le motif retenu doit être pour cette longueur (une surface de faille est bien plus longue qu'une paroi).
+    const length = Math.max(box.x1 - box.x0, box.y1 - box.y0);
+    const known = this.crackCache.get(box.id);
+    if (known && known.length === length) return known.cracks;
+    if (this.crackCache.size >= CRACK_CACHE_MAX) this.crackCache.clear();
+    const cracks = crackPattern(box.id, length);
+    this.crackCache.set(box.id, { length, cracks });
     return cracks;
   }
 
@@ -2099,6 +2407,164 @@ export class Renderer {
         dashedLine(g, { x: edgeX, y: gate }, { x: right, y: gate }, CLOSER_GATE_DASH, CLOSER_GATE_GAP);
         g.stroke({ width: CLOSER_GATE_WIDTH, color: SKIN.closerPale, alpha: CLOSER_GATE_ALPHA });
       }
+    }
+  }
+
+  /**
+   * Les surfaces d'une faille, par-dessus leur masse de solide : de la roche fendue. Des fêlures pâles qui la traversent d'un bord à l'autre (le motif de
+   * chaque paroi vient de son numéro, comme pour une paroi cassable) et, du côté du vide, un liseré lumineux : c'est de là que la roche s'écarte.
+   * Elles se dessinent là où elles sont (`obstacleAt`), donc elles glissent avec leur ensemble ; le contour reste celui d'un solide, rouge-magenta.
+   */
+  private paintRiftWalls(g: Graphics, boxes: readonly ScreenBox[]): void {
+    if (boxes.length === 0) return;
+    for (const box of boxes) g.rect(box.x + RIFT_LISERE_INSET, box.y + RIFT_LISERE_INSET, box.width - 2 * RIFT_LISERE_INSET, box.height - 2 * RIFT_LISERE_INSET);
+    g.fill({ color: SKIN.riftBody, alpha: RIFT_WALL_TINT_ALPHA });
+    for (const box of boxes) {
+      for (const crack of this.cracksOf(box.source)) this.traceCrack(g, box, crack);
+    }
+    g.stroke({ width: RIFT_FRACTURE_WIDTH, color: SKIN.riftStone, alpha: RIFT_FRACTURE_ALPHA, cap: 'round', join: 'round' });
+    // Le liseré : le bord qui regarde le vide, c'est-à-dire le bord intérieur de l'ensemble (la gauche d'une paroi qui s'écarte vers la droite).
+    neonStroke(
+      g,
+      (target) => {
+        for (const box of boxes) {
+          const x = (box.source.rift?.dx ?? 0) > 0 ? box.x + RIFT_LISERE_INSET : box.x + box.width - RIFT_LISERE_INSET;
+          target.moveTo(x, box.y).lineTo(x, box.y + box.height);
+        }
+      },
+      { color: SKIN.riftCore, halo: COLOR.rift, width: RIFT_LISERE_WIDTH, strength: RIFT_LISERE_HALO * this.species, cap: 'round' },
+    );
+  }
+
+  /** Les plots de la coque d'un carrousel : des pierres pâles, une masse chaude au contour sable, et un second contour en retrait quand ils sont assez gros pour l'avoir. */
+  private paintStuds(g: Graphics, boxes: readonly ScreenBox[]): void {
+    if (boxes.length === 0) return;
+    const tube = { color: COLOR.crown, halo: COLOR.crown, width: OBSTACLE_EDGE_WIDTH, strength: this.rim };
+    neonRects(g, boxes, { ...tube, pass: 'halo' });
+    for (const box of boxes) g.rect(box.x, box.y, box.width, box.height);
+    g.fill(SKIN.crownBody);
+    neonRects(g, boxes, { ...tube, pass: 'core' });
+    let inner = false;
+    for (const box of boxes) {
+      if (Math.min(box.width, box.height) < STUD_INNER_MIN) continue;
+      g.rect(box.x + STUD_INNER_INSET, box.y + STUD_INNER_INSET, box.width - 2 * STUD_INNER_INSET, box.height - 2 * STUD_INNER_INSET);
+      inner = true;
+    }
+    if (inner) g.stroke({ width: 1, color: SKIN.crownCore, alpha: STUD_INNER_ALPHA });
+  }
+
+  /**
+   * Les surfaces des plateformes d'un convoyeur : une masse d'acier au contour bleu froid, et sur elle des chevrons qui pointent le sens où la
+   * plateforme va à ce pas (`slabHeading`), comme les chevrons d'une bande d'accordéon : une bande transporteuse, même sur une image fixe.
+   */
+  private paintPlatforms(g: Graphics, boxes: readonly ScreenBox[], state: SimState, tuning: Tuning): void {
+    if (boxes.length === 0) return;
+    const tube = { color: COLOR.conveyor, halo: COLOR.conveyor, width: OBSTACLE_EDGE_WIDTH, strength: this.rim };
+    neonRects(g, boxes, { ...tube, pass: 'halo' });
+    for (const box of boxes) g.rect(box.x, box.y, box.width, box.height);
+    g.fill(SKIN.conveyorBody);
+    neonRects(g, boxes, { ...tube, pass: 'core' });
+    for (const heading of [-1, 1] as const) {
+      const going = boxes.filter((box) => box.source.slide !== undefined && slabHeading(box.source.slide, state.step, tuning) === heading);
+      if (going.length === 0) continue;
+      neonStroke(
+        g,
+        (target) => {
+          for (const box of going) {
+            const count = Math.max(1, Math.floor(box.width / BELT_CHEVRON_SPACING));
+            const half = Math.min(BELT_CHEVRON_MAX_HALF, box.height / 2 - 2);
+            if (half <= 0) continue;
+            const cy = box.y + box.height / 2;
+            for (let k = 0; k < count; k += 1) {
+              const cx = box.x + ((k + 0.5) * box.width) / count;
+              target.moveTo(cx - heading * BELT_CHEVRON_DEPTH, cy - half).lineTo(cx + heading * BELT_CHEVRON_DEPTH, cy).lineTo(cx - heading * BELT_CHEVRON_DEPTH, cy + half);
+            }
+          }
+        },
+        { color: SKIN.conveyorCore, halo: COLOR.conveyor, width: BELT_CHEVRON_WIDTH, alpha: BELT_CHEVRON_ALPHA, strength: 0, cap: 'round', join: 'round' },
+      );
+    }
+  }
+
+  /**
+   * Les panneaux d'une structure dépliante : une barre ambre plus lourde qu'une barre tournante (un contour plus épais, la masse plus étroite), des nervures
+   * en travers, là où elle est à ce pas (`rotorEnds`, qui lit son ouverture). La charnière est dessinée à son pivot : un anneau, son point. Une jauge
+   * parcourt la barre depuis la charnière pendant le délai qui suit le lâcher (`switchGauge`), et le panneau clignote la dernière seconde avant de se replier ; tenu,
+   * il s'allume. Pendant qu'il bascule, une flèche en arc au-dessus de la charnière dit le sens (un demi-tour par le haut), et un arc pâle, toujours là, dit
+   * par où il passera.
+   */
+  private paintPanels(g: Graphics, boxes: readonly ScreenBox[], camera: Camera, state: SimState, tuning: Tuning): void {
+    if (boxes.length === 0) return;
+    const scale = camera.scale;
+    const widths = rotorWidths(scale, OBSTACLE_EDGE_WIDTH + PANEL_EDGE_EXTRA, PANEL_MIN_THICKNESS);
+    interface Leaf {
+      readonly a: Vec2;
+      readonly b: Vec2;
+      readonly source: Obstacle;
+      readonly look: ReturnType<typeof panelLook>;
+    }
+    const leaves: Leaf[] = [];
+    for (const box of boxes) {
+      const ends = rotorEnds(box.source, state.step, tuning);
+      if (ends && box.source.hinge) leaves.push({ a: camera.worldToScreen(ends.a), b: camera.worldToScreen(ends.b), source: box.source, look: panelLook(box.source, state, tuning) });
+    }
+    const bar = (leaf: Leaf) => (target: Graphics): void => {
+      target.moveTo(leaf.a.x, leaf.a.y).lineTo(leaf.b.x, leaf.b.y);
+    };
+    const ring = Math.max(PANEL_HINGE_MIN, HINGE_RING_RADIUS * scale);
+    // Les halos d'abord, les corps ensuite : un halo ne passe jamais sur la barre d'à côté.
+    for (const leaf of leaves) {
+      const lit = leaf.look.held || leaf.look.moving !== 0;
+      neonStroke(g, bar(leaf), { color: COLOR.switch, halo: COLOR.switch, width: widths.outer, alpha: leaf.look.beat, strength: this.rim * (lit ? PANEL_HELD_GLOW : 1), cap: 'round', pass: 'halo' });
+    }
+    for (const leaf of leaves) {
+      const lit = leaf.look.held || leaf.look.moving !== 0;
+      const color = lit ? SKIN.switchHot : COLOR.switch;
+      neonStroke(g, bar(leaf), { color, halo: COLOR.switch, width: widths.outer, alpha: leaf.look.beat, cap: 'round', pass: 'core' });
+      bar(leaf)(g);
+      g.stroke({ width: widths.body, color: SKIN.panelBody, cap: 'round' });
+      // Les nervures, en travers de la barre.
+      const length = Math.hypot(leaf.b.x - leaf.a.x, leaf.b.y - leaf.a.y);
+      if (length > 0) {
+        const ux = (leaf.b.x - leaf.a.x) / length;
+        const uy = (leaf.b.y - leaf.a.y) / length;
+        const reach = widths.body / 2;
+        const count = Math.max(1, Math.round(length / PANEL_RIB_SPACING));
+        for (let k = 0; k < count; k += 1) {
+          const along = ring + ((k + 0.5) * (length - ring)) / count;
+          const cx = leaf.a.x + ux * along;
+          const cy = leaf.a.y + uy * along;
+          g.moveTo(cx - uy * reach, cy + ux * reach).lineTo(cx + uy * reach, cy - ux * reach);
+        }
+        g.stroke({ width: PANEL_RIB_WIDTH, color: SKIN.lockPale, alpha: PANEL_RIB_ALPHA });
+        // La jauge du délai : la part déjà écoulée, depuis la charnière.
+        const filled = leaf.look.commanded && !leaf.look.held ? leaf.look.gauge : 0;
+        if (filled > 0) neonLine(g, leaf.a, { x: leaf.a.x + (leaf.b.x - leaf.a.x) * filled, y: leaf.a.y + (leaf.b.y - leaf.a.y) * filled }, { color: COLOR.white, halo: COLOR.switch, width: PANEL_GAUGE_WIDTH, alpha: PANEL_GAUGE_ALPHA * leaf.look.beat, strength: 0.8 * this.species, cap: 'round' });
+      }
+    }
+    for (const leaf of leaves) {
+      const hinge = leaf.source.hinge!;
+      const lit = leaf.look.held || leaf.look.moving !== 0;
+      // L'arc par où le panneau passe : pâle et fixe ; et, pendant qu'il bascule, ce qu'il lui reste à parcourir en vif, avec sa pointe.
+      const radius = PANEL_ARC_RADIUS * scale;
+      const at = (point: Vec2): Vec2 => ({ x: leaf.a.x + point.x, y: leaf.a.y + point.y });
+      const faint = hingeArc(hinge, radius, PANEL_ARC_SEGMENTS).map(at);
+      faint.forEach((point, i) => (i === 0 ? g.moveTo(point.x, point.y) : g.lineTo(point.x, point.y)));
+      g.stroke({ width: 1.5, color: COLOR.switch, alpha: PANEL_ARC_FAINT_ALPHA });
+      if (leaf.look.moving !== 0) {
+        const progress = leaf.look.progress;
+        const to = leaf.look.moving > 0 ? 1 : 0;
+        const arc = hingeArc(hinge, radius, PANEL_ARC_SEGMENTS, progress, to).map(at);
+        neonPolyline(g, arc, { color: SKIN.switchHot, halo: COLOR.switch, width: PANEL_ARC_WIDTH, strength: this.species, cap: 'round', join: 'round' });
+        const tip = arc[arc.length - 1]!;
+        const before = arc[arc.length - 2]!;
+        const [ax, ay, bx, by] = arrowWings(tip.x - before.x, tip.y - before.y, PANEL_ARC_HEAD);
+        neonPolyline(g, [{ x: tip.x + ax, y: tip.y + ay }, tip, { x: tip.x + bx, y: tip.y + by }], { color: SKIN.switchHot, halo: COLOR.switch, width: PANEL_ARC_WIDTH, strength: this.species, cap: 'round', join: 'round' });
+      }
+      // La charnière : une masse sombre qui coiffe le bout de la barre, son anneau et son point.
+      g.circle(leaf.a.x, leaf.a.y, ring).fill(SKIN.panelBody);
+      neonCircle(g, leaf.a.x, leaf.a.y, ring, { color: lit ? SKIN.switchHot : COLOR.switch, halo: COLOR.switch, width: PANEL_HINGE_WIDTH, strength: this.rim * (lit ? PANEL_HELD_GLOW : 1) });
+      neonDiscs(g, [leaf.a], PANEL_HINGE_DOT, { color: SKIN.lockPale, halo: COLOR.switch, strength: 0 });
     }
   }
 
@@ -2291,8 +2757,8 @@ export class Renderer {
    */
   private drawCables(state: SimState, camera: Camera): void {
     const g = this.cables.clear();
-    // Une prise de bande d'accordéon glisse aussi, mais son rail est le panneau de sa bande (voir `drawBands`) : pas de câble.
-    const ends = state.anchors.flatMap((anchor) => (anchor.cable && anchor.band === undefined && !anchor.broken ? [{ from: camera.worldToScreen(anchor.cable.from), to: camera.worldToScreen(anchor.cable.to) }] : []));
+    // Une prise de bande d'accordéon glisse aussi, mais son rail est le panneau de sa bande (voir `drawBands`) : pas de câble. Ni une plateforme de convoyeur, qui a le sien (`paintConveyors`).
+    const ends = state.anchors.flatMap((anchor) => (anchor.cable && anchor.band === undefined && !anchor.broken && !isConveyorAnchor(anchor, state.obstacles) ? [{ from: camera.worldToScreen(anchor.cable.from), to: camera.worldToScreen(anchor.cable.to) }] : []));
     if (ends.length === 0) return;
     for (const rail of ends) g.moveTo(rail.from.x, rail.from.y).lineTo(rail.to.x, rail.to.y);
     g.stroke({ width: CABLE_GLOW_WIDTH * this.halo.spread, color: this.palette.halo, alpha: CABLE_GLOW_ALPHA * this.halo.strength });
@@ -2385,6 +2851,10 @@ export class Renderer {
       else if (anchor.kind === 'interrupteur' && !off) this.paintSwitchLink(g, p, anchor, state, camera, view, tuning, effects.clock);
       else if (anchor.kind === 'rail' && anchor.rail) this.paintRail(g, p, anchor.rail, camera, view, anchor.id === state.rope?.anchorId, off);
     }
+    // Le terrain avancé du lot 5 B : la couronne d'un carrousel, les rails et les tiges d'un convoyeur, les crochets d'un plafond.
+    this.paintCarousels(g, state, camera, view, effects.clock);
+    this.paintConveyors(g, state, camera, view);
+    this.paintCeilingHooks(g, state, camera, view);
   }
 
   /** Le champ d'un aimant autour de son noyau en `p` : au repos des anneaux fixes très pâles, visé un cran plus clairs, tenu convergents vers le noyau ; et le cercle tireté du rayon d'action. */
@@ -2420,10 +2890,12 @@ export class Renderer {
     let timer = false;
     for (const box of state.obstacles) {
       if (box.switchedBy !== anchor.id || box.broken) continue;
-      const centre = camera.worldToScreen({ x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 });
+      // Un panneau dépliant se rejoint à sa charnière (son carré englobant est celui de sa course) ; une porte, par le bord de sa masse.
+      const hinge = box.hinge && box.rotor ? box.rotor.pivot : null;
+      const centre = hinge ? camera.worldToScreen(hinge) : camera.worldToScreen({ x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 });
       if (!inView(view, p, CULL_MARGIN) && !inView(view, centre, CULL_MARGIN)) continue;
       const open = box.openUntilStep !== undefined && state.step < box.openUntilStep;
-      const end = rectEdgePoint(centre.x, centre.y, ((box.x1 - box.x0) * scale) / 2, ((box.y1 - box.y0) * scale) / 2, p.x, p.y);
+      const end = hinge ? ringEdgePoint(centre, p, Math.max(PANEL_HINGE_MIN, HINGE_RING_RADIUS * scale) + 1) : rectEdgePoint(centre.x, centre.y, ((box.x1 - box.x0) * scale) / 2, ((box.y1 - box.y0) * scale) / 2, p.x, p.y);
       // Le pointillé part du bord de l'anneau de la prise, pas de son centre.
       const length = Math.hypot(end.x - p.x, end.y - p.y);
       if (length > ring + SWITCH_LINK_GAP_FROM_ANCHOR) {
@@ -2480,6 +2952,149 @@ export class Renderer {
     g.stroke({ width: RAIL_MID_WIDTH, color: SKIN.railCore, alpha: off ? DARK_ALPHA : RAIL_ALPHA, cap: 'round' });
     g.moveTo(p.x, p.y - ANCHOR_RADIUS * scale).lineTo(p.x, apex + RAIL_MID_HALF);
     g.stroke({ width: RAIL_STEM_WIDTH, color: COLOR.rail, alpha: off ? DARK_ALPHA : RAIL_STEM_ALPHA });
+  }
+
+  /**
+   * Les couronnes de carrousel, sous leurs prises : un moyeu au pivot, entouré d'un anneau ; un rayon du moyeu à chaque prise ; un cercle tireté, le
+   * long duquel les prises passent, et des chevrons posés entre elles qui pointent le sens du tour : le tout tourne avec les prises, car tout se lit de
+   * leur position du moment. Le rayon de la prise tenue s'allume (plus épais, clair, avec une lueur qui file vers la prise), et le moyeu avec lui :
+   * c'est le signe qu'on est porté. Les plots de la coque, eux, sont des obstacles fixes (`paintStuds`).
+   */
+  private paintCarousels(g: Graphics, state: SimState, camera: Camera, view: ViewBounds, clock: number): void {
+    const scale = camera.scale;
+    for (const crown of carouselViews(state.anchors)) {
+      const centre = camera.worldToScreen(crown.pivot);
+      const radius = crown.radius * scale;
+      if (!inView(view, centre, radius + CULL_MARGIN)) continue;
+      const spots = crown.anchors.map((anchor) => ({ p: camera.worldToScreen(anchor.pos), held: state.rope?.anchorId === anchor.id }));
+      const carried = spots.some((spot) => spot.held);
+      const first = spots[0]!;
+      const turn = Math.atan2(first.p.y - centre.y, first.p.x - centre.x);
+      dashedRing(g, centre.x, centre.y, radius, CROWN_DASHES, CROWN_DASH_FILL, turn);
+      g.stroke({ width: CROWN_WIDTH, color: COLOR.crown, alpha: carried ? Math.min(1, 1.6 * CROWN_ALPHA) : CROWN_ALPHA });
+      // Entre deux prises, un chevron sur le cercle, pointé dans le sens du tour : à l'écran (y vers le bas), le sens trigonométrique du monde tourne vers les angles décroissants.
+      const way = crown.spin > 0 ? 1 : -1;
+      neonStroke(
+        g,
+        (target) => {
+          for (const spot of spots) {
+            const angle = Math.atan2(spot.p.y - centre.y, spot.p.x - centre.x) + Math.PI / spots.length;
+            const rx = Math.cos(angle);
+            const ry = Math.sin(angle);
+            const tx = way * ry;
+            const ty = -way * rx;
+            const px = centre.x + rx * radius;
+            const py = centre.y + ry * radius;
+            target.moveTo(px - tx * CROWN_CHEVRON_SIZE * 0.6 + rx * CROWN_CHEVRON_SIZE, py - ty * CROWN_CHEVRON_SIZE * 0.6 + ry * CROWN_CHEVRON_SIZE).lineTo(px + tx * CROWN_CHEVRON_SIZE, py + ty * CROWN_CHEVRON_SIZE).lineTo(px - tx * CROWN_CHEVRON_SIZE * 0.6 - rx * CROWN_CHEVRON_SIZE, py - ty * CROWN_CHEVRON_SIZE * 0.6 - ry * CROWN_CHEVRON_SIZE);
+          }
+        },
+        { color: SKIN.crownCore, halo: COLOR.crown, width: CROWN_CHEVRON_WIDTH, alpha: CROWN_CHEVRON_ALPHA, strength: 0, cap: 'round', join: 'round' },
+      );
+      const hub = Math.max(CROWN_HUB_MIN, CROWN_HUB_RADIUS * scale);
+      const inner = hub + CROWN_HUB_RING_GAP;
+      const reach = ANCHOR_RADIUS * scale + CROWN_SPOKE_GAP;
+      // Un rayon du bord de l'anneau du moyeu au bord de la prise.
+      const spoke = (spot: { p: Vec2 }): { from: Vec2; to: Vec2 } | null => {
+        const length = Math.hypot(spot.p.x - centre.x, spot.p.y - centre.y);
+        if (length <= inner + reach) return null;
+        const ux = (spot.p.x - centre.x) / length;
+        const uy = (spot.p.y - centre.y) / length;
+        return { from: { x: centre.x + ux * inner, y: centre.y + uy * inner }, to: { x: spot.p.x - ux * reach, y: spot.p.y - uy * reach } };
+      };
+      const calm = spots.filter((spot) => !spot.held).flatMap((spot) => spoke(spot) ?? []);
+      if (calm.length > 0) {
+        neonStroke(
+          g,
+          (target) => {
+            for (const line of calm) target.moveTo(line.from.x, line.from.y).lineTo(line.to.x, line.to.y);
+          },
+          { color: COLOR.crown, halo: COLOR.crown, width: CROWN_SPOKE_WIDTH, alpha: CROWN_SPOKE_ALPHA, strength: 0.4 * this.species, cap: 'round' },
+        );
+      }
+      for (const spot of spots) {
+        const line = spot.held ? spoke(spot) : null;
+        if (!line) continue;
+        const tube = { color: SKIN.crownCore, halo: COLOR.crown, width: CROWN_SPOKE_HELD_WIDTH, cap: 'round' as const };
+        neonLine(g, line.from, line.to, { ...tube, strength: this.species * CROWN_SPOKE_HELD_GLOW });
+        // Une lueur qui file du moyeu vers la prise tenue : c'est elle qui porte.
+        dashedLine(g, line.from, line.to, 5, 7, clock * 40);
+        g.stroke({ width: 1.5, color: COLOR.white, alpha: 0.9 });
+      }
+      neonDiscs(g, [centre], hub, { color: carried ? SKIN.crownCore : COLOR.crown, halo: COLOR.crown, strength: this.species * (carried ? CROWN_SPOKE_HELD_GLOW : 1) });
+      neonCircle(g, centre.x, centre.y, inner, { color: carried ? SKIN.crownCore : COLOR.crown, halo: COLOR.crown, width: CROWN_HUB_WIDTH, alpha: 0.8, strength: carried ? this.species : 0 });
+    }
+  }
+
+  /**
+   * Les plateformes d'un convoyeur, sous leurs prises : le rail de chaque prise, de ses deux butées, un pointillé bleu froid sur sa course ; la tige qui
+   * rattache la prise à sa surface (la surface elle-même est un obstacle : `paintPlatforms`) ; et, pour le lanceur de la dernière plateforme, qui n'a pas
+   * de surface, un petit chariot sur le rail. Le câble ordinaire de ces prises n'est pas dessiné (`drawCables`) : celui-ci le remplace.
+   */
+  private paintConveyors(g: Graphics, state: SimState, camera: Camera, view: ViewBounds): void {
+    const scale = camera.scale;
+    const radius = ANCHOR_RADIUS * scale;
+    const rails: { from: Vec2; to: Vec2 }[] = [];
+    for (const anchor of state.anchors) {
+      if (anchor.broken || !anchor.cable || !isConveyorAnchor(anchor, state.obstacles)) continue;
+      const from = camera.worldToScreen(anchor.cable.from);
+      const to = camera.worldToScreen(anchor.cable.to);
+      const p = camera.worldToScreen(anchor.pos);
+      if (!inView(view, p, Math.abs(to.x - from.x) + CULL_MARGIN)) continue;
+      rails.push({ from, to });
+      const slab = platformSlab(anchor, state.obstacles);
+      if (slab) {
+        const under = camera.worldToScreen({ x: anchor.pos.x, y: slab.y0 }).y;
+        neonLine(g, { x: p.x, y: p.y - radius - 1 }, { x: p.x, y: under }, { color: SKIN.conveyorCore, halo: COLOR.conveyor, width: CONVEYOR_ROD_WIDTH, strength: 0.6 * this.species, cap: 'round' });
+      } else {
+        // Le chariot du lanceur : un petit rail court sous lui, posé sur le rail, et ses deux roues.
+        const half = CARRIAGE_HALF * scale;
+        neonLine(g, { x: p.x - half, y: p.y }, { x: p.x + half, y: p.y }, { color: SKIN.conveyorCore, halo: COLOR.conveyor, width: CARRIAGE_WIDTH, strength: 0.6 * this.species, cap: 'round' });
+        neonDiscs(g, [{ x: p.x - half, y: p.y }, { x: p.x + half, y: p.y }], CARRIAGE_WHEEL, { color: COLOR.conveyor, halo: COLOR.conveyor, strength: 0 });
+      }
+    }
+    if (rails.length === 0) return;
+    for (const rail of rails) g.moveTo(rail.from.x, rail.from.y).lineTo(rail.to.x, rail.to.y);
+    g.stroke({ width: CONVEYOR_RAIL_GLOW_WIDTH * this.halo.spread, color: COLOR.conveyor, alpha: CONVEYOR_RAIL_GLOW_ALPHA * this.halo.strength });
+    for (const rail of rails) dashedLine(g, rail.from, rail.to, CONVEYOR_RAIL_DASH, CONVEYOR_RAIL_GAP);
+    g.stroke({ width: CONVEYOR_RAIL_WIDTH, color: COLOR.conveyor, alpha: CONVEYOR_RAIL_ALPHA });
+    // Les butées, aux deux bouts de la course.
+    for (const rail of rails) {
+      for (const end of [rail.from, rail.to]) g.moveTo(end.x, end.y - CONVEYOR_STOP_HALF).lineTo(end.x, end.y + CONVEYOR_STOP_HALF);
+    }
+    g.stroke({ width: CONVEYOR_STOP_WIDTH, color: SKIN.conveyorCore, alpha: 0.9, cap: 'round' });
+  }
+
+  /**
+   * Les crochets d'un plafond : une prise ordinaire suspendue à `CEILING_HOOK_BELOW` mètres sous un plafond. Un hameçon la rattache à lui : une tige
+   * fine qui descend du dessous du plafond (une platine l'y fixe), se courbe sous la prise et la berce, et finit en un petit ardillon.
+   */
+  private paintCeilingHooks(g: Graphics, state: SimState, camera: Camera, view: ViewBounds): void {
+    const scale = camera.scale;
+    const radius = ANCHOR_RADIUS * scale;
+    const hook = radius + HOOK_GAP + 1;
+    for (const anchor of state.anchors) {
+      if (anchor.broken || anchor.kind !== 'normal') continue;
+      const p = camera.worldToScreen(anchor.pos);
+      // Le plafond est plus haut que la prise : la marge couvre la tige.
+      if (!inView(view, p, CULL_MARGIN + 4 * scale)) continue;
+      const ceiling = this.ceilingOfAnchor(anchor, state.obstacles);
+      if (!ceiling) continue;
+      const top = camera.worldToScreen({ x: anchor.pos.x, y: ceiling.y0 }).y;
+      const stem = p.x + hook;
+      g.moveTo(stem - HOOK_MOUNT_HALF, top).lineTo(stem + HOOK_MOUNT_HALF, top);
+      g.moveTo(stem, top).lineTo(stem, p.y).arc(p.x, p.y, hook, 0, Math.PI).lineTo(p.x - hook, p.y - HOOK_BARB);
+      g.stroke({ width: HOOK_WIDTH, color: this.palette.pale, alpha: HOOK_STEM_ALPHA, cap: 'round', join: 'round' });
+    }
+  }
+
+  /** Le plafond qui porte la prise, ou null ; retenu par prise (la relation ne change jamais tant qu'elle existe). */
+  private ceilingOfAnchor(anchor: Anchor, obstacles: readonly Obstacle[]): Obstacle | null {
+    let ceiling = this.hookCache.get(anchor);
+    if (ceiling === undefined) {
+      ceiling = ceilingOf(anchor, obstacles);
+      this.hookCache.set(anchor, ceiling);
+    }
+    return ceiling;
   }
 
   /** La prise du lot 5 est-elle active ? Tenue ; et pour l'interrupteur, aussi tant que son verrou est ouvert (le délai qui suit le lâcher). */

@@ -258,5 +258,5 @@ describe('les scènes de démonstration', () => {
       const report = playRobot(5, T, 40, REASONABLE, { kind: 'scene', sceneId: scene.id, startY: 0 });
       expect(report.height, scene.id).toBeGreaterThan(22);
     }
-  }, 20_000); // dix-huit scènes : quatre secondes ici, le double sur l'intégration continue
+  }, 20_000); // vingt-trois scènes : quatre secondes ici, le double sur l'intégration continue
 });

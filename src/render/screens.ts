@@ -85,9 +85,12 @@ const DENSE_VIEWS: ReadonlySet<OverlayView['kind']> = new Set(['talismans', 'lev
  *  - `primary` : l'action principale du titre, sur toute la largeur, au fond allumé ;
  *  - `large` : « Reprendre », grand pour le pouce ;
  *  - `access` : les accès du titre, trois côte à côte ;
- *  - `quiet` : les réglages et « Quitter », au contour discret et au texte atténué.
+ *  - `quiet` : les réglages et « Quitter », au contour discret et au texte atténué ;
+ *  - `tile` et `tileOn` : les cases serrées de l'atelier, quarante et une sur un seul écran. Moins hautes (34 px) et au libellé plus petit, elles
+ *    rendent à l'écran, une fois le bloc rétréci, des boutons de plus de 28 px au lieu de 26 et un texte de 11 px au lieu de 8 ; choisie, une case
+ *    prend le contour de néon de l'accent et le fond des lignes allumées.
  */
-type ButtonLook = 'normal' | 'primary' | 'large' | 'access' | 'quiet';
+type ButtonLook = 'normal' | 'primary' | 'large' | 'access' | 'quiet' | 'tile' | 'tileOn';
 
 interface ButtonStyle {
   /** Largeur d'un bouton seul, réduite à celle du bloc s'il est plus étroit. */
@@ -111,9 +114,14 @@ const BUTTON_STYLES: Record<ButtonLook, ButtonStyle> = {
   large: { width: 300, height: 72, radius: 16, fontSize: 28, edgeWidth: 2, edge: 'accent', fill: COLOR.panelEquipped, fillAlpha: 0.95, textColor: COLOR.text, wrap: false },
   access: { width: Number.POSITIVE_INFINITY, height: 52, radius: 12, fontSize: 16, edgeWidth: 1.5, edge: 'accent', fill: COLOR.panel, fillAlpha: 0.9, textColor: COLOR.text, wrap: false },
   quiet: { width: 160, height: 44, radius: 10, fontSize: 14, edgeWidth: 1.5, edge: 'quiet', fill: COLOR.panel, fillAlpha: 0.55, textColor: COLOR.textDim, wrap: false },
+  tile: { width: Number.POSITIVE_INFINITY, height: 34, radius: 8, fontSize: 13, edgeWidth: 1.5, edge: 'quiet', fill: COLOR.panel, fillAlpha: 0.55, textColor: COLOR.textDim, wrap: false },
+  tileOn: { width: Number.POSITIVE_INFINITY, height: 34, radius: 8, fontSize: 13, edgeWidth: 1.5, edge: 'accent', fill: COLOR.panelEquipped, fillAlpha: 0.95, textColor: COLOR.text, wrap: false },
 };
 /** Marge intérieure d'un libellé de bouton, de chaque côté. */
 const BUTTON_TEXT_PAD = 6;
+/** Dans un flux de boutons (`Column.buttonFlow`) : l'air qu'un bouton garde de chaque côté de son libellé en plus de sa marge, et le dépassement de largeur qu'une rangée tolère (un vingtième : tous les libellés rétrécissent d'autant). */
+const FLOW_TEXT_PAD = 4;
+const FLOW_SLACK = 0.05;
 /** Écart entre les trois réglages du titre : plus serré que celui des autres boutons. */
 const SETTINGS_GAP = 8;
 
@@ -205,6 +213,48 @@ function keepSegments(label: string): string {
     .split(' · ')
     .map((segment) => segment.replaceAll(' ', '\u00A0'))
     .join(' · ');
+}
+
+/**
+ * Comment répartir des boutons de largeurs `widths` (séparés de `gap`) en rangées de `limit` pixels au plus, `perRow` boutons au plus : le nombre de
+ * boutons de chaque rangée. D'abord le moins de rangées possible (au plus tôt, en remplissant chacune), puis, pour ce nombre de rangées, la répartition
+ * qui garde la plus large rangée la plus courte possible. Un bouton plus large que `limit` a sa rangée à lui. Pur : testable sans PixiJS.
+ */
+export function flowRows(widths: readonly number[], gap: number, limit: number, perRow: number): number[] {
+  const n = widths.length;
+  if (n === 0) return [];
+  const span = (from: number, to: number): number => widths.slice(from, to).reduce((sum, width) => sum + width, 0) + gap * (to - from - 1);
+  const fits = (from: number, to: number): boolean => to - from <= perRow && (to - from === 1 || span(from, to) <= limit);
+  // Le moins de rangées, en les remplissant l'une après l'autre.
+  let count = 0;
+  for (let first = 0; first < n; count += 1) {
+    let last = first + 1;
+    while (last < n && fits(first, last + 1)) last += 1;
+    first = last;
+  }
+  // Pour ce nombre de rangées : minimiser la plus large (programmation dynamique sur les préfixes ; au plus quelques dizaines de boutons).
+  const best: number[][] = Array.from({ length: count + 1 }, () => Array.from({ length: n + 1 }, () => Number.POSITIVE_INFINITY));
+  const cut: number[][] = Array.from({ length: count + 1 }, () => Array.from({ length: n + 1 }, () => 0));
+  best[0]![0] = 0;
+  for (let rows = 1; rows <= count; rows += 1) {
+    for (let end = rows; end <= n; end += 1) {
+      for (let from = rows - 1; from < end; from += 1) {
+        if (!fits(from, end)) continue;
+        const widest = Math.max(best[rows - 1]![from]!, span(from, end));
+        if (widest < best[rows]![end]!) {
+          best[rows]![end] = widest;
+          cut[rows]![end] = from;
+        }
+      }
+    }
+  }
+  const counts: number[] = [];
+  for (let rows = count, end = n; rows > 0; rows -= 1) {
+    const from = cut[rows]![end]!;
+    counts.unshift(end - from);
+    end = from;
+  }
+  return counts;
 }
 
 /** Un bloc d'écran : une pile verticale de textes et de formes, avec les boutons qu'elle porte. */
@@ -339,23 +389,52 @@ class Column {
    * écran étroit, tous les libellés rétrécissent d'autant : le plus long en
    * décide, aucun ne dépasse son bouton et tous gardent la même taille.
    */
-  buttonRow(items: readonly { readonly id: ButtonId; readonly label: string; readonly weight: number }[], look: ButtonLook = 'normal', gap: number = BUTTON_GAP): void {
-    const style = BUTTON_STYLES[look];
+  buttonRow(items: readonly { readonly id: ButtonId; readonly label: string; readonly weight: number; readonly look?: ButtonLook }[], look: ButtonLook = 'normal', gap: number = BUTTON_GAP, span: number = this.width): void {
+    const base = BUTTON_STYLES[look];
     const total = items.reduce((sum, item) => sum + item.weight, 0);
-    const room = this.width - gap * (items.length - 1);
+    // La rangée tient sur `span` pixels (toute la largeur d'ordinaire), centrée.
+    const room = span - gap * (items.length - 1);
+    // Chaque bouton peut avoir son allure (une case choisie, ou non) ; tous ont la hauteur de la rangée.
     const cells = items.map((item) => {
+      const style = BUTTON_STYLES[item.look ?? look];
       const width = (room * item.weight) / total;
-      return { item, width, ...this.buttonLabel(item.label, width, style) };
+      return { item, style, width, ...this.buttonLabel(item.label, width, style) };
     });
     const fit = Math.min(...cells.map((cell) => cell.fit));
-    let x = 0;
-    for (const { item, width, text } of cells) {
+    let x = (this.width - span) / 2;
+    for (const { item, style, width, text } of cells) {
       this.buttonFrame(x, width, style);
       this.placeLabel(text, fit, x, width, style);
       this.buttons.push({ id: item.id, x, y: this.cursor, width, height: style.height });
       x += width + gap;
     }
-    this.cursor += style.height;
+    this.cursor += base.height;
+  }
+
+  /**
+   * Des boutons en flux, rangée après rangée, sur la largeur du bloc : autant de rangées qu'il en faut pour que leurs libellés mesurés tiennent (au plus
+   * `perRow` boutons par rangée, avec une marge d'un vingtième de la largeur : ils rétrécissent d'autant), puis réparties le plus également possible, pour
+   * qu'aucun bouton ne reste seul. Chaque bouton a la largeur de son libellé, et une rangée plus courte que le bloc est centrée au lieu d'être étirée.
+   * Les rangées sont séparées de `rowGap`.
+   */
+  buttonFlow(items: readonly { readonly id: ButtonId; readonly label: string; readonly look: ButtonLook }[], gap: number, rowGap: number, perRow: number): void {
+    const widths = items.map((item) => {
+      const style = BUTTON_STYLES[item.look];
+      const text = makeText(item.label, style.fontSize, style.textColor, { bold: true });
+      const width = text.width + 2 * BUTTON_TEXT_PAD + 2 * FLOW_TEXT_PAD;
+      text.destroy();
+      return width;
+    });
+    const limit = this.width * (1 + FLOW_SLACK);
+    const rows = flowRows(widths, gap, limit, perRow);
+    let first = 0;
+    rows.forEach((count, index) => {
+      if (index > 0) this.gap(rowGap);
+      const row = items.slice(first, first + count);
+      const span = widths.slice(first, first + count).reduce((sum, width) => sum + width, 0) + gap * (count - 1);
+      this.buttonRow(row.map((item, i) => ({ id: item.id, label: item.label, look: item.look, weight: widths[first + i]! })), row[0]!.look, gap, Math.min(span, this.width));
+      first += count;
+    });
   }
 
   /**
@@ -548,38 +627,45 @@ function buildTitle(profile: Profile, width: number, testMode: boolean, install:
 }
 
 /**
- * L'atelier du mode test : le catalogue par groupes, chaque élément une case
- * (● choisi, ○ non), puis Tout, Rien, Jouer et Retour. Demande du
- * propriétaire : « un vrai mode test où je peux choisir à quelles prises ou
- * autres éléments je veux être confronté ».
+ * L'atelier du mode test : le catalogue par groupes, chaque élément une case (● choisi, ○ non, la case choisie allumée), puis Tout, Rien, Jouer et Retour.
+ * Demande du propriétaire : « un vrai mode test où je peux choisir à quelles prises ou autres éléments je veux être confronté ». Quarante et un éléments
+ * sur un écran de 390 × 844 : les cases, serrées (`tile`), vont en flux sur la largeur (quatre par rangée au plus, autant que leurs libellés en laissent
+ * tenir), au lieu de trois par rangée ; il en reste treize rangées au lieu de seize, et les deux phrases d'introduction n'en font plus qu'une.
  */
 function buildAtelier(selection: readonly AtelierId[], width: number): Layout {
   const upper = new Column(width);
-  upper.line('Atelier', 28, COLOR.text, true);
-  upper.gap(6);
-  upper.line('Choisis ce que tu veux affronter : la course n\'engendre que cela.', 14, COLOR.textDim);
+  upper.line('Atelier', 26, COLOR.text, true);
   upper.gap(4);
-  upper.line('Une partie d\'atelier ne compte pas : ni record, ni mission, ni expérience.', 13, COLOR.textFaint);
+  upper.line('Choisis ce que la course engendre.', 13, COLOR.textDim);
   for (const group of ATELIER_GROUPS) {
-    upper.gap(10);
-    upper.line(group.label, 14, COLOR.textFaint, true);
     upper.gap(6);
+    upper.line(group.label, 13, COLOR.textFaint, true);
+    upper.gap(4);
     const elements = ATELIER_ELEMENTS.filter((element) => element.group === group.id);
-    for (let i = 0; i < elements.length; i += 3) {
-      if (i > 0) upper.gap(6);
-      upper.buttonRow(elements.slice(i, i + 3).map((element) => ({ id: `atelier:${element.id}` as const, label: `${selection.includes(element.id) ? '●' : '○'} ${element.label}`, weight: 1 })), 'quiet', SETTINGS_GAP);
-    }
+    upper.buttonFlow(
+      elements.map((element) => {
+        const chosen = selection.includes(element.id);
+        return { id: `atelier:${element.id}` as const, label: `${chosen ? '●' : '○'} ${element.label}`, look: chosen ? ('tileOn' as const) : ('tile' as const) };
+      }),
+      ATELIER_TILE_GAP,
+      ATELIER_TILE_GAP,
+      ATELIER_PER_ROW,
+    );
   }
   const lower = new Column(width);
-  lower.line(selection.length === 0 ? 'Rien de choisi : une chaîne nue.' : `${selection.length} élément${selection.length > 1 ? 's' : ''} choisi${selection.length > 1 ? 's' : ''}.`, 14, COLOR.textDim);
-  lower.gap(10);
-  lower.buttonRow(weighted([['atelierAll', 'Tout'], ['atelierNone', 'Rien']], 2), 'quiet', SETTINGS_GAP);
-  lower.gap(10);
+  lower.line(`${selection.length === 0 ? 'Rien de choisi : une chaîne nue.' : `${selection.length} élément${selection.length > 1 ? 's' : ''} choisi${selection.length > 1 ? 's' : ''}.`} Une partie d'atelier ne compte pas.`, 13, COLOR.textDim);
+  lower.gap(8);
+  lower.buttonRow(weighted([['atelierAll', 'Tout'], ['atelierNone', 'Rien']], 2).map((item) => ({ ...item, look: 'tile' as const })), 'tile', ATELIER_TILE_GAP);
+  lower.gap(8);
   lower.button('atelierPlay', 'Jouer l\'atelier', 'primary');
-  lower.gap(10);
-  lower.button('back', 'Retour');
+  lower.gap(8);
+  lower.button('back', 'Retour', 'quiet');
   return { upper, lower, align: 'center' };
 }
+
+/** Écart entre deux cases de l'atelier, côte à côte et d'une rangée à l'autre ; au plus quatre cases par rangée. */
+const ATELIER_TILE_GAP = 5;
+const ATELIER_PER_ROW = 4;
 
 /** Des boutons de rangée dont le poids suit la longueur du libellé (plus `extra` caractères de marge) : chacun a la place de son texte. */
 function weighted(items: readonly (readonly [ButtonId, string])[], extra = 0): { id: ButtonId; label: string; weight: number }[] {

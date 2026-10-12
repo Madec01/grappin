@@ -19,8 +19,9 @@ import { newMemory, pilotFrame, sceneWorld } from '../scripts/pilote';
  * du tutoriel apparaît à la première accroche, les quatre scènes de démonstration du lot 2 (le ricochet, le mur à percer, la porte, le cerceau)
  * se jouent et se dessinent sans erreur et le pilote y prouve la mécanique exigée (rebond, fracas, anneau traversé), les quatre scènes de zones (courant ascendant, dérive, fusée, poche de faible gravité) chargent leurs zones et voient le
  * pilote y entrer, les trois scènes de la fin du lot 2 (la roue motorisée, le tournant, la glissière), les deux scènes de transformations du lot 3
- * (l'accordéon, le serpentin) et les cinq scènes du lot 5 (l'aimant, l'interrupteur, le rail, le lien élastique, le passage qui se referme) se jouent au pilote
- * sans erreur, chacune avec la preuve de sa mécanique. Tout passe par `window.__grappin`.
+ * (l'accordéon, le serpentin), les cinq scènes du lot 5 (l'aimant, l'interrupteur, le rail, le lien élastique, le passage qui se referme) et les cinq du
+ * lot 5 B (le plafond, la faille, le carrousel, la structure dépliante, le convoyeur) se jouent au pilote sans erreur, chacune avec la preuve de sa
+ * mécanique. Tout passe par `window.__grappin`.
  */
 
 /**
@@ -409,8 +410,12 @@ test('scène « porte » : un cycle complet (6 s) se joue, et le rendu voit la p
  */
 const FRAME_MS = 16;
 
-/** Ouvre la scène `scene` sur une horloge figée, la joue, et laisse défiler la bannière d'intro. */
-async function openFrozenScene(page: Page, scene: string): Promise<void> {
+/**
+ * Ouvre la scène `scene` sur une horloge figée, la joue, et laisse défiler la bannière d'intro. `viewport` : une fenêtre plus petite que celle des
+ * autres tests, pour les scènes qui jouent longtemps (voir `LIGHT_VIEWPORT`).
+ */
+async function openFrozenScene(page: Page, scene: string, viewport?: { width: number; height: number }): Promise<void> {
+  if (viewport) await page.setViewportSize(viewport);
   await page.clock.install({ time: 0 });
   await open(page, `/?scene=${scene}&graine=5&fogBaseSpeed=0.1`);
   await page.clock.pauseAt(60_000);
@@ -954,6 +959,205 @@ test('scène « evasion » : le passage se referme dès que le personnage entre 
   expect(errors).toEqual([]);
 });
 
+/**
+ * Les cinq scènes du lot 5 B (0.16.0), jouées par le pilote des scènes sur l'horloge figée de la page, sans erreur de console :
+ *  - le plafond (`plafond`) : la gravité s'inverse en passant par l'apesanteur (`inverted`, `gravityY` de -1 à 1) ; le pilote, qui se balance au-dessus des
+ *    prises, dépasse 40 m (le plafond commence à 24 m et dure 30 m) ;
+ *  - la faille (`faille`) : `faultOpen` passe de faux à vrai quand le pilote passe la ligne, une prise `mobile === 'rift'` s'écarte de plus d'un mètre de
+ *    sa place de départ, et le pilote dépasse 26 m ;
+ *  - le carrousel (`carrousel`) : une prise en orbite tourne (elle change de place d'au moins 2 m en 2 s), le pilote la tient (une prise normale, que `anchors()`
+ *    dit en orbite), puis dépasse 26 m ;
+ *  - la structure dépliante (`depliante`) : `unfolded` vaut 0 au départ, monte à 1 pendant que le pilote tient la prise interrupteur, puis il dépasse 26 m ;
+ *  - le convoyeur (`convoyeur`) : une prise `mobile === 'cable'` va et vient, le pilote tient le lanceur (`heldKind`), puis dépasse 26 m.
+ */
+const LOT5B_HEIGHT = 26;
+const CEILING_HEIGHT = 40;
+/**
+ * Ces cinq scènes jouent longtemps image par image (jusqu'à un millier d'images, le pilote tenant chaque prise), et le rendu logiciel de Chromium coûte à la surface
+ * dessinée : à demi-largeur et demi-hauteur, une image coûte les trois cinquièmes. La simulation et le pilote n'en dépendent pas (aucun test d'ici ne vise un pixel,
+ * tout passe par `window.__grappin`) : même partie, mêmes résultats, et la suite entière tient sous les quatre minutes.
+ */
+const LIGHT_VIEWPORT = { width: 195, height: 422 };
+
+test('scène « plafond » : la gravité s\'inverse en passant par l\'apesanteur (state().inverted, gravityY de -1 à 1), et le pilote dépasse 40 m', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'plafond', LIGHT_VIEWPORT);
+  const world = sceneWorld('plafond', 5);
+  expect(world.schedule.map((event) => event.kind)).toEqual(['plafond']);
+  expect(await state(page)).toMatchObject({ screen: 'playing', scene: 'plafond', inverted: false, gravityY: -1 });
+  const memory = newMemory();
+  let invertedFrames = 0;
+  let weightless = 0;
+  let lowest = -1;
+  let strongest = -1;
+  let highest = 0;
+  for (let frame = 0; frame < 3500 && !(highest > CEILING_HEIGHT && strongest >= 1); frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world });
+    expect(seen.screen).toBe('playing');
+    if (seen.inverted) {
+      invertedFrames += 1;
+      if (Math.abs(seen.gravityY) < 0.2) weightless += 1;
+    } else expect(seen.gravityY, 'la gravité hors de l\'inversion').toBeLessThanOrEqual(-1);
+    lowest = Math.min(lowest, seen.gravityY);
+    strongest = Math.max(strongest, seen.gravityY);
+    highest = Math.max(highest, seen.pos.y);
+  }
+  expect(invertedFrames, 'images pendant l\'inversion').toBeGreaterThan(0);
+  expect(weightless, 'images en apesanteur').toBeGreaterThan(0);
+  expect(lowest, 'la gravité part de vers le bas').toBe(-1);
+  expect(strongest, 'la gravité tire vers le haut').toBe(1);
+  expect(highest, 'hauteur atteinte').toBeGreaterThan(CEILING_HEIGHT);
+  // Le monde inversé se dessine encore quelques images (fond, particules, crochets), sans erreur.
+  for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
+  expect((await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
+test('scène « faille » : faultOpen passe de faux à vrai quand le pilote passe la ligne, une prise de faille s\'écarte de plus d\'un mètre, et il dépasse 26 m', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'faille', LIGHT_VIEWPORT);
+  const world = sceneWorld('faille', 5);
+  const rifts = world.anchors.filter((a) => a.rift);
+  expect(rifts.length, 'prises de la faille').toBeGreaterThanOrEqual(4);
+  expect(world.obstacles.filter((box) => box.rift), 'surfaces de la faille').toHaveLength(2);
+  const triggerY = rifts[0]!.rift!.triggerY;
+  expect(await state(page)).toMatchObject({ faultOpen: false, rifts: [] });
+  const mobile = (await page.evaluate(() => window.__grappin!.anchors())).filter((a) => a.mobile === 'rift');
+  expect(mobile.map((a) => a.id).sort()).toEqual(rifts.map((a) => a.id).sort());
+  const from = new Map(mobile.map((a) => [a.id, { x: a.x, y: a.y }]));
+  const memory = newMemory();
+  let opened = false;
+  let openedAtY = -1;
+  let moved = 0;
+  let highest = 0;
+  for (let frame = 0; frame < 1500 && !(highest > LOT5B_HEIGHT && moved > 1); frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world });
+    expect(seen.screen).toBe('playing');
+    // La faille ne s'ouvre jamais avant que le personnage passe la ligne qui la déclenche.
+    if (!seen.faultOpen) expect(seen.pos.y, 'la faille s\'ouvre avant la ligne').toBeLessThanOrEqual(triggerY + 1);
+    else if (!opened) {
+      opened = true;
+      openedAtY = seen.pos.y;
+    }
+    if (opened && frame % 10 === 0) {
+      for (const a of (await page.evaluate(() => window.__grappin!.anchors())).filter((b) => b.mobile === 'rift')) moved = Math.max(moved, Math.hypot(a.x - from.get(a.id)!.x, a.y - from.get(a.id)!.y));
+    }
+    highest = Math.max(highest, seen.pos.y);
+  }
+  expect(opened, 'la faille s\'est ouverte').toBe(true);
+  expect(openedAtY, 'hauteur où elle s\'ouvre').toBeGreaterThanOrEqual(triggerY);
+  expect((await state(page)).rifts, 'les deux surfaces sont déclenchées ensemble').toHaveLength(2);
+  expect(moved, 'écart d\'une prise depuis sa place de départ (m)').toBeGreaterThan(1);
+  expect(highest, 'hauteur atteinte').toBeGreaterThan(LOT5B_HEIGHT);
+  for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
+  expect((await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
+test('scène « carrousel » : une prise en orbite tourne (2 m en 2 s), le pilote la tient (heldKind normal, prise de la couronne), puis il dépasse 26 m', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'carrousel', LIGHT_VIEWPORT);
+  const world = sceneWorld('carrousel', 5);
+  const crown = (await page.evaluate(() => window.__grappin!.anchors())).filter((a) => a.mobile === 'orbit');
+  expect(crown, 'la couronne a trois prises').toHaveLength(world.anchors.filter((a) => a.orbit).length);
+  expect(crown).toHaveLength(3);
+  // La couronne tourne d'elle-même, que le pilote la tienne ou non (il met plus de deux secondes à y monter) : deux secondes après le départ, une prise a changé de place
+  // d'au moins deux mètres (un quart de tour de sa couronne, 3,7 m). On le mesure en route, sans rien attendre : le pilote arrive à la couronne au bon moment de son tour.
+  const tracked = crown[0]!;
+  const spinFrame = Math.round(2000 / FRAME_MS) - 1;
+  let spun = 0;
+  const orbit = new Set(crown.map((a) => a.id));
+  const memory = newMemory();
+  let heldFrames = 0;
+  let highest = 0;
+  for (let frame = 0; frame < 2500 && (highest <= LOT5B_HEIGHT || frame <= spinFrame); frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world });
+    expect(seen.screen).toBe('playing');
+    if (frame === spinFrame) {
+      const later = (await page.evaluate(() => window.__grappin!.anchors())).find((a) => a.id === tracked.id)!;
+      spun = Math.hypot(later.x - tracked.x, later.y - tracked.y);
+    }
+    if (seen.attached && seen.heldKind === 'normal' && memory.heldId !== null && orbit.has(memory.heldId)) heldFrames += 1;
+    highest = Math.max(highest, seen.pos.y);
+  }
+  expect(spun, 'déplacement de la prise en 2 s (m)').toBeGreaterThan(2);
+  // Porté : le pilote ne lâche pas la couronne avant que le vol attrape une sortie, et la tient plus d'une demi-seconde (l'orbite, elle, mène plus loin qu'un balancement).
+  expect(heldFrames * FRAME_MS, 'tenue à la couronne (ms)').toBeGreaterThan(500);
+  expect(highest, 'hauteur atteinte').toBeGreaterThan(LOT5B_HEIGHT);
+  for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
+  expect((await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
+test('scène « depliante » : unfolded vaut 0 au départ, monte à 1 pendant que le pilote tient l\'interrupteur, et il dépasse 26 m', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'depliante', LIGHT_VIEWPORT);
+  const world = sceneWorld('depliante', 5);
+  const lever = world.anchors.find((a) => a.kind === 'interrupteur')!;
+  const panels = world.obstacles.filter((box) => box.hinge && box.switchedBy === lever.id);
+  expect(panels).toHaveLength(1);
+  expect(await state(page)).toMatchObject({ unfolded: 0, switchOpen: false });
+  const memory = newMemory();
+  let heldFrames = 0;
+  let unfoldedWhileHeld = 0;
+  let highest = 0;
+  for (let frame = 0; frame < 2000 && !(highest > LOT5B_HEIGHT && unfoldedWhileHeld >= 1); frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world });
+    expect(seen.screen).toBe('playing');
+    if (seen.heldKind === 'interrupteur') {
+      heldFrames += 1;
+      unfoldedWhileHeld = Math.max(unfoldedWhileHeld, seen.unfolded);
+    }
+    highest = Math.max(highest, seen.pos.y);
+  }
+  expect(heldFrames, 'images tenues à l\'interrupteur').toBeGreaterThan(0);
+  // Le panneau met deux secondes à se déplier : le pilote tient donc la prise tout ce temps (il ne la lâche pas avant qu'il soit ouvert).
+  expect(heldFrames * FRAME_MS, 'tenue à l\'interrupteur (ms)').toBeGreaterThan(1900);
+  expect(unfoldedWhileHeld, 'ouverture du panneau pendant la tenue').toBe(1);
+  expect(highest, 'hauteur atteinte').toBeGreaterThan(LOT5B_HEIGHT);
+  for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
+  expect((await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
+test('scène « convoyeur » : une prise sur câble va et vient, le pilote tient le lanceur (heldKind), puis il dépasse 26 m', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openFrozenScene(page, 'convoyeur', LIGHT_VIEWPORT);
+  const world = sceneWorld('convoyeur', 5);
+  const platforms = (await page.evaluate(() => window.__grappin!.anchors())).filter((a) => a.mobile === 'cable');
+  expect(platforms.map((a) => a.kind).sort()).toEqual(['lanceur', 'normal', 'normal']);
+  expect(world.obstacles.filter((box) => box.slide?.proven), 'surfaces de plateforme').toHaveLength(2);
+  const tracked = platforms.find((a) => a.kind === 'normal')!;
+  const memory = newMemory();
+  let launcherFrames = 0;
+  let left = tracked.x;
+  let right = tracked.x;
+  let highest = 0;
+  for (let frame = 0; frame < 2500 && !(highest > LOT5B_HEIGHT && launcherFrames > 0); frame += 1) {
+    await page.clock.runFor(FRAME_MS);
+    const seen = await pilotFrame(page, memory, frame * FRAME_MS, { world });
+    expect(seen.screen).toBe('playing');
+    if (seen.heldKind === 'lanceur') launcherFrames += 1;
+    if (frame % 5 === 0) {
+      const x = (await page.evaluate(() => window.__grappin!.anchors())).find((a) => a.id === tracked.id)!.x;
+      left = Math.min(left, x);
+      right = Math.max(right, x);
+    }
+    highest = Math.max(highest, seen.pos.y);
+  }
+  // Un aller-retour de 1,6 m d'amplitude : la plateforme parcourt plus de la moitié de sa course de 3,2 m pendant la partie.
+  expect(right - left, 'course de la plateforme (m)').toBeGreaterThan(1.6);
+  expect(launcherFrames, 'images tenues au lanceur').toBeGreaterThan(0);
+  expect(highest, 'hauteur atteinte').toBeGreaterThan(LOT5B_HEIGHT);
+  for (let frame = 0; frame < 20; frame += 1) await page.clock.runFor(FRAME_MS);
+  expect((await state(page)).screen).toBe('playing');
+  expect(errors).toEqual([]);
+});
+
 test('progression : une partie rapporte de l\'expérience, le profil survit au rechargement, un talisman s\'équipe', async ({ page }) => {
   const errors = watchErrors(page);
   // Brume rapide : sans personne pour jouer, elle finit la partie en quelques secondes.
@@ -1226,21 +1430,21 @@ test('la bascule du niveau 5 se joue sans erreur de console : la gravité tourne
   expect(errors).toEqual([]);
 });
 
-test('liste des niveaux : trois pages (dix, dix, deux), « suite » et « precedents » les tournent, et un niveau de la dernière page se lance', async ({ page }) => {
+test('liste des niveaux : trois pages (dix, dix, quatre), « suite » et « precedents » les tournent, et un niveau de la dernière page se lance', async ({ page }) => {
   const errors = watchErrors(page);
   await open(page, '/');
   await page.evaluate(() => window.__grappin!.resetProfile());
   await page.evaluate(() => window.__grappin!.unlockAll());
-  expect(LEVELS).toHaveLength(22);
+  expect(LEVELS).toHaveLength(24);
 
   /** Les lignes de niveau des niveaux `from` à `to`. */
   const rows = (from: number, to: number): string[] => Array.from({ length: to - from + 1 }, (_, i) => `niveau-${from + i}`);
   const first = rows(1, 10);
   const second = rows(11, 20);
-  const third = rows(21, 22);
+  const third = rows(21, 24);
   const shown = async (): Promise<string[]> => (await buttons(page)).map((button) => button.id);
 
-  // Tous les niveaux sont ouverts : la liste s'ouvre sur la page du niveau à jouer, le dernier, donc la troisième (« Niveaux 21 à 22 »).
+  // Tous les niveaux sont ouverts : la liste s'ouvre sur la page du niveau à jouer, le dernier, donc la troisième (« Niveaux 21 à 24 »).
   await tapButton(page, 'levels');
   await expect.poll(async () => (await state(page)).screen).toBe('levels');
   await expect.poll(shown).toEqual([...third, 'back', 'precedents']);

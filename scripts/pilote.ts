@@ -10,7 +10,7 @@ import { railPull } from '../src/sim/holds';
 import { launchSet, launchVelocity, pulledPosition } from '../src/sim/launcher';
 import { isMoving, obstacleGap } from '../src/sim/moving';
 import { provableObstacles, solidObstacles } from '../src/sim/obstacles';
-import { EDGE_AHEAD_SECONDS, EDGE_MARGIN, EDGE_SOON_SECONDS, ELASTIC_CATCH_SPEED, ELASTIC_HOLD_MAX_SECONDS, LAUNCH_AIM_SECONDS, LAUNCH_WAIT_MAX_SECONDS, LOOK_AHEAD_SECONDS, MAGNET_HOLD_MAX_SECONDS, RELEASE_EVERY, WHEEL_READY_RATIO, launchIsClear } from '../src/sim/robot';
+import { CATCH_LOOK_SECONDS, EDGE_AHEAD_SECONDS, EDGE_MARGIN, EDGE_SOON_SECONDS, ELASTIC_CATCH_SPEED, ELASTIC_HOLD_MAX_SECONDS, LAUNCH_AIM_SECONDS, LAUNCH_WAIT_MAX_SECONDS, LOOK_AHEAD_SECONDS, MAGNET_HOLD_MAX_SECONDS, MOVING_LOOK_AHEAD_SECONDS, ORBIT_HOLD_MAX_SECONDS, RELEASE_EVERY, WHEEL_READY_RATIO, catchIsClearOfMoving, launchIsClear } from '../src/sim/robot';
 import { WORLD_HALF_WIDTH, releaseVelocity } from '../src/sim/rules';
 import { Simulation } from '../src/sim/simulation';
 import type { Anchor, Obstacle, SimState } from '../src/sim/state';
@@ -57,7 +57,18 @@ import { flightCatches, swingIsClear } from '../src/sim/verifier';
  *    (regardé un pas sur quatre), jamais plus de quatre secondes à l'aimant, sept
  *    au lien ; après un aimant, comme après un lanceur, il ne rattrape rien plus
  *    bas pendant une seconde et demie. Il laisse un lien élastique qu'il
- *    atteindrait à moins de 6 m/s, s'il a une autre prise à portée du grappin.
+ *    atteindrait à moins de 6 m/s, s'il a une autre prise à portée du grappin ;
+ *  - le terrain avancé du lot 5 B, comme le robot : sur une prise de carrousel
+ *    (en orbite), il se laisse porter, et ne lâche que si le vol attrape une prise
+ *    qui n'est pas de la couronne, de plus d'un mètre plus haute, jusqu'à neuf
+ *    secondes ; sur une prise interrupteur dont un panneau se déplie encore
+ *    (`state().unfolded` sous 1), il tient ; avant d'attraper, il regarde que le
+ *    balancement qui suivrait, pendant une seconde et demie, ne rencontre rien
+ *    qui bouge (la coque d'un carrousel), et avant de lâcher que le vol, pendant
+ *    1,2 s, n'en heurte rien non plus ; il n'accepte un vol que s'il attrape plus
+ *    d'un mètre au-dessus de la prise tenue. Le monde rejoué prend de la page les
+ *    failles déclenchées (`rifts`) et l'ouverture des panneaux dépliants, que leur
+ *    géométrie lit.
  */
 
 /** L'état que le jeu rend à `state()`. */
@@ -81,6 +92,7 @@ const LAUNCH_WAIT_MAX_MS = LAUNCH_WAIT_MAX_SECONDS * 1000;
 /** Sur un aimant ou un lien élastique, jamais plus longtemps tenu (millisecondes) : les bornes du robot. */
 const MAGNET_MAX_HOLD_MS = MAGNET_HOLD_MAX_SECONDS * 1000;
 const ELASTIC_MAX_HOLD_MS = ELASTIC_HOLD_MAX_SECONDS * 1000;
+const ORBIT_MAX_HOLD_MS = ORBIT_HOLD_MAX_SECONDS * 1000;
 /** Sans tir prouvé, le rail lance depuis le milieu de son arc. */
 const RAIL_MIDDLE = 0.5;
 /** La traction du tir quand le vérificateur n'en prouve aucune. */
@@ -199,17 +211,31 @@ function standingObstacles(world: SimState, s: Seen): Obstacle[] {
     .filter((box) => !(s.smashed > 0 && box.kind === 'cassable'))
     .map((box) => {
       const trigger = s.triggered.find((t) => t.obstacleId === box.id);
-      return trigger ? { ...box, triggeredStep: trigger.step } : box;
+      if (trigger) return { ...box, triggeredStep: trigger.step };
+      // Une surface de faille déclenchée glisse depuis son déclenchement ; un panneau dépliant est ouvert de ce que la page en dit (le plus ouvert, s'il y en a plusieurs).
+      const rift = s.rifts.find((r) => r.obstacleId === box.id);
+      if (rift) return { ...box, riftStep: rift.step };
+      return box.hinge ? { ...box, hingeProgress: s.unfolded } : box;
     });
 }
 
-/** Vrai si s'accrocher à `targetId` d'ici ne mène pas dans un mur (le balancement qui suit, joué comme le robot le regarde). Sans monde rejoué, on ne regarde pas. */
-function swingIsSafe(world: SimState | undefined, s: Seen, live: readonly DebugAnchor[], targetId: number): boolean {
+/** Le monde rejoué tel que la page le montre à cet instant : le pas, le personnage, les conditions du moment, les obstacles qui tiennent et les prises là où elles sont. */
+function observedWorld(world: SimState, s: Seen, live: readonly DebugAnchor[]): SimState {
+  return { ...world, step: s.step, hero: { pos: s.pos, vel: s.vel, grounded: false }, env: liveEnv(s), obstacles: standingObstacles(world, s), anchors: liveAnchors(world, live) };
+}
+
+/**
+ * Vrai si s'accrocher à `targetId` d'ici ne mène pas dans un mur (le balancement qui suit, joué comme le robot le regarde), ni dans ce qui bouge pendant
+ * `CATCH_LOOK_SECONDS` (la coque d'un carrousel) : en retombant, ou sans autre prise à portée (`others`), le robot attrape quand même, et le pilote avec lui.
+ * Sans monde rejoué, on ne regarde pas.
+ */
+function swingIsSafe(world: SimState | undefined, s: Seen, live: readonly DebugAnchor[], targetId: number, others: number): boolean {
   if (!world) return true;
   const anchors = liveAnchors(world, live);
   const anchor = anchors.find((a) => a.id === targetId);
   if (!anchor) return true;
-  return swingIsClear(anchor, { pos: s.pos, vel: s.vel }, anchors, provableObstacles(standingObstacles(world, s)), DEFAULT_TUNING, liveEnv(s), world.zones);
+  if (!swingIsClear(anchor, { pos: s.pos, vel: s.vel }, anchors, provableObstacles(standingObstacles(world, s)), DEFAULT_TUNING, liveEnv(s), world.zones)) return false;
+  return s.vel.y < 0 || others === 0 || catchIsClearOfMoving(observedWorld(world, s, live), anchor, CATCH_LOOK_SECONDS, DEFAULT_TUNING);
 }
 
 /** La vitesse du lâcher maintenant : celle de la règle du lâcher (`releaseVelocity`), propulseur et lanceur compris. */
@@ -226,13 +252,17 @@ function nextTarget(world: SimState, s: Seen, live: readonly DebugAnchor[], held
   return bestAnchor(candidates, sight, { pos: s.pos, vel: releasedVelocity(s, anchors, held) }, false, heldId, DEFAULT_TUNING, liveEnv(s), world.zones)?.id ?? null;
 }
 
+/** Vrai si la prise `id` est plus d'un mètre au-dessus de `held`, et hors de la couronne si `held` en fait partie : on ne lâche pas une prise de carrousel pour une autre prise de la couronne, qui ferait tourner en rond. */
+function isHigherExit(anchors: readonly Anchor[], held: Anchor, id: number): boolean {
+  const candidate = anchors.find((a) => a.id === id);
+  return candidate !== undefined && (held.orbit === undefined || candidate.orbit === undefined) && candidate.pos.y > held.pos.y + ABOVE_RELEASE;
+}
+
 /**
- * Vrai si lâcher maintenant est un bon lâcher, comme le robot l'entend : le vol qui suivrait ne heurte rien pendant `LOOK_AHEAD_SECONDS`
- * (rebonds, fracas et anneaux joués ; ce qui bouge regardé là où il sera), ne sort pas du monde pendant `EDGE_AHEAD_SECONDS`, et attrape une
- * prise plus haute que celle qu'on lâche (`flightCatches`, ce que le vérificateur regarde). Une roue n'a pas ce dernier contrôle : sa
- * sortie est prouvée à part.
+ * Vrai si le vol que donnerait un lâcher maintenant ne heurte rien pendant `LOOK_AHEAD_SECONDS` (rebonds, fracas et anneaux joués), ni ce qui bouge
+ * pendant `MOVING_LOOK_AHEAD_SECONDS` (regardé là où ce sera), et ne sort pas du monde pendant `EDGE_AHEAD_SECONDS` : `releaseIsClear` du robot.
  */
-function releaseIsGood(world: SimState, s: Seen, live: readonly DebugAnchor[], heldId: number | null): boolean {
+function flightIsClear(world: SimState, s: Seen, live: readonly DebugAnchor[], heldId: number | null): boolean {
   const tuning = DEFAULT_TUNING;
   const env = liveEnv(s);
   const anchors = liveAnchors(world, live);
@@ -242,13 +272,30 @@ function releaseIsGood(world: SimState, s: Seen, live: readonly DebugAnchor[], h
   const obstacles = provableObstacles(standing);
   const moving = standing.filter((box) => !box.broken && isMoving(box));
   const flight = startFlight({ pos: s.pos, vel });
-  for (let k = 0, steps = Math.round(LOOK_AHEAD_SECONDS / tuning.stepSeconds); k < steps; k += 1) {
+  const steps = Math.round(LOOK_AHEAD_SECONDS / tuning.stepSeconds);
+  const movingSteps = moving.length > 0 ? Math.round(MOVING_LOOK_AHEAD_SECONDS / tuning.stepSeconds) : 0;
+  for (let k = 0; k < Math.max(steps, movingSteps); k += 1) {
     flightStep(flight, obstacles, world.rings, world.zones, tuning, env);
-    if (flight.ended || moving.some((box) => obstacleGap(flight.body.pos, tuning.heroRadius, box, s.step + k + 1, tuning) <= 0)) return false;
+    // Un vol qui finit (un choc) avant la fin de la demi-seconde est un mauvais vol ; plus tard, il n'y a plus rien à craindre ni à regarder.
+    if (flight.ended) return k >= steps;
+    if (k < movingSteps && moving.some((box) => obstacleGap(flight.body.pos, tuning.heroRadius, box, s.step + k + 1, tuning) <= 0)) return false;
   }
   // Un vol qui file vers le bord du monde : on garde la corde.
-  if (!(Math.abs(s.pos.x + vel.x * EDGE_AHEAD_SECONDS) < WORLD_HALF_WIDTH - EDGE_MARGIN)) return false;
-  return s.heldKind === 'roue' || held === undefined || flightCatches(held, { pos: s.pos, vel }, anchors, standing, tuning, env, world.zones, world.rings).length > 0;
+  return Math.abs(s.pos.x + vel.x * EDGE_AHEAD_SECONDS) < WORLD_HALF_WIDTH - EDGE_MARGIN;
+}
+
+/**
+ * Vrai si lâcher maintenant est un bon lâcher, comme le robot l'entend : le vol qui suivrait est libre (`flightIsClear`), et attrape une prise de plus
+ * d'un mètre plus haute que celle qu'on lâche (`flightCatches`, ce que le vérificateur regarde), hors de la couronne d'un carrousel si l'on en tient une
+ * prise. Une roue n'a pas ce dernier contrôle : sa sortie est prouvée à part.
+ */
+function releaseIsGood(world: SimState, s: Seen, live: readonly DebugAnchor[], heldId: number | null): boolean {
+  if (!flightIsClear(world, s, live, heldId)) return false;
+  const anchors = liveAnchors(world, live);
+  const held = anchors.find((a) => a.id === heldId);
+  if (s.heldKind === 'roue' || held === undefined) return true;
+  const vel = releasedVelocity(s, anchors, held);
+  return flightCatches(held, { pos: s.pos, vel }, anchors, standingObstacles(world, s), DEFAULT_TUNING, liveEnv(s), world.zones, world.rings).some((id) => isHigherExit(anchors, held, id));
 }
 
 /**
@@ -260,7 +307,7 @@ function catchesAbove(world: SimState, s: Seen, live: readonly DebugAnchor[], he
   const held = anchors.find((a) => a.id === heldId);
   if (!held) return false;
   const caught = flightCatches(held, { pos: s.pos, vel: s.vel }, anchors, standingObstacles(world, s), DEFAULT_TUNING, liveEnv(s), world.zones, world.rings);
-  return caught.some((id) => (anchors.find((a) => a.id === id)?.pos.y ?? -Infinity) > held.pos.y + ABOVE_RELEASE);
+  return caught.some((id) => isHigherExit(anchors, held, id));
 }
 
 /** La prise que le pilote veut tenir (`hold`), si elle est à portée du grappin de celle qu'il tient en ce moment ; sinon null. */
@@ -296,7 +343,7 @@ export async function pilotFrame(page: Page, memory: PilotMemory, nowMs: number,
     // Un lien élastique ne vaut que pris vite (sa puissance vient du mouvement d'arrivée) : trop lentement, on le laisse s'il y a autre chose à portée.
     const others = target ? live.filter((a) => a.id !== target.id && Math.hypot(a.x - s.pos.x, a.y - s.pos.y) <= DEFAULT_TUNING.ropeMax).length : 0;
     const slowForElastic = target?.kind === 'elastique' && others > 0 && Math.hypot(s.vel.x, s.vel.y) < ELASTIC_CATCH_SPEED;
-    if (target && climbing && !rising && !slowForElastic && !options.wait?.(s, memory) && swingIsSafe(options.world, s, live, target.id)) {
+    if (target && climbing && !rising && !slowForElastic && !options.wait?.(s, memory) && swingIsSafe(options.world, s, live, target.id, others)) {
       await page.evaluate(() => window.__grappin!.press());
       memory.holdSince = nowMs;
       memory.heldId = target.id;
@@ -327,9 +374,13 @@ export async function pilotFrame(page: Page, memory: PilotMemory, nowMs: number,
     // Sur un aimant ou un lien élastique, ni treuil ni fenêtre non plus : on lâche en montant, quand le vol attrape plus haut.
     const onMagnet = s.heldKind === 'aimant';
     const onElastic = s.heldKind === 'elastique';
+    // Sur une prise de carrousel, on se laisse porter : on ne lâche que pour une prise hors de la couronne, quand le vol l'attrape (la sortie passe une fois par tour).
+    const onOrbit = options.world?.anchors.find((a) => a.id === memory.heldId)?.orbit !== undefined;
+    // Sur une prise interrupteur dont un panneau se déplie encore, on tient : on voit la structure s'ouvrir avant de s'y engager.
+    const unfolding = s.heldKind === 'interrupteur' && s.unfolded < 1 && (options.world?.obstacles.some((box) => box.switchedBy === memory.heldId && box.hinge !== undefined) ?? false);
     const ready = onWheel ? speed >= DEFAULT_TUNING.wheelSpeed * WHEEL_READY_RATIO : speed >= 8 || (s.ropeLength !== null && s.ropeLength <= 1.5 + 1e-9);
     const slope = s.vel.x !== 0 ? s.vel.y / Math.abs(s.vel.x) : Infinity;
-    const maxHold = onWheel ? WHEEL_MAX_HOLD_MS : onMagnet ? MAGNET_MAX_HOLD_MS : onElastic ? ELASTIC_MAX_HOLD_MS : MAX_HOLD_MS;
+    const maxHold = onWheel ? WHEEL_MAX_HOLD_MS : onMagnet ? MAGNET_MAX_HOLD_MS : onElastic ? ELASTIC_MAX_HOLD_MS : onOrbit ? ORBIT_MAX_HOLD_MS : MAX_HOLD_MS;
     const lingered = nowMs - memory.holdSince > maxHold;
     let live: DebugAnchor[] | null = null;
     let wants: boolean;
@@ -341,27 +392,30 @@ export async function pilotFrame(page: Page, memory: PilotMemory, nowMs: number,
         live = await page.evaluate(() => window.__grappin!.anchors());
         wants = nextTarget(options.world, s, live, memory.heldId) === seeking.id;
       }
-    } else if (onMagnet || onElastic) {
-      // Le vol se regarde un pas sur quatre, et seulement en montant (à l'opposé de la gravité du moment) ; sans monde rejoué, on ne regarde pas.
+    } else if (onMagnet || onElastic || onOrbit) {
+      // Le vol se regarde un pas sur quatre, et (sauf sur une couronne, qui tourne) seulement en montant, à l'opposé de la gravité du moment ; sans monde rejoué, on ne regarde pas.
       wants = lingered;
       const up = upOf(liveEnv(s));
-      if (!wants && options.world && s.step % RELEASE_EVERY === 0 && s.vel.x * up.x + s.vel.y * up.y > 0) {
+      if (!wants && options.world && s.step % RELEASE_EVERY === 0 && (onOrbit || s.vel.x * up.x + s.vel.y * up.y > 0)) {
         live = await page.evaluate(() => window.__grappin!.anchors());
         wants = catchesAbove(options.world, s, live, memory.heldId);
       }
     } else {
       wants = (!onWheel && s.releaseWindow) || (ready && s.vel.y > 1 && slope > 0.6 && slope < 1.8) || lingered;
     }
-    if (wants) {
+    if (wants && !unfolding) {
       live ??= await page.evaluate(() => window.__grappin!.anchors());
-      // Le vol qui suivrait se regarde un pas sur quatre ; sans monde rejoué, on ne regarde pas. Pendu depuis trop longtemps, on lâche quoi qu'il arrive.
+      // Le vol qui suivrait se regarde un pas sur quatre ; sans monde rejoué, on ne regarde pas.
       const good = !options.world || (s.step % RELEASE_EVERY === 0 && releaseIsGood(options.world, s, live, memory.heldId));
-      if (good || nowMs - memory.holdSince > OVERHELD_MS) {
+      // Pendu depuis trop longtemps, on lâche sans rien attraper, mais jamais droit dans ce qui bouge (la coque d'un carrousel qui passe) tant qu'il reste un peu de patience ; passé le double, quoi qu'il arrive.
+      const held = nowMs - memory.holdSince;
+      const overdue = held > OVERHELD_MS && (held > 2 * OVERHELD_MS || !options.world || flightIsClear(options.world, s, live, memory.heldId));
+      if (good || overdue) {
         await page.evaluate(() => window.__grappin!.release());
         // Lancé par une roue ou un aimant, comme par un lanceur, ou simplement lâché : on ne rattrape rien sous le point pendant un moment, on monte.
-        const held = live.find((a) => a.id === memory.heldId);
+        const heldSpot = live.find((a) => a.id === memory.heldId);
         memory.releasedAt = nowMs;
-        memory.releasedPos = held ? { x: held.x, y: held.y } : null;
+        memory.releasedPos = heldSpot ? { x: heldSpot.x, y: heldSpot.y } : null;
         memory.launched = onWheel || onMagnet;
       }
     }

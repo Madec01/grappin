@@ -37,6 +37,9 @@ export interface SoundPlayer {
 /** Le son du passage qui se referme est celui du rebond, environ neuf demi-tons plus bas : grave, il dure près d'une seconde. */
 export const ESCAPE_PITCH = 0.6;
 
+/** Le son d'une faille qui s'ouvre est celui de la casse, environ une octave plus bas : le craquement grave de la roche qui se fend. */
+export const FAULT_PITCH = 0.55;
+
 /** Jusqu'où la série monte le son du parfait : un demi-ton par parfait d'affilée, huit au plus. */
 export const PERFECT_PITCH_STEPS = 8;
 
@@ -88,6 +91,9 @@ export function cueFor(event: RuleEvent): Cue | null {
     case 'escape':
       // Le champ de force du rebond, grave et plus long : un passage dont la porte d'énergie se met en marche.
       return { id: 'bounce', pitch: ESCAPE_PITCH };
+    case 'faille':
+      // La roche qui se fend : le craquement de la casse, une octave plus bas.
+      return { id: 'break', pitch: FAULT_PITCH };
     default:
       return null;
   }
