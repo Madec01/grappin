@@ -1,5 +1,6 @@
 import { Game, readSettings, type DebugAnchor, type DebugState } from './app/game';
 import { browserInstaller, hostOf } from './app/install';
+import { parseAtelier } from './data/atelier';
 import { Music, browserAudio } from './audio/music';
 import { browserRhythms } from './audio/rhythms';
 import { browserSfx } from './audio/sfx';
@@ -40,6 +41,8 @@ declare global {
       /** Joue la course libre tout de suite, sans appui d'accroche. */
       playFree: () => void;
       playScene: (id: string) => boolean;
+      /** Joue une partie d'atelier sur ces éléments (voir data/atelier.ts) ; sans liste, sur le choix du profil. */
+      playAtelier: (ids?: readonly string[]) => void;
       /** Les points d'accroche encore là, en mètres de monde : de quoi viser un trou dans un mur. Pour les tests de bout en bout et le banc de captures. */
       anchors: () => DebugAnchor[];
       /** La traction prouvée depuis le lanceur tenu (voir `sim/pilot.ts`), ou null : pour les pilotes de test. */
@@ -76,6 +79,7 @@ async function start(): Promise<void> {
     playLevel: (id: number) => game.playLevel(id),
     playFree: () => game.playFree(),
     playScene: (id: string) => game.playScene(id),
+    playAtelier: (ids?: readonly string[]) => game.playAtelier(ids ? parseAtelier(ids.join(',')) : undefined),
     anchors: () => game.anchors(),
     launchAim: () => game.launchAim(),
   };

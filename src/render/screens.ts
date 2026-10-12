@@ -4,6 +4,7 @@ import { levelFor, levelProgress } from '../meta/levels';
 import { missionById, type MissionDef } from '../meta/missions';
 import { showsHint, type LevelOutcome, type Profile, type RunOutcome } from '../meta/profile';
 import type { InstallState } from '../app/install';
+import { ATELIER_ELEMENTS, ATELIER_GROUPS, type AtelierId } from '../data/atelier';
 import { TALISMANS, slotsFor, type Talisman } from '../meta/talismans';
 import { starsOf, unlockedLevel, type LevelResult } from '../meta/traversee';
 import { levelButton, levelPageCount, levelsOfPage, type ButtonId, type ButtonRect } from './buttons';
@@ -54,7 +55,9 @@ export type OverlayView =
   | { readonly kind: 'won'; readonly score: number; readonly outcome: LevelOutcome; readonly result: LevelResult }
   | { readonly kind: 'talismans'; readonly profile: Profile }
   /** La pause : la partie reste visible, figée, sous un voile léger. */
-  | { readonly kind: 'paused' };
+  | { readonly kind: 'paused' }
+  /** L'atelier du mode test : les éléments choisis, à cocher. */
+  | { readonly kind: 'atelier'; readonly selection: readonly AtelierId[] };
 
 /** Marges et mise en page, en pixels CSS. */
 /** Sur iPhone et iPad, pas d'invite : le chemin par le menu Partager, en une ligne sous les accès du titre. */
@@ -527,7 +530,8 @@ function buildTitle(profile: Profile, width: number, testMode: boolean, install:
     lower.line(HINT, 16, COLOR.textDim);
   }
   lower.gap(BUTTON_GAP);
-  lower.buttonRow(weighted([['levels', 'Niveaux'], ['free', 'Course libre'], ['talismans', 'Talismans']]), 'access');
+  // En mode test, l'atelier : choisir ce que l'on veut affronter.
+  lower.buttonRow(weighted(testMode ? [['levels', 'Niveaux'], ['free', 'Course libre'], ['talismans', 'Talismans'], ['atelier', 'Atelier']] : [['levels', 'Niveaux'], ['free', 'Course libre'], ['talismans', 'Talismans']]), 'access');
   // L'installation sur l'écran d'accueil : le bouton quand le navigateur sait installer en un geste, le rappel du chemin sur iPhone, rien sinon.
   if (install === 'prompt') {
     lower.gap(14);
@@ -538,6 +542,38 @@ function buildTitle(profile: Profile, width: number, testMode: boolean, install:
   }
   lower.gap(18);
   lower.buttonRow(weighted([['music', musicLabel(profile.music)], ['sfx', sfxLabel(profile.sfx)], ['start', startLabel(profile.freeStart)]], 2), 'quiet', SETTINGS_GAP);
+  return { upper, lower, align: 'center' };
+}
+
+/**
+ * L'atelier du mode test : le catalogue par groupes, chaque élément une case
+ * (● choisi, ○ non), puis Tout, Rien, Jouer et Retour. Demande du
+ * propriétaire : « un vrai mode test où je peux choisir à quelles prises ou
+ * autres éléments je veux être confronté ».
+ */
+function buildAtelier(selection: readonly AtelierId[], width: number): Layout {
+  const upper = new Column(width);
+  upper.line('Atelier', 28, COLOR.text, true);
+  upper.gap(6);
+  upper.line('Choisis ce que tu veux affronter : la course n\'engendre que cela.', 14, COLOR.textDim);
+  for (const group of ATELIER_GROUPS) {
+    upper.gap(10);
+    upper.line(group.label, 14, COLOR.textFaint, true);
+    upper.gap(6);
+    const elements = ATELIER_ELEMENTS.filter((element) => element.group === group.id);
+    for (let i = 0; i < elements.length; i += 3) {
+      if (i > 0) upper.gap(6);
+      upper.buttonRow(elements.slice(i, i + 3).map((element) => ({ id: `atelier:${element.id}` as const, label: `${selection.includes(element.id) ? '●' : '○'} ${element.label}`, weight: 1 })), 'quiet', SETTINGS_GAP);
+    }
+  }
+  const lower = new Column(width);
+  lower.line(selection.length === 0 ? 'Rien de choisi : une chaîne nue.' : `${selection.length} élément${selection.length > 1 ? 's' : ''} choisi${selection.length > 1 ? 's' : ''}.`, 14, COLOR.textDim);
+  lower.gap(10);
+  lower.buttonRow(weighted([['atelierAll', 'Tout'], ['atelierNone', 'Rien']], 2), 'quiet', SETTINGS_GAP);
+  lower.gap(10);
+  lower.button('atelierPlay', 'Jouer l\'atelier', 'primary');
+  lower.gap(10);
+  lower.button('back', 'Retour');
   return { upper, lower, align: 'center' };
 }
 
@@ -702,6 +738,8 @@ function buildLayout(view: Exclude<OverlayView, { kind: 'none' }>, width: number
       return buildTalismans(view.profile, width);
     case 'paused':
       return buildPaused(width);
+    case 'atelier':
+      return buildAtelier(view.selection, width);
   }
 }
 

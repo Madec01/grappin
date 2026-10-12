@@ -45,6 +45,8 @@ export const COLOR = {
   booster: 0x3cf0ff,
   /** Lanceur : tube vert d'eau, un cyan qui tire sur le vert pour ne pas passer pour un propulseur. Sa coupe, son élastique et sa jauge de force ont cette couleur. */
   launcher: 0x3dffc0,
+  /** Roue motorisée : tube bleu sarcelle, entre le cyan du propulseur et le vert d'eau du lanceur sans être ni l'un ni l'autre. */
+  wheel: 0x1fb6c8,
   /** Prise électrique : tube orange au calme, rouge vif quand elle est chargée (ne pas toucher). */
   electric: 0xffb547,
   electricCharged: 0xff4d4d,

@@ -328,7 +328,7 @@ describe('jeu', () => {
         'fogFactor',
         'fogY',
         'freeRunStartY',
-        'freeStart', 'install',
+        'freeStart', 'install', 'atelier', 'atelierChoice',
         'goal',
         'gravityX',
         'gravityY',
@@ -2098,6 +2098,57 @@ describe('sons et départ', () => {
     plain.game.frame(0.016);
     expect(plain.seen.lastInstall).toBeNull();
     expect(plain.game.debugState().install).toBeNull();
+  });
+
+  it('l\'atelier du mode test : on coche des éléments, le choix se garde, Jouer lance une partie qui ne porte que ces éléments', () => {
+    const { game, seen, storage } = makeGame('?test=1');
+    game.frame(0.016);
+    seen.hit = () => 'atelier';
+    game.press(1, 1);
+    game.frame(0.016);
+    expect(game.debugState()).toMatchObject({ screen: 'atelier', atelier: null, atelierChoice: [] });
+    seen.hit = () => 'atelier:porte';
+    game.press(1, 1);
+    seen.hit = () => 'atelier:roue';
+    game.press(1, 1);
+    game.frame(0.016);
+    expect(game.debugState().atelierChoice).toEqual(['roue', 'porte']);
+    expect(loadSavedProfile(storage).atelier).toEqual(['roue', 'porte']);
+    seen.hit = () => 'atelier:porte';
+    game.press(1, 1);
+    expect(game.debugState().atelierChoice).toEqual(['roue']);
+    seen.hit = () => 'atelierAll';
+    game.press(1, 1);
+    expect(game.debugState().atelierChoice).toHaveLength(28);
+    seen.hit = () => 'atelierNone';
+    game.press(1, 1);
+    expect(game.debugState().atelierChoice).toEqual([]);
+    seen.hit = () => 'atelier:porte';
+    game.press(1, 1);
+    seen.hit = () => 'atelierPlay';
+    game.press(1, 1);
+    game.frame(0.016);
+    const state = (game as unknown as { run: { sim: { state: SimState } } }).run.sim.state;
+    expect(game.debugState()).toMatchObject({ screen: 'playing', atelier: ['porte'] });
+    expect(state.course.plan).toMatchObject({ kind: 'atelier', selection: ['porte'] });
+    expect(state.obstacles.some((box) => box.kind === 'porte')).toBe(true);
+    expect(state.anchors.every((anchor) => anchor.kind === 'normal')).toBe(true);
+    // Retour : l'écran de l'atelier revient au titre.
+    game.restart();
+    game.frame(0.016);
+    seen.hit = () => 'atelier';
+    game.press(1, 1);
+    seen.hit = () => 'back';
+    game.press(1, 1);
+    expect(game.debugState().screen).toBe('title');
+    // `?atelier=` ouvre une partie d'atelier directement, et `playAtelier` aussi, sur la liste donnée.
+    const direct = makeGame('?test=1&atelier=tournant,machin,fragile');
+    direct.game.playFree();
+    direct.game.frame(0.016);
+    expect(direct.game.debugState().atelier).toEqual(['fragile', 'tournant']);
+    direct.game.playAtelier(['roue']);
+    direct.game.frame(0.016);
+    expect(direct.game.debugState().atelier).toEqual(['roue']);
   });
 
   it('le départ de la course libre se bascule entre avancé et du sol, et se garde', () => {

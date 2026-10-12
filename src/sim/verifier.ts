@@ -93,7 +93,7 @@ export function swingIsClear(anchor: Anchor, body: Body, anchors: readonly Ancho
   let swing: Swing = { body: { pos: context.hero.pos, vel: context.hero.vel }, ropeLength };
   const steps = Math.round(AFTER_CATCH_SECONDS / tuning.stepSeconds);
   for (let k = 0; k < steps; k += 1) {
-    swing = swingStep(swing.body, anchor.pos, swing.ropeLength, tuning, env, zones);
+    swing = swingStep(swing.body, anchor.pos, swing.ropeLength, tuning, env, zones, anchor.motor ?? null);
     if (obstacles.some((box) => circleBoxGap(swing.body.pos, tuning.heroRadius, box) <= 0)) return false;
   }
   return true;
@@ -172,7 +172,7 @@ function holdAndRelease(
       if (satisfied()) return true;
     }
     if (obstacles.some((box) => circleBoxGap(swing.body.pos, tuning.heroRadius, box) <= 0)) break;
-    swing = swingStep(swing.body, from.pos, swing.ropeLength, tuning, env, zones);
+    swing = swingStep(swing.body, from.pos, swing.ropeLength, tuning, env, zones, from.motor ?? null);
   }
   return satisfied();
 }

@@ -67,7 +67,9 @@ Le héros, son nom, et le détail du décor restent à proposer au propriétaire
 
 - La brume qui monte.
 - Obstacles fixes : corniches accrochées aux bords et dalles flottantes. Les toucher est un choc, pas une mort (décision du propriétaire du 10 octobre 2026) : repoussé, rebond amorti, corde lâchée, série à zéro, étourdi 0,45 s ; on peut se poser sur le dessus d'une corniche. Passer à moins d'un demi-mètre sans toucher rapporte le bonus « Frôlé », une fois par obstacle et par corde.
-- Obstacles mobiles (bras tournants, ouverture tournante), à venir en 0.13.0.
+- **Roue motorisée (P1), livrée en 0.13.0.** Une prise qui tourne : accroché, le personnage est entraîné le long de sa corde par un moteur jusqu'à 11 m/s, sans treuil, jusqu'à faire le tour ; il lâche où il veut. Le générateur la pose devant une prise dix mètres plus haut, que seule la roue atteint. Dès le palier 3.
+- **Obstacle tournant (O2), livré en 0.13.0.** Une barre de 2,6 m qui fait un tour en six secondes ; la toucher est un choc. Elle ne barre pas la visée : on la passe au bon moment. Dès le palier 3.
+- **Lanceur à ouverture mobile (L3, la glissière), livré en 0.13.0.** Le trou du mur va et vient de 2,4 m de part et d'autre, un aller-retour en cinq secondes : on tire quand il passe. Dès le palier 5.
 
 **Obstacles à comportement, lot 2 du brief, livrés en 0.11.0** (chacun avec sa scène de démonstration, `?scene=`) :
 - **Surface de rebond (O3).** Une dalle ou une corniche d'un autre habillage qui renvoie le personnage selon son angle d'arrivée, à 90 % de sa vitesse, presque sans frottement. La corde est lâchée s'il en tenait une, mais ni série perdue ni étourdissement : on rattrape un point dans la foulée. Une chute devient une remontée, un tir manqué se récupère ; utile autour des lanceurs et des passages indirects. Le vérificateur la tient pour solide : une route qui n'en dépend pas existe toujours. Dès le palier 1, et au niveau 12.
@@ -197,3 +199,5 @@ Valeurs de départ pour le prototype, à régler à la main sur téléphone. Ell
 | Étoile | rayon 0,35 m, 10 points × multiplicateur |
 | Ombre prédictive | 0,25 s de vol |
 | Palier | tous les 50 m |
+
+**L'atelier, le mode test où l'on choisit (0.13.0).** Demande du propriétaire : « un vrai mode test dans le jeu où je peux choisir à quelles prises ou autres éléments je veux être confronté ». En mode test, le titre porte un bouton « Atelier » : un catalogue de vingt-huit éléments en cinq groupes (prises, obstacles, lanceurs à usage exigé, zones, événements), que l'on coche ; la course n'engendre alors que des segments qui portent ces éléments, et les événements choisis se succèdent à chaque segment. Pour tester une mécanique seule, l'enchaîner, ou en combiner plusieurs. Le choix se garde dans le profil du mode test.

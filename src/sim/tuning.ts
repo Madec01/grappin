@@ -79,6 +79,9 @@ export interface Tuning {
   readonly ringScore: number;
   readonly ringCentreScore: number;
   readonly ringBoost: number;
+  /** Roue motorisée : vitesse le long du cercle que le moteur entretient (m/s), et accélération pour l'atteindre (m/s²). */
+  readonly wheelSpeed: number;
+  readonly wheelAccel: number;
   readonly grazeDistance: number;
   /** Points d'un frôlé et d'une étoile, multipliés par le multiplicateur courant. */
   readonly grazeScore: number;
@@ -141,6 +144,8 @@ export const DEFAULT_TUNING: Tuning = {
   ringScore: 15,
   ringCentreScore: 40,
   ringBoost: 1.3,
+  wheelSpeed: 11,
+  wheelAccel: 18,
   grazeDistance: 0.5,
   grazeScore: 5,
   pickupScore: 10,

@@ -2,6 +2,19 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Versionnage sémantique.
 
+## [0.13.0] — 2026-10-12 — Fin du lot 2 : la roue, le tournant, la glissière ; et l'atelier
+
+Demande du propriétaire : « finis le lot 2 », et « un vrai mode test dans le jeu où je peux choisir à quelles prises ou autres éléments je veux être confronté ».
+
+### Ajouté
+
+- **Roue motorisée (P1 du brief)**, prise `roue` : accroché, le personnage est entraîné le long de sa corde par un moteur (`wheelSpeed` 11 m/s, `wheelAccel` 18 m/s²), sans treuil ni pompage, jusqu'à faire le tour ; il lâche où il veut, et la roue porte loin. Le vérificateur joue le moteur dans ses balancements, et le motif « roue » reprend la chaîne dix mètres plus haut, du côté où la roue envoie, hors de portée d'un balancement ordinaire : mesuré, 50 segments sur 60 construits, tous prouvés, aucun sans le moteur. Dès le palier 3, aux niveaux 13 et 20, scène `?scene=roue`. Tube bleu sarcelle.
+- **Obstacle tournant (O2)**, obstacle `tournant` : une barre de 2,6 m qui fait un tour en six secondes autour d'un pivot, dans un sens ou l'autre ; la toucher est un choc. Elle ne barre jamais la visée : on la passe au bon moment, le vérificateur ne compte pas sur elle (comme une porte), et les robots regardent où elle sera. Posée comme une dalle, une par segment du motif « tournant » (dès le palier 3, aux niveaux 16 et 20) et selon le profil (`rotors`). Scène `?scene=tournant`.
+- **Lanceur à ouverture mobile (L3, « glissière »)** : au-dessus d'un lanceur, un mur dont le trou va et vient de 2,4 m de part et d'autre, un aller-retour en cinq secondes : on tire quand il passe. Les panneaux glissent (`slide`), couvrent le monde quel que soit leur décalage, et le vérificateur, qui ne compte pas sur eux, prouve le tir droit ; les robots attendent le trou (jusqu'à six secondes). Dès le palier 5, aux niveaux 18 et 20, scène `?scene=glissiere`.
+- **Géométrie qui bouge** (`sim/moving.ts`) : où est un obstacle à un pas donné (`obstacleAt`, `rotorEnds`, `obstacleGap`, `pushOutAt`), déterministe, avec une trigonométrie à quatre opérations (`core/math/trig.ts`, juste à un millième) puisque celle du moteur JavaScript est interdite dans la simulation.
+- **L'atelier**, le mode test où l'on choisit ce que l'on affronte (`data/atelier.ts`) : en mode test (`?test=1`), un bouton « Atelier » sur le titre ouvre un catalogue de vingt-huit éléments en cinq groupes (prises, obstacles, lanceurs à usage exigé, zones, événements), à cocher ; Tout, Rien, « Jouer l'atelier ». La course n'engendre alors que des segments qui portent les éléments choisis (choisir une seule chose, c'est la voir à chaque segment), et les événements choisis se succèdent à chaque segment. Le choix se garde dans le profil du mode test ; `?atelier=roue,tournant` ouvre une partie d'atelier directement, `window.__grappin.playAtelier([...])` aussi.
+- Robots : sur une roue, le robot lâche au premier instant où le vol attrape un point au-dessus d'elle (ce que le vérificateur a prouvé) ; sous une glissière, il attend le trou ; avant tout lâcher, il garde la corde si le vol file vers le bord du monde.
+
 ## [0.12.5] — 2026-10-12 — La musique part au premier geste, des vrais bruitages
 
 Deux retours du propriétaire : « la musique ne se lance pas systématiquement tant qu'on ne fait pas pause une première fois », et « les sons sont horribles, je n'aime pas les sons générés par oscillateur ».

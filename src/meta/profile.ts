@@ -1,3 +1,4 @@
+import { parseAtelier, type AtelierId } from '../data/atelier';
 import type { LevelDef } from '../data/levels';
 import { levelFor } from './levels';
 import { nextMissions, settleMissions, type MissionDef, type MissionState, type RunStats } from './missions';
@@ -45,6 +46,8 @@ export interface Profile {
   readonly freeStart: FreeStart;
   /** Conseils du tutoriel déjà donnés (voir `app/coach.ts`) : chacun une seule fois. */
   readonly tips: string[];
+  /** L'atelier du mode test : les éléments choisis (voir `data/atelier.ts`), gardés d'une fois à l'autre. */
+  readonly atelier: AtelierId[];
 }
 
 /** Lecture et écriture d'un texte : `localStorage` dans le navigateur, une mémoire dans les tests. */
@@ -72,6 +75,7 @@ export function createProfile(): Profile {
     sfx: true,
     freeStart: 'advanced',
     tips: [],
+    atelier: [],
   };
 }
 
@@ -141,6 +145,7 @@ export function loadProfile(storage: ProfileStorage): Profile {
       sfx: raw.sfx !== false,
       freeStart: raw.freeStart === 'ground' ? 'ground' : 'advanced',
       tips: Array.isArray(raw.tips) ? raw.tips.filter((id): id is string => typeof id === 'string') : [],
+      atelier: Array.isArray(raw.atelier) ? parseAtelier(raw.atelier.filter((id): id is string => typeof id === 'string').join(',')) : [],
     };
     return refillMissions(profile);
   } catch {

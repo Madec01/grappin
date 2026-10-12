@@ -25,7 +25,7 @@ import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from './state
  * d'accélération puis une zone de freinage avant le point suivant
  * (« accélération, envolée, freinage, rattrapage »).
  */
-export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' | 'fragiles' | 'saut' | 'lanceur' | 'courant' | 'derive' | 'fusee' | 'brise' | 'sas' | 'cerceau' | 'ricochet' | 'percee';
+export type Archetype = 'chaine' | 'escalier' | 'couloir' | 'dalles' | 'rafale' | 'fragiles' | 'saut' | 'lanceur' | 'courant' | 'derive' | 'fusee' | 'brise' | 'sas' | 'cerceau' | 'ricochet' | 'percee' | 'roue' | 'tournant' | 'glissiere';
 
 /**
  * Les cinq derniers motifs EXIGENT une mécanique du lot 2 (retour du
@@ -92,6 +92,8 @@ export interface TierProfile {
   readonly breakables?: number;
   readonly doors?: number;
   readonly rings?: number;
+  /** Fin du lot 2 : barres tournantes par segment (une de plus dans le motif « tournant »). */
+  readonly rotors?: number;
 }
 
 /** Largeur jouable à l'écartement 1 : les points restent entre -limit et +limit, les obstacles s'y appuient. */
@@ -164,6 +166,9 @@ export function tierProfile(tier: number): TierProfile {
   // Lot 2, les usages exigés : avec les lanceurs (palier 2), le cerceau et le mur à percer ; puis le sas et le ricochet ; la percée avec la fusée.
   if (tier >= 2) archetypes.push('cerceau', 'brise');
   if (tier >= 4) archetypes.push('sas', 'ricochet', 'percee');
+  // Fin du lot 2 : la roue et le tournant au palier 3, la glissière avec les lanceurs du palier 5.
+  if (tier >= 3) archetypes.push('roue', 'tournant');
+  if (tier >= 5) archetypes.push('glissiere');
   return {
     spacing: Math.min(5, 3 + 0.4 * tier),
     obstacles: tier === 0 ? 0 : Math.min(3, 1 + Math.floor(tier / 2)),
@@ -231,7 +236,59 @@ const SHAPES: Record<Archetype, { dy: readonly [number, number]; dx: readonly [n
   cerceau: { dy: [0.55, 0.9], dx: [0.4, 1] },
   ricochet: { dy: [0.55, 0.9], dx: [0.4, 1] },
   percee: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  roue: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  tournant: { dy: [0.55, 0.9], dx: [0.4, 1] },
+  glissiere: { dy: [0.55, 0.9], dx: [0.4, 1] },
 };
+
+/**
+ * Fin du lot 2 (0.13.0), en mètres. Roue motorisée (P1) : la chaîne arrive sur
+ * une roue, dont le moteur entraîne le personnage le long de sa corde jusqu'à
+ * `wheelSpeed` ; la chaîne reprend `WHEEL_RISE` plus haut, du côté où la roue
+ * envoie, hors de portée d'un balancement ordinaire : seule la roue y mène. Rien
+ * à moins de `WHEEL_CLEARANCE` d'une roue : on y tourne au bout de sa corde.
+ * Tournant (O2) : une barre de `ROTOR_LENGTH` qui fait un tour en
+ * `ROTOR_TURN_SECONDS`, posée comme une dalle (son carré tient lieu de boîte),
+ * que l'on passe au bon moment. Glissière (L3) : le mur d'un lanceur dont le
+ * trou va et vient de `SLIDE_AMPLITUDE` de part et d'autre, en `SLIDE_PERIOD`
+ * par aller-retour : on tire quand le trou passe.
+ */
+export const WHEEL_RISE = 10;
+const WHEEL_SIDE = 2.2;
+export const WHEEL_CLEARANCE = 5.5;
+export const ROTOR_LENGTH = 2.6;
+export const ROTOR_TURN_SECONDS = 6;
+export const SLIDE_AMPLITUDE = 2.4;
+export const SLIDE_PERIOD = 5;
+
+/** La roue au point `from`, et où la chaîne reprend. Partagé avec les scènes. */
+export function wheel(ids: IdCounters, from: Vec2, spin: -1 | 1, halfWidth: number): { anchor: Anchor; exit: Vec2 } {
+  const anchor: Anchor = { ...makeAnchor(ids, from, 'roue'), motor: { spin } };
+  return { anchor, exit: { x: clampX(from.x + spin * WHEEL_SIDE, halfWidth), y: from.y + WHEEL_RISE } };
+}
+
+/** Une barre tournante autour de `pivot` : son carré englobant tient lieu de boîte. Partagé avec les scènes. */
+export function rotorBar(ids: IdCounters, pivot: Vec2, spin: number, phase: number): Obstacle {
+  const half = ROTOR_LENGTH / 2;
+  const box: Obstacle = { id: ids.obstacle, x0: pivot.x - half, y0: pivot.y - half, x1: pivot.x + half, y1: pivot.y + half, kind: 'tournant', rotor: { pivot, length: ROTOR_LENGTH, spin, phase } };
+  ids.obstacle += 1;
+  return box;
+}
+
+/** Le mur à ouverture mobile au-dessus d'un lanceur : deux panneaux qui glissent ensemble, et où la chaîne reprend. Partagé avec les scènes. */
+export function slidingWall(ids: IdCounters, launcher: Vec2, rise: number, halfWidth: number, phase: number): { walls: Obstacle[]; exit: Vec2 } {
+  const wallY = launcher.y + rise;
+  const gapX = clampX(launcher.x, halfWidth);
+  // Les panneaux dépassent le bord du monde de l'amplitude : décalés, ils le couvrent encore.
+  const reach = WALL_EDGE + SLIDE_AMPLITUDE;
+  const slide = { amplitude: SLIDE_AMPLITUDE, period: SLIDE_PERIOD, phase };
+  const walls: Obstacle[] = [
+    { id: ids.obstacle, x0: -reach, y0: wallY, x1: gapX - GAP_HALF_WIDTH, y1: wallY + OBSTACLE_THICKNESS, slide },
+    { id: ids.obstacle + 1, x0: gapX + GAP_HALF_WIDTH, y0: wallY, x1: reach, y1: wallY + OBSTACLE_THICKNESS, slide },
+  ];
+  ids.obstacle += 2;
+  return { walls, exit: { x: gapX, y: wallY + ABOVE_WALL } };
+}
 
 /**
  * Les usages exigés du lot 2, en mètres. Mur à percer (« brise ») : un mur
@@ -545,6 +602,27 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
       launcherDone = true;
       continue;
     }
+    // La roue n'est posée qu'à six mètres au-dessus du départ du segment : au bout de sa corde, le personnage tourne jusqu'à cinq mètres sous elle, au-dessus des obstacles du segment d'avant.
+    if (archetype === 'roue' && !featureDone && anchors.length > 0 && cur.y - startY > 6 && targetY - cur.y > WHEEL_RISE + 3) {
+      // Roue : le dernier point devient une roue motorisée, et la chaîne reprend bien plus haut, du côté où elle envoie.
+      const spin: -1 | 1 = cur.x > 0 ? -1 : 1;
+      const { anchor: hub, exit } = wheel(ids, cur, spin, halfWidth);
+      anchors[anchors.length - 1] = hub;
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      featureDone = true;
+      continue;
+    }
+    if (archetype === 'glissiere' && !featureDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > 11) {
+      // Glissière : le dernier point devient un lanceur, sous un mur dont le trou va et vient ; on tire quand il passe.
+      anchors[anchors.length - 1] = makeAnchor(ids, cur, 'lanceur');
+      const { walls, exit } = slidingWall(ids, cur, WALL_RISE_MIN + WALL_RISE_RANGE * rng.next(), halfWidth, rng.next());
+      fixed.push(...walls);
+      cur = exit;
+      anchors.push(makeAnchor(ids, cur));
+      featureDone = true;
+      continue;
+    }
     if (archetype === 'brise' && !featureDone && anchors.length > 0 && cur.y - startY > 3 && targetY - cur.y > 11) {
       // Mur à percer : le dernier point devient un lanceur, un mur cassable sans trou le surplombe, la chaîne reprend au-dessus.
       anchors[anchors.length - 1] = makeAnchor(ids, cur, 'lanceur');
@@ -654,6 +732,7 @@ export function buildSegment(rng: Rng, ids: IdCounters, from: Vec2 | null, origi
   const obstacleCount = archetype === 'dalles' ? Math.min(4, profile.obstacles + 2) : profile.obstacles;
   // Les espèces du lot 2 se posent d'abord : elles sont le propos du segment, les obstacles ordinaires prennent la place qui reste.
   const kinds: ObstacleKind[] = [
+    ...Array<ObstacleKind>((profile.rotors ?? 0) + (archetype === 'tournant' ? 1 : 0)).fill('tournant'),
     ...Array<ObstacleKind>(profile.doors ?? 0).fill('porte'),
     ...Array<ObstacleKind>(profile.breakables ?? 0).fill('cassable'),
     ...Array<ObstacleKind>(profile.bouncers ?? 0).fill('rebond'),
@@ -752,6 +831,7 @@ function addSpecialAnchors(rng: Rng, ids: IdCounters, anchors: Anchor[], profile
       if (here.cable || before.cable || after.cable) continue;
       // Jamais autour d'un lanceur ni dans sa bande de tir : sous le mur, une prise n'aurait pas de sortie.
       if (before.kind === 'lanceur' || here.kind === 'lanceur' || after.kind === 'lanceur') continue;
+      if (before.kind === 'roue' || here.kind === 'roue' || after.kind === 'roue') continue;
       const pos =
         kind === 'eclipse'
           ? { x: clampX((before.pos.x + after.pos.x) / 2 + (rng.next() - 0.5) * 1.2, halfWidth), y: here.pos.y + ECLIPSE_RISE }
@@ -859,7 +939,7 @@ function placeObstacles(
   // Un point qui glisse est tenu à l'écart partout où il passe : à ses deux bouts et au milieu. Autour d'un lanceur, rien jusqu'où la traction recule le personnage.
   const clearOf = (pos: Vec2, box: Obstacle): boolean => circleBoxGap(pos, 0, box) >= OBSTACLE_CLEARANCE && !underAnchor(pos, box, env);
   const keepAway = (box: Obstacle): boolean =>
-    anchors.every((a) => (a.kind === 'lanceur' ? circleBoxGap(a.pos, LANCEUR_CLEARANCE, box) > 0 : (a.cable ? [a.cable.from, a.pos, a.cable.to] : [a.pos]).every((pos) => clearOf(pos, box)))) &&
+    anchors.every((a) => (a.kind === 'lanceur' ? circleBoxGap(a.pos, LANCEUR_CLEARANCE, box) > 0 : a.kind === 'roue' ? circleBoxGap(a.pos, WHEEL_CLEARANCE, box) > 0 : (a.cable ? [a.cable.from, a.pos, a.cable.to] : [a.pos]).every((pos) => clearOf(pos, box)))) &&
     pickups.every((p) => circleBoxGap(p.pos, 0, box) >= PICKUP_CLEARANCE) &&
     rings.every((r) => circleBoxGap(r.pos, r.radius, box) >= RING_OBSTACLE_CLEARANCE) &&
     !nearZone(box, zones) &&
@@ -873,7 +953,7 @@ function placeObstacles(
   if (top - bottom < 1) return obstacles;
   for (const kind of kinds) {
     // Une espèce du lot 2 a droit à plus d'essais : elle est attendue.
-    for (let attempt = 0; attempt < (kind === 'solide' ? 6 : 12); attempt += 1) {
+    for (let attempt = 0; attempt < (kind === 'solide' ? 6 : kind === 'tournant' ? 24 : 12); attempt += 1) {
       const y0 = bottom + rng.next() * (top - bottom);
       let x0: number;
       let x1: number;
@@ -891,6 +971,17 @@ function placeObstacles(
         const center = (-3 + 6 * rng.next()) * (halfWidth / HALF_WIDTH);
         x0 = center - width / 2;
         x1 = center + width / 2;
+      }
+      if (kind === 'tournant') {
+        // Une barre tournante : son pivot au milieu de la place tirée, flottant, jamais au bord ; un tour en six secondes, dans un sens ou l'autre.
+        const pivot = { x: clampX((x0 + x1) / 2, halfWidth - ROTOR_LENGTH / 2), y: y0 + ROTOR_LENGTH / 2 };
+        if (pivot.y + ROTOR_LENGTH / 2 > top + OBSTACLE_THICKNESS) continue;
+        const spin = (rng.next() < 0.5 ? -1 : 1) / ROTOR_TURN_SECONDS;
+        const probe = rotorBar({ obstacle: ids.obstacle, anchor: 0, pickup: 0, ring: 0, zone: 0 }, pivot, spin, rng.next());
+        if (!keepAway(probe)) continue;
+        obstacles.push(probe);
+        ids.obstacle += 1;
+        break;
       }
       const box: Obstacle = kind === 'solide' ? { id: ids.obstacle, x0, y0, x1, y1: y0 + OBSTACLE_THICKNESS } : { id: ids.obstacle, x0, y0, x1, y1: y0 + OBSTACLE_THICKNESS, kind };
       if (!keepAway(box)) continue;

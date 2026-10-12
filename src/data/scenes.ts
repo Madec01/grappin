@@ -1,5 +1,5 @@
 import type { Vec2 } from '../core/math/vec2';
-import { FIRST_ANCHOR_OFFSET, HALF_WIDTH, RICOCHET_WALL_RISE, RING_RADIUS, drift, hoop, ricochet, rocket, smashWall, updraft, type IdCounters, type Segment } from '../sim/generator';
+import { FIRST_ANCHOR_OFFSET, HALF_WIDTH, RICOCHET_WALL_RISE, RING_RADIUS, ROTOR_TURN_SECONDS, WHEEL_RISE, drift, hoop, ricochet, rocket, rotorBar, slidingWall, smashWall, updraft, wheel, type IdCounters, type Segment } from '../sim/generator';
 import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from '../sim/state';
 
 /**
@@ -11,7 +11,7 @@ import type { Anchor, Obstacle, ObstacleKind, Pickup, Ring, Zone } from '../sim/
  * captures et aux robots. Les tests prouvent chaque scène par le vérificateur.
  */
 
-export type SceneId = 'rebond' | 'cassable' | 'porte' | 'anneau' | 'courant' | 'derive' | 'fusee';
+export type SceneId = 'rebond' | 'cassable' | 'porte' | 'anneau' | 'courant' | 'derive' | 'fusee' | 'roue' | 'tournant' | 'glissiere';
 
 export interface SceneDef {
   readonly id: SceneId;
@@ -28,6 +28,9 @@ export const SCENES: readonly SceneDef[] = [
   { id: 'courant', name: 'Le courant', intro: 'Le courant te porte : lâche dedans et laisse-toi monter.' },
   { id: 'derive', name: 'La dérive', intro: 'Dans la bande, le courant te pousse de côté : vise avant d\'entrer.' },
   { id: 'fusee', name: 'La fusée', intro: 'Le couloir t\'accélère, la zone qui suit te freine : rattrape la prise en haut.' },
+  { id: 'roue', name: 'La roue', intro: 'La roue t\'entraîne de plus en plus vite : fais le tour, lâche en montant.' },
+  { id: 'tournant', name: 'Le tournant', intro: 'La barre tourne : passe quand elle laisse le passage.' },
+  { id: 'glissiere', name: 'La glissière', intro: 'Le trou du mur va et vient : tire quand il passe au-dessus de toi.' },
 ];
 
 export function sceneById(id: string): SceneDef | undefined {
@@ -171,6 +174,39 @@ export function buildScene(id: SceneId, ids: IdCounters, origin: Vec2): Segment 
       const next: Vec2 = { x: -1.6, y: 19.8 };
       ring(b, { x: (exit.x - FIRST_ANCHOR_OFFSET.x + next.x) / 2, y: (exit.y - FIRST_ANCHOR_OFFSET.y + next.y) / 2 + 0.5 });
       anchor(b, next);
+      break;
+    }
+    case 'roue': {
+      // Deux points, puis une roue motorisée (vers la gauche) ; la chaîne reprend bien plus haut, là où la roue envoie.
+      anchor(b, { x: 0, y: 0 });
+      anchor(b, CHAIN[0]!);
+      const at = { x: b.origin.x + FIRST_ANCHOR_OFFSET.x + 0.8, y: b.origin.y + FIRST_ANCHOR_OFFSET.y + 7.2 };
+      const { anchor: hub, exit } = wheel(b.ids, at, 1, HALF_WIDTH);
+      b.anchors.push(hub);
+      b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
+      b.ids.anchor += 1;
+      anchor(b, { x: -1, y: 7.2 + WHEEL_RISE + 3.6 });
+      anchor(b, { x: 1.6, y: 7.2 + WHEEL_RISE + 7.2 });
+      break;
+    }
+    case 'tournant': {
+      // La chaîne de démonstration, et une barre qui tourne entre le deuxième et le troisième point, dans le passage.
+      anchor(b, { x: 0, y: 0 });
+      for (const p of CHAIN) anchor(b, p);
+      const pivot = { x: b.origin.x + FIRST_ANCHOR_OFFSET.x - 0.9, y: b.origin.y + FIRST_ANCHOR_OFFSET.y + 9.6 };
+      b.obstacles.push(rotorBar(b.ids, pivot, 1 / ROTOR_TURN_SECONDS, 0.1));
+      break;
+    }
+    case 'glissiere': {
+      // Un lanceur sous un mur dont le trou va et vient au-dessus de lui : on tire quand il passe.
+      anchor(b, { x: 0, y: 0 });
+      anchor(b, CHAIN[0]!);
+      const launcher = anchor(b, { x: -0.4, y: 7 }, 'lanceur');
+      const { walls, exit } = slidingWall(b.ids, launcher.pos, 5, HALF_WIDTH, 0);
+      b.obstacles.push(...walls);
+      b.anchors.push({ id: b.ids.anchor, pos: exit, kind: 'normal', broken: false });
+      b.ids.anchor += 1;
+      anchor(b, { x: 2.2, y: 19.8 });
       break;
     }
   }

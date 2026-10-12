@@ -1,4 +1,5 @@
 import { NO_INSTALLER, type InstallState, type Installer } from './install';
+import { ATELIER_ELEMENTS, isAtelierId, parseAtelier, toggleAtelier, type AtelierId } from '../data/atelier';
 import type { Vec2 } from '../core/math/vec2';
 import { Music, silentAudio } from '../audio/music';
 import { SILENT_PULSE, pulseAt, syntheticRhythm, type Pulse, type Rhythm } from '../audio/rhythm';
@@ -82,6 +83,8 @@ export interface GameSettings {
   readonly pulseBpm: number | null;
   /** Scène de démonstration d'une mécanique, `?scene=rebond` : la course libre commence par elle. Null sinon. */
   readonly scene: SceneId | null;
+  /** L'atelier, `?atelier=roue,tournant` : la course libre est une partie d'atelier sur ces éléments. Vide sinon. */
+  readonly atelier: readonly AtelierId[];
 }
 
 /** Instantané lisible de l'extérieur : tests de bout en bout et séances de réglage. */
@@ -113,6 +116,9 @@ export interface DebugState {
   readonly smashed: number;
   /** Scène de démonstration en cours, ou null. */
   readonly scene: SceneId | null;
+  /** Partie d'atelier en cours : ses éléments, ou null ; et le choix gardé dans le profil, que l'écran de l'atelier coche. */
+  readonly atelier: readonly AtelierId[] | null;
+  readonly atelierChoice: readonly AtelierId[];
   /** Zones chargées, et l'espèce de celle où se trouve le personnage, ou null. */
   readonly zones: number;
   readonly zone: ZoneKind | null;
@@ -209,6 +215,7 @@ export function readSettings(search: string): GameSettings {
     testMode: test !== undefined && test !== '0' && test !== 'non',
     pulseBpm: pulseBpm !== null && Number.isFinite(pulseBpm) && pulseBpm > 0 ? pulseBpm : null,
     scene: isSceneId(scene) ? scene : null,
+    atelier: parseAtelier(params.get('atelier')),
   };
 }
 
@@ -355,6 +362,8 @@ export class Game {
         return this.pressTalismans(button);
       case 'paused':
         return this.pressPaused(button);
+      case 'atelier':
+        return this.pressAtelier(button);
     }
   }
 
@@ -533,6 +542,7 @@ export class Game {
       palette: this.palette,
       pulse: this.pulse,
       install: this.installer.state(),
+      atelier: this.profile.atelier,
     });
   }
 
@@ -596,6 +606,8 @@ export class Game {
       rings: state.rings.filter((ring) => ring.taken).length,
       smashed: state.obstacles.filter((box) => box.broken).length,
       scene: state.course.plan.kind === 'scene' ? state.course.plan.sceneId : null,
+      atelier: state.course.plan.kind === 'atelier' ? state.course.plan.selection : null,
+      atelierChoice: this.profile.atelier,
       zones: state.zones.length,
       zone: zoneAt(state.zones, state.hero.pos)?.kind ?? null,
       level: levelFor(this.profile.xp),
@@ -664,6 +676,7 @@ export class Game {
    * démonstration demandée, depuis le sol.
    */
   private newFreeRun(seed: number): Run {
+    if (this.settings.atelier.length > 0) return this.newRun({ kind: 'atelier', startY: 0, selection: this.settings.atelier }, seed);
     return this.settings.scene ? this.newSceneRun(this.settings.scene, seed) : this.newRun({ kind: 'infinite', startY: this.profile.freeStart === 'ground' ? 0 : freeRunStartY(this.profile) }, seed);
   }
 
@@ -733,7 +746,30 @@ export class Game {
     else if (button === 'sfx') this.toggleSfx();
     else if (button === 'start') this.toggleFreeStart();
     else if (button === 'install') void this.installer.prompt();
+    else if (button === 'atelier') this.screen = 'atelier';
     else this.startLevel(unlockedLevel(this.profile), true);
+  }
+
+  /** L'atelier du mode test : cocher et décocher les éléments (gardés dans le profil), tout, rien, jouer, retour. */
+  private pressAtelier(button: ButtonId | null): void {
+    if (button === 'back') this.screen = 'title';
+    else if (button === 'atelierPlay') this.playAtelier();
+    else if (button === 'atelierAll') this.chooseAtelier(ATELIER_ELEMENTS.map((element) => element.id));
+    else if (button === 'atelierNone') this.chooseAtelier([]);
+    else if (button?.startsWith('atelier:')) {
+      const id = button.slice('atelier:'.length);
+      if (isAtelierId(id)) this.chooseAtelier(toggleAtelier(this.profile.atelier, id));
+    }
+  }
+
+  private chooseAtelier(selection: AtelierId[]): void {
+    this.profile = { ...this.profile, atelier: selection };
+    saveProfile(this.storage, this.profile);
+  }
+
+  /** Joue une partie d'atelier sur `selection`, sinon sur le choix du profil : depuis le sol, chaque segment portant ces éléments. */
+  playAtelier(selection?: readonly AtelierId[]): void {
+    this.begin(this.newRun({ kind: 'atelier', startY: 0, selection: selection ?? this.profile.atelier }, this.freeSeed()), false);
   }
 
   /** Le réglage « Sons » du titre : coupe ou remet les bruitages, et s'en souvient dans le profil. */

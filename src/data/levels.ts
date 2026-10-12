@@ -161,12 +161,12 @@ export const LEVELS: readonly LevelDef[] = [
   {
     id: 13,
     name: 'Les verticales',
-    intro: 'Des traversières, le vent, et des courants qui portent jusqu\'à des prises hors de portée.',
+    intro: 'Des traversières, le vent, des courants qui portent, et une roue qui t\'entraîne : lâche en montant.',
     seed: 1013,
     startY: 1820,
     endY: 2020,
     fogBaseSpeed: 1.35,
-    profile: { spacing: 4.5, obstacles: 2, split: true, fragileChance: 0.3, boosters: 1, archetypes: ['chaine', 'lanceur', 'couloir', 'rafale', 'courant', 'courant'], spread: 1.3, electric: 0, eclipse: 1 },
+    profile: { spacing: 4.5, obstacles: 2, split: true, fragileChance: 0.3, boosters: 1, archetypes: ['chaine', 'lanceur', 'couloir', 'rafale', 'courant', 'courant', 'roue'], spread: 1.3, electric: 0, eclipse: 1 },
     events: [{ kind: 'traversiere', at: 20, length: 30 }, { kind: 'vent', at: 65, length: 30, side: 1, strength: 3 }, { kind: 'traversiere', at: 120, length: 30 }, { kind: 'vent', at: 160, length: 30, side: -1, strength: 3 }],
   },
   {
@@ -194,12 +194,12 @@ export const LEVELS: readonly LevelDef[] = [
   {
     id: 16,
     name: 'L\'arche',
-    intro: 'Bascules et câbles, des couloirs qui t\'accélèrent puis te freinent, et un plafond que seule cette vitesse perce.',
+    intro: 'Bascules et câbles, des couloirs qui t\'accélèrent puis te freinent, un plafond que seule cette vitesse perce, et des barres qui tournent.',
     seed: 1016,
     startY: 2430,
     endY: 2650,
     fogBaseSpeed: 1.4,
-    profile: { spacing: 4.7, obstacles: 3, split: true, fragileChance: 0.3, boosters: 1, archetypes: ['lanceur', 'chaine', 'escalier', 'dalles', 'fusee', 'percee'], spread: 1.4, electric: 1, eclipse: 1 },
+    profile: { spacing: 4.7, obstacles: 3, split: true, fragileChance: 0.3, boosters: 1, archetypes: ['lanceur', 'chaine', 'escalier', 'dalles', 'fusee', 'percee', 'tournant'], spread: 1.4, electric: 1, eclipse: 1 },
     events: [{ kind: 'bascule', at: 25, length: 35, side: -1 }, { kind: 'cable', at: 75, length: 30 }, { kind: 'bascule', at: 130, length: 35, side: 1 }, { kind: 'cable', at: 185, length: 25 }],
   },
   {
@@ -216,12 +216,12 @@ export const LEVELS: readonly LevelDef[] = [
   {
     id: 18,
     name: 'La balise',
-    intro: 'Dans le noir, vise de mémoire ; un mur dont le trou est une porte ; puis les traversières.',
+    intro: 'Dans le noir, vise de mémoire ; un mur dont le trou est une porte, un autre dont le trou se déplace ; puis les traversières.',
     seed: 1018,
     startY: 2870,
     endY: 3100,
     fogBaseSpeed: 1.45,
-    profile: { spacing: 4.8, obstacles: 3, split: true, fragileChance: 0.3, boosters: 1, archetypes: ['lanceur', 'dalles', 'couloir', 'chaine', 'sas'], spread: 1.45, electric: 1, eclipse: 2, doors: 1 },
+    profile: { spacing: 4.8, obstacles: 3, split: true, fragileChance: 0.3, boosters: 1, archetypes: ['lanceur', 'dalles', 'couloir', 'chaine', 'sas', 'glissiere'], spread: 1.45, electric: 1, eclipse: 2, doors: 1 },
     events: [{ kind: 'panne', at: 20, length: 35 }, { kind: 'traversiere', at: 70, length: 30 }, { kind: 'panne', at: 130, length: 35 }, { kind: 'traversiere', at: 180, length: 30 }],
   },
   {
@@ -243,7 +243,7 @@ export const LEVELS: readonly LevelDef[] = [
     startY: 3340,
     endY: 3600,
     fogBaseSpeed: 1.55,
-    profile: { spacing: 5, obstacles: 3, split: true, fragileChance: 0.4, boosters: 1, archetypes: ['lanceur', 'chaine', 'rafale', 'dalles', 'couloir', 'fragiles', 'saut'], spread: 1.5, electric: 2, eclipse: 2 },
+    profile: { spacing: 5, obstacles: 3, split: true, fragileChance: 0.4, boosters: 1, archetypes: ['lanceur', 'chaine', 'rafale', 'dalles', 'couloir', 'fragiles', 'saut', 'roue', 'tournant', 'glissiere'], spread: 1.5, electric: 2, eclipse: 2, rotors: 1 },
     events: [{ kind: 'vent', at: 15, length: 30, side: -1, strength: 3.5 }, { kind: 'bascule', at: 55, length: 35, side: -1 }, { kind: 'traversiere', at: 100, length: 30 }, { kind: 'alerte', at: 130, length: 15 }, { kind: 'bascule', at: 170, length: 35, side: 1 }, { kind: 'traversiere', at: 215, length: 30 }],
   },
 ];

@@ -3,8 +3,8 @@ import { grabbable, isCharged, isLit } from './cycles';
 import { tierName } from '../data/tiers';
 import { STILL, isUpright, upOf, type Environment } from './environment';
 import { launchVelocity } from './launcher';
-import { circleBoxGap } from './geometry';
-import { BOUNCE_FRICTION, BOUNCE_RESTITUTION, RING_CENTRE_RATIO, SMASH_KEEP, pushOut, reflected, ringBoosted } from './flight';
+import { obstacleGap, pushOutAt } from './moving';
+import { BOUNCE_FRICTION, BOUNCE_RESTITUTION, RING_CENTRE_RATIO, SMASH_KEEP, reflected, ringBoosted } from './flight';
 import { isSolidNow, obstacleKind } from './obstacles';
 import { constrainVelocity } from './physics';
 import type { Anchor, RuleEvent, SimState, Obstacle } from './state';
@@ -241,7 +241,7 @@ export { BOUNCE_FRICTION, BOUNCE_RESTITUTION, RING_CENTRE_RATIO, SMASH_KEEP } fr
 
 /** Sort le personnage de la boîte qu'il touche (voir `flight.ts`) et rend la normale du contact. */
 function pushHeroOut(state: SimState, box: Obstacle, tuning: Tuning): Vec2 {
-  const out = pushOut(state.hero.pos, tuning.heroRadius, box);
+  const out = pushOutAt(state.hero.pos, tuning.heroRadius, box, state.step, tuning);
   state.hero.pos = out.pos;
   return out.n;
 }
@@ -310,7 +310,7 @@ export function applyObstacles(state: SimState, tuning: Tuning, events: RuleEven
   for (const box of state.obstacles) {
     if (box.broken) continue;
     const kind = obstacleKind(box);
-    const gap = circleBoxGap(state.hero.pos, tuning.heroRadius, box);
+    const gap = obstacleGap(state.hero.pos, tuning.heroRadius, box, state.step, tuning);
     if (kind === 'porte') {
       const inside = state.doorsInside.includes(box.id);
       if (gap > 0) {

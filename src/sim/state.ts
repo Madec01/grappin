@@ -11,9 +11,18 @@ import type { EventKind, EventRuntime, ScheduledEvent } from './events';
  * vérificateur de parcours possibles.
  */
 
-/** Normal ; fragile, casse après une seconde de tenue ; propulseur, booste le lâcher. */
-/** Espèces de prises : normale, fragile (casse après une seconde), propulseur, électrique (piège à cycles), à éclipse (accrochable deux secondes sur quatre). */
-export type AnchorKind = 'normal' | 'fragile' | 'booster' | 'electrique' | 'eclipse' | 'lanceur';
+/**
+ * Espèces de prises : normale, fragile (casse après une seconde), propulseur,
+ * électrique (piège à cycles), à éclipse (accrochable deux secondes sur
+ * quatre), lanceur (fronde), roue (motorisée : accroché, le personnage est
+ * entraîné en rotation à vitesse constante, sans treuil, et lâche quand il veut).
+ */
+export type AnchorKind = 'normal' | 'fragile' | 'booster' | 'electrique' | 'eclipse' | 'lanceur' | 'roue';
+
+/** Le moteur d'une roue : le sens de rotation, +1 vers la gauche (sens trigonométrique, vu de face), -1 vers la droite. La vitesse est un réglage (`wheelSpeed`). */
+export interface Motor {
+  readonly spin: -1 | 1;
+}
 
 export interface Anchor {
   readonly id: number;
@@ -24,6 +33,8 @@ export interface Anchor {
   broken: boolean;
   /** Point sur câble : il va et vient entre ces deux positions. */
   readonly cable?: { readonly from: Vec2; readonly to: Vec2; /** Durée d'un aller-retour, en secondes. */ readonly period: number };
+  /** Roue motorisée : son moteur. */
+  readonly motor?: Motor;
 }
 
 /**
@@ -35,9 +46,30 @@ export interface Anchor {
  * tour à tour solide et franchissable, par cycles lents (`cycles.ts`), jamais
  * refermée sur le personnage.
  */
-export type ObstacleKind = 'solide' | 'rebond' | 'cassable' | 'porte';
+export type ObstacleKind = 'solide' | 'rebond' | 'cassable' | 'porte' | 'tournant';
 
-/** Obstacle : boîte alignée sur les axes, en mètres, Y vers le haut. Le frôler rapporte ; le toucher dépend de son espèce. */
+/** Barre qui tourne autour d'un pivot (obstacle « tournant », O2 du brief) : longueur en mètres, vitesse en tours par seconde (signée), phase en tours. */
+export interface Rotor {
+  readonly pivot: Vec2;
+  readonly length: number;
+  readonly spin: number;
+  readonly phase: number;
+}
+
+/** Va-et-vient horizontal d'un obstacle (ouverture mobile, L3 du brief) : amplitude en mètres de part et d'autre de la position de repos, période d'un aller-retour en secondes, phase en tours. */
+export interface Slide {
+  readonly amplitude: number;
+  readonly period: number;
+  readonly phase: number;
+}
+
+/**
+ * Obstacle : boîte alignée sur les axes, en mètres, Y vers le haut. Le frôler
+ * rapporte ; le toucher dépend de son espèce. Un obstacle qui bouge (voir
+ * `moving.ts`) garde ici sa boîte de repos : un tournant, le carré qui
+ * contient la barre quelle que soit sa position ; un panneau qui glisse, sa
+ * place au repos.
+ */
 export interface Obstacle {
   readonly id: number;
   readonly x0: number;
@@ -48,6 +80,10 @@ export interface Obstacle {
   readonly kind?: ObstacleKind;
   /** Paroi cassable traversée : plus rien, ni solide, ni dessinée. */
   broken?: true;
+  /** Obstacle tournant : la barre et son pivot. */
+  readonly rotor?: Rotor;
+  /** Panneau qui glisse : son va-et-vient. */
+  readonly slide?: Slide;
 }
 
 /**

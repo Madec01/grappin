@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createRng } from '../src/core/math/rng';
 import { SCENES, buildScene } from '../src/data/scenes';
 import { BOUNCE_RESTITUTION, SMASH_KEEP, flightStep, needsSteps, startFlight } from '../src/sim/flight';
-import { RICOCHET_WALL_RISE, buildSegment, doorWall, hoop, ricochet, smashWall, type Archetype, type Segment, type TierProfile } from '../src/sim/generator';
+import { RICOCHET_WALL_RISE, SLIDE_AMPLITUDE, WHEEL_RISE, buildSegment, doorWall, hoop, ricochet, rotorBar, slidingWall, smashWall, wheel, type Archetype, type Segment, type TierProfile } from '../src/sim/generator';
+import { obstacleAt } from '../src/sim/moving';
 import { pulledPosition } from '../src/sim/launcher';
 import { REASONABLE, playRobot } from '../src/sim/robot';
 import { WORLD_HALF_WIDTH } from '../src/sim/rules';
@@ -136,6 +137,48 @@ describe('les usages exigés du générateur', () => {
     expect(hoops).toBeGreaterThan(10);
   });
 
+  it('fin du lot 2 : la roue est exigée (jamais prouvée sans son moteur), la glissière et le tournant se posent et se prouvent', () => {
+    let wheels = 0;
+    let slides = 0;
+    let rotors = 0;
+    for (let seed = 1; seed <= 60; seed += 1) {
+      const roue = build(seed, 'roue');
+      const hub = roue.segment.anchors.find((a) => a.kind === 'roue');
+      if (hub) {
+        wheels += 1;
+        expect(hub.motor, `graine ${seed}`).toBeDefined();
+        // La sortie est dix mètres plus haut, du côté où la roue envoie : hors de portée d'un balancement ordinaire.
+        const exit = roue.segment.anchors[roue.segment.anchors.indexOf(hub) + 1]!;
+        expect(exit.pos.y - hub.pos.y).toBeCloseTo(WHEEL_RISE, 6);
+        expect(verifySegment([roue.entry], [], roue.segment, T), `roue ${seed}`).toBe(true);
+        const stripped: Segment = { ...roue.segment, anchors: roue.segment.anchors.map((a) => (a.kind === 'roue' ? { id: a.id, pos: a.pos, kind: 'normal', broken: false } : a)) };
+        expect(verifySegment([roue.entry], [], stripped, T), `roue ${seed} sans moteur`).toBe(false);
+      }
+      const glissiere = build(seed, 'glissiere');
+      const panes = glissiere.segment.obstacles.filter((o) => o.slide);
+      if (panes.length > 0) {
+        slides += 1;
+        expect(panes).toHaveLength(2);
+        expect(glissiere.segment.anchors.some((a) => a.kind === 'lanceur')).toBe(true);
+        // Les deux panneaux glissent ensemble, et couvrent le monde quel que soit leur décalage.
+        expect(panes[0]!.slide).toEqual(panes[1]!.slide);
+        for (const step of [0, 300, 600]) expect(spansWorld(panes.map((o) => obstacleAt(o, step, T)))).toBe(true);
+        expect(verifySegment([glissiere.entry], [], glissiere.segment, T), `glissière ${seed}`).toBe(true);
+      }
+      const tournant = build(seed, 'tournant');
+      const bar = tournant.segment.obstacles.find((o) => o.kind === 'tournant');
+      if (bar) {
+        rotors += 1;
+        expect(bar.rotor).toBeDefined();
+        expect(Math.abs(bar.rotor!.spin)).toBeCloseTo(1 / 6, 6);
+        expect(verifySegment([tournant.entry], [], tournant.segment, T), `tournant ${seed}`).toBe(true);
+      }
+    }
+    expect(wheels).toBeGreaterThan(15);
+    expect(slides).toBeGreaterThan(40);
+    expect(rotors).toBeGreaterThan(10);
+  });
+
   it('les constructeurs partagés : mur cassable sans trou, anneau-trou, ricochet à la hauteur réglée', () => {
     const launcher = { x: 0.5, y: 20 };
     const { wall, exit } = smashWall(ids(), launcher, 5, 0.6, 4);
@@ -155,6 +198,17 @@ describe('les usages exigés du générateur', () => {
     expect(r.boxes.map((b) => b.kind ?? 'solide')).toEqual(['solide', 'solide', 'solide', 'rebond']);
     expect(spansWorld(r.boxes.slice(0, 2))).toBe(true);
     expect(r.exit.x).toBeLessThan(launcher.x);
+    const w = wheel(ids(), launcher, -1, 4);
+    expect(w.anchor).toMatchObject({ kind: 'roue', motor: { spin: -1 } });
+    expect(w.exit.x).toBeLessThan(launcher.x);
+    expect(w.exit.y).toBeCloseTo(launcher.y + WHEEL_RISE, 6);
+    const bar = rotorBar(ids(), { x: 1, y: 30 }, 1 / 6, 0.2);
+    expect(bar).toMatchObject({ kind: 'tournant', rotor: { pivot: { x: 1, y: 30 }, spin: 1 / 6, phase: 0.2 } });
+    expect(bar.x0).toBeCloseTo(-0.3, 9);
+    expect(bar.x1).toBeCloseTo(2.3, 9);
+    const g = slidingWall(ids(), launcher, 5, 4, 0.3);
+    expect(g.walls.map((o) => o.slide?.amplitude)).toEqual([SLIDE_AMPLITUDE, SLIDE_AMPLITUDE]);
+    expect(g.exit).toEqual({ x: launcher.x, y: launcher.y + 5 + 4.2 });
   });
 });
 
@@ -165,15 +219,22 @@ describe('les scènes des usages exigés', () => {
       expect(verifySegment([], [], segment, T), scene.id).toBe(true);
       if (scene.id === 'rebond' || scene.id === 'cassable') expect(verifySegment([], [], stripped(segment), T), `${scene.id} sans`).toBe(false);
       // Les rencontres comptées dans la scène elle-même (sous 30 m), pas dans la course libre qui la suit : on ne contourne pas la scène.
-      const counts = { bounce: 0, smash: 0, ring: 0 };
+      const counts = { bounce: 0, smash: 0, ring: 0, wheel: 0, launch: 0, bump: 0 };
       const report = playRobot(5, T, 40, REASONABLE, { kind: 'scene', sceneId: scene.id, startY: 0 }, (state, events) => {
         if (state.hero.pos.y > 30) return;
-        for (const e of events) if (e.type === 'bounce' || e.type === 'smash' || e.type === 'ring') counts[e.type] += 1;
+        for (const e of events) {
+          if (e.type === 'bounce' || e.type === 'smash' || e.type === 'ring' || e.type === 'bump') counts[e.type] += 1;
+          if (e.type === 'attach' && state.anchors.find((a) => a.id === e.anchorId)?.kind === 'roue') counts.wheel += 1;
+          if (e.type === 'release' && e.kind === 'lanceur') counts.launch += 1;
+        }
       });
       expect(report.height, scene.name).toBeGreaterThan(24);
       if (scene.id === 'rebond') expect(counts.bounce).toBeGreaterThan(0);
       if (scene.id === 'cassable') expect(counts.smash).toBeGreaterThan(0);
       if (scene.id === 'anneau') expect(counts.ring).toBeGreaterThan(0);
+      if (scene.id === 'roue') expect(counts.wheel).toBeGreaterThan(0);
+      // Sous la glissière, le robot attend que le trou passe : un seul tir, aucun choc.
+      if (scene.id === 'glissiere') expect(counts).toMatchObject({ launch: 1, bump: 0 });
     }
   });
 });

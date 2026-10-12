@@ -1,14 +1,16 @@
+import type { Vec2 } from '../core/math/vec2';
+import { isMoving, obstacleGap } from './moving';
 import { FREE_RUN, type CoursePlan } from './course';
 import { flightStep, startFlight } from './flight';
-import { PULL_MAX } from './launcher';
+import { PULL_MAX, launchVelocity, pulledPosition } from './launcher';
 import { provableObstacles } from './obstacles';
-import { zoneAt } from './physics';
+import { zoneAt, type Body } from './physics';
 import { bestLaunch } from './pilot';
-import { releaseVelocity } from './rules';
+import { WORLD_HALF_WIDTH, releaseVelocity } from './rules';
 import type { Anchor, RuleEvent, SimState } from './state';
 import { Simulation } from './simulation';
 import type { Tuning } from './tuning';
-import { swingIsClear } from './verifier';
+import { flightCatches, swingIsClear } from './verifier';
 
 /**
  * Robots joueurs : des stratégies simples qui jouent une partie en Node,
@@ -46,16 +48,53 @@ const ZONE_AHEAD_SECONDS = 0.4;
 /** Avant de lâcher, le robot regarde ce temps de vol devant lui : s'il heurte un obstacle solide, il garde la corde et attend la suite du balancement. */
 const LOOK_AHEAD_SECONDS = 0.5;
 
-/** Vrai si le vol qui suivrait un lâcher maintenant ne heurte rien pendant `LOOK_AHEAD_SECONDS` (rebonds, fracas et anneaux joués). */
+/** Sous un mur à ouverture mobile, le robot attend que le trou passe, jamais plus longtemps que ceci (secondes) : la brume monte. */
+const LAUNCH_WAIT_MAX_SECONDS = 6;
+/** Sur une roue, le robot ne lâche qu'une fois le moteur presque à sa vitesse, et presque à la verticale vers le haut : c'est là que la roue porte (10 m plus haut). Il y reste jusqu'à ce moment, au plus `WHEEL_HOLD_MAX_SECONDS`. */
+const WHEEL_READY_RATIO = 0.95;
+const WHEEL_UP_RATIO = 0.5;
+const WHEEL_HOLD_MAX_SECONDS = 8;
+
+/** Vrai si le vol `body` ne heurte, pendant `seconds`, aucun obstacle qui bouge (tournant, panneau qui glisse), regardé là où il sera à chaque pas. */
+function clearOfMoving(state: SimState, body: Body, seconds: number, tuning: Tuning): boolean {
+  const moving = state.obstacles.filter((box) => !box.broken && isMoving(box));
+  if (moving.length === 0) return true;
+  const flight = startFlight(body);
+  const steps = Math.round(seconds / tuning.stepSeconds);
+  for (let k = 0; k < steps; k += 1) {
+    flightStep(flight, [], state.rings, state.zones, tuning, state.env);
+    if (moving.some((box) => obstacleGap(flight.body.pos, tuning.heroRadius, box, state.step + k + 1, tuning) <= 0)) return false;
+  }
+  return true;
+}
+
+/** Vrai si un tir de traction `pull` depuis le lanceur tenu ne heurte, pendant le vol que le vérificateur regarde, aucun obstacle qui bouge : sous un mur à ouverture mobile, c'est le moment de tirer. Partagé avec le pilote des scènes. */
+export function launchIsClear(state: SimState, pull: Vec2, tuning: Tuning): boolean {
+  const launcher = state.rope ? state.anchors.find((a) => a.id === state.rope?.anchorId) : undefined;
+  if (!launcher) return true;
+  return clearOfMoving(state, { pos: pulledPosition(launcher.pos, pull), vel: launchVelocity(pull, state.env) }, tuning.verifyFlightSeconds, tuning);
+}
+
+/** Avant de lâcher, le robot regarde aussi si le vol sort du monde dans ce temps (secondes) : un lâcher vers le bord, c'est une chute. */
+const EDGE_AHEAD_SECONDS = 1;
+const EDGE_MARGIN = 1;
+
+/** Vrai si le vol qui suivrait un lâcher maintenant ne heurte rien pendant `LOOK_AHEAD_SECONDS` (rebonds, fracas et anneaux joués), ni ne sort du monde pendant `EDGE_AHEAD_SECONDS`. */
 function releaseIsClear(state: SimState, tuning: Tuning): boolean {
-  const flight = startFlight({ pos: state.hero.pos, vel: releaseVelocity(state, tuning) });
+  const vel = releaseVelocity(state, tuning);
+  const flight = startFlight({ pos: state.hero.pos, vel });
   const obstacles = provableObstacles(state.obstacles);
+  // Ce qui bouge (tournants, panneaux qui glissent) n'est pas dans la preuve : le robot le regarde là où il sera, pas à pas.
+  const moving = state.obstacles.filter((box) => !box.broken && isMoving(box));
   const steps = Math.round(LOOK_AHEAD_SECONDS / tuning.stepSeconds);
   for (let k = 0; k < steps; k += 1) {
     flightStep(flight, obstacles, state.rings, state.zones, tuning, state.env);
     if (flight.ended) return false;
+    if (moving.some((box) => obstacleGap(flight.body.pos, tuning.heroRadius, box, state.step + k + 1, tuning) <= 0)) return false;
   }
-  return true;
+  // Un vol qui file vers le bord du monde (propulseur de côté, par exemple) : on garde la corde.
+  const edgeX = state.hero.pos.x + vel.x * EDGE_AHEAD_SECONDS;
+  return Math.abs(edgeX) < WORLD_HALF_WIDTH - EDGE_MARGIN;
 }
 
 export const BEGINNER: RobotProfile = { name: 'débutant', speedTarget: 6, minSlope: 0.3, maxSlope: 3, reactionSeconds: 0.25, maxHoldSeconds: 3 };
@@ -132,23 +171,42 @@ export function playRobot(seed: number, tuning: Tuning, seconds: number, profile
         }
         const dir = target ? { x: target.pos.x - launcher.pos.x, y: target.pos.y - launcher.pos.y } : { x: 0, y: 1 };
         const len = Math.hypot(dir.x, dir.y) || 1;
-        sim.release(bestLaunch(s, tuning) ?? { x: (-dir.x / len) * PULL_MAX * 0.7, y: (-dir.y / len) * PULL_MAX * 0.7 });
-        launchedStep = s.step;
-        launchedY = launcher.pos.y;
+        const pull = bestLaunch(s, tuning) ?? { x: (-dir.x / len) * PULL_MAX * 0.7, y: (-dir.y / len) * PULL_MAX * 0.7 };
+        // Sous un mur dont le trou va et vient, le robot regarde où sera le trou pendant son tir, et attend qu'il passe (jamais trop longtemps).
+        const waited = (s.step - attachStep) * tuning.stepSeconds;
+        if (waited < LAUNCH_WAIT_MAX_SECONDS && !launchIsClear(s, pull, tuning)) {
+          plannedRelease = s.step + 1;
+        } else {
+          sim.release(pull);
+          launchedStep = s.step;
+          launchedY = launcher.pos.y;
+        }
       }
     } else if (s.step - attachStep > 10) {
       const held = (s.step - attachStep) * tuning.stepSeconds;
       const speed = Math.hypot(s.hero.vel.x, s.hero.vel.y);
-      const ready = speed >= profile.speedTarget || s.rope.length <= tuning.ropeMin + 1e-9;
+      // Sur une roue, il faut la vitesse du moteur et partir presque droit vers le haut : le robot fait le tour et lâche à ce moment-là.
+      const held_ = s.anchors.find((a) => a.id === s.rope?.anchorId);
+      const onWheel = held_?.kind === 'roue';
+      const ready = onWheel ? speed >= tuning.wheelSpeed * WHEEL_READY_RATIO : speed >= profile.speedTarget || s.rope.length <= tuning.ropeMin + 1e-9;
       const ax = Math.abs(s.hero.vel.x);
       const slope = ax > 0 ? s.hero.vel.y / ax : Infinity;
-      const wants = (ready && s.hero.vel.y > 1 && slope > profile.minSlope && slope < profile.maxSlope) || held > profile.maxHoldSeconds;
+      // Sur une roue, le robot lâche au premier instant où le vol qui suivrait attrape un point au-dessus de la roue (ce que le vérificateur a prouvé).
+      const inWindow = onWheel
+        ? s.hero.vel.y >= tuning.wheelSpeed * WHEEL_UP_RATIO && flightCatches(held_, { pos: s.hero.pos, vel: s.hero.vel }, s.anchors, s.obstacles, tuning, s.env, s.zones, s.rings).some((id) => (s.anchors.find((a) => a.id === id)?.pos.y ?? -Infinity) > held_.pos.y + 1)
+        : s.hero.vel.y > 1 && slope > profile.minSlope && slope < profile.maxSlope;
+      const wants = (ready && inWindow) || held > (onWheel ? WHEEL_HOLD_MAX_SECONDS : profile.maxHoldSeconds);
       // Un lâcher droit dans un mur n'est pas un lâcher : le robot attend le prochain moment, sauf s'il pend depuis trop longtemps.
       if (wants && plannedRelease < 0 && (held > 2 * profile.maxHoldSeconds || releaseIsClear(s, tuning))) plannedRelease = s.step + reactionSteps;
       if (plannedRelease >= 0 && s.step >= plannedRelease) {
         plannedRelease = -1;
         sim.release();
         holdTotal += held;
+        // Lancé par une roue, comme par un lanceur : le robot ne rattrape rien sous elle pendant un moment, il monte.
+        if (onWheel && held_) {
+          launchedStep = s.step;
+          launchedY = held_.pos.y;
+        }
       }
     }
     sim.step();

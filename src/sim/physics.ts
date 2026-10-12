@@ -1,6 +1,6 @@
 import { add, clampLength, dot, length, lengthSq, normalize, scale, sub, type Vec2 } from '../core/math/vec2';
 import { STILL, acceleration, type Environment } from './environment';
-import type { Zone } from './state';
+import type { Motor, Zone } from './state';
 import type { Tuning } from './tuning';
 
 /**
@@ -163,11 +163,33 @@ export function swingAssist(body: Body, anchor: Vec2, ropeLength: number, tuning
 }
 
 /**
+ * Le moteur d'une roue : corde tendue, il pousse le personnage le long du
+ * cercle dans son sens de rotation, de `wheelAccel` par seconde, jusqu'à la
+ * vitesse `wheelSpeed` qu'il entretient ; au-delà, il ne freine pas. Corde
+ * molle, rien : on n'est pas sur la roue. Vite, la gravité ne suffit plus à
+ * retenir le personnage en bas : il fait le tour, et lâche où il veut.
+ */
+export function motorStep(body: Body, anchor: Vec2, ropeLength: number, motor: Motor, tuning: Tuning): Body {
+  const r = sub(body.pos, anchor);
+  const d = length(r);
+  if (d === 0 || d < ropeLength - TAUT_EPSILON) return body;
+  const n = scale(r, 1 / d);
+  const tangent: Vec2 = { x: -n.y * motor.spin, y: n.x * motor.spin };
+  const along = dot(body.vel, tangent);
+  if (along >= tuning.wheelSpeed) return body;
+  const gain = Math.min(tuning.wheelAccel * tuning.stepSeconds, tuning.wheelSpeed - along);
+  return { pos: body.pos, vel: add(body.vel, scale(tangent, gain)) };
+}
+
+/**
  * Un pas de personnage accroché : pompage, treuil puis mouvement. Renvoie le
  * corps déplacé et la nouvelle longueur de corde. Partagé par la simulation et
  * le vérificateur de parcours, qui jouent ainsi exactement la même physique.
+ * Sur une roue (`motor`), ni pompage ni treuil : le moteur seul, à longueur
+ * de corde constante.
  */
-export function swingStep(body: Body, anchor: Vec2, ropeLength: number, tuning: Tuning, env: Environment = STILL, zones: readonly Zone[] = NO_ZONES): { body: Body; ropeLength: number } {
+export function swingStep(body: Body, anchor: Vec2, ropeLength: number, tuning: Tuning, env: Environment = STILL, zones: readonly Zone[] = NO_ZONES, motor: Motor | null = null): { body: Body; ropeLength: number } {
+  if (motor) return { body: integrate(motorStep(body, anchor, ropeLength, motor, tuning), anchor, ropeLength, tuning, env, zones), ropeLength };
   const assisted = swingAssist(body, anchor, ropeLength, tuning, env);
   const shorter = Math.max(tuning.ropeMin, ropeLength - tuning.reelSpeed * tuning.stepSeconds);
   const pulled = reelIn(assisted, anchor, ropeLength, shorter, tuning.reelSpin, tuning.stepSeconds, tuning.reelMaxSpeed);

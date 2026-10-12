@@ -1,4 +1,5 @@
 import { isDoorClosed } from './cycles';
+import { obstacleAt } from './moving';
 import type { Obstacle, ObstacleKind, SimState } from './state';
 import type { Tuning } from './tuning';
 
@@ -22,12 +23,16 @@ export function isSolidNow(box: Obstacle, step: number, tuning: Tuning, doorsIns
   return isDoorClosed(box.id, step, tuning) && !doorsInside.includes(box.id);
 }
 
-/** Les obstacles solides en ce moment : la visée, la ligne de vue et l'ombre les lisent. */
+/**
+ * Les obstacles solides en ce moment, là où ils sont à ce pas : la visée, la
+ * ligne de vue et l'ombre les lisent. Un tournant n'en fait pas partie : il ne
+ * barre jamais la visée, on l'évite au contact, le temps d'un passage.
+ */
 export function solidObstacles(state: Pick<SimState, 'obstacles' | 'step' | 'doorsInside'>, tuning: Tuning): Obstacle[] {
-  return state.obstacles.filter((box) => isSolidNow(box, state.step, tuning, state.doorsInside));
+  return state.obstacles.filter((box) => isSolidNow(box, state.step, tuning, state.doorsInside) && obstacleKind(box) !== 'tournant').map((box) => obstacleAt(box, state.step, tuning));
 }
 
-/** Ce que le vérificateur tient pour solide : tout sauf les portes et les parois cassées. */
+/** Ce que le vérificateur tient pour solide : tout sauf les portes, les parois cassées, et ce qui bouge (tournants, panneaux qui glissent), que l'on attend ou que l'on évite. */
 export function provableObstacles(obstacles: readonly Obstacle[]): Obstacle[] {
-  return obstacles.filter((box) => !box.broken && obstacleKind(box) !== 'porte');
+  return obstacles.filter((box) => !box.broken && obstacleKind(box) !== 'porte' && obstacleKind(box) !== 'tournant' && box.slide === undefined);
 }

@@ -1,3 +1,4 @@
+import type { AtelierId } from '../data/atelier';
 import { LEVELS, type LevelDef } from '../data/levels';
 import type { TalismanId } from '../meta/talismans';
 
@@ -8,6 +9,8 @@ import type { TalismanId } from '../meta/talismans';
 
 /** Un niveau de la liste : « niveau-3 ». */
 export type LevelButtonId = `niveau-${number}`;
+/** Les cases de l'atelier du mode test, une par élément du catalogue (voir data/atelier.ts). */
+export type AtelierButtonId = `atelier:${AtelierId}`;
 
 /**
  * Un bouton ou une ligne sur laquelle on peut taper : un bouton nommé, un
@@ -18,7 +21,7 @@ export type LevelButtonId = `niveau-${number}`;
  * réglages ; « pause » est le seul bouton de la partie, « resume » et « quit »
  * ceux du voile de pause.
  */
-export type ButtonId = 'continue' | 'talismans' | 'levels' | 'free' | 'music' | 'sfx' | 'start' | 'install' | 'pause' | 'resume' | 'quit' | 'next' | 'replay' | 'back' | 'suite' | 'precedents' | LevelButtonId | TalismanId;
+export type ButtonId = 'continue' | 'talismans' | 'levels' | 'free' | 'music' | 'sfx' | 'start' | 'install' | 'atelier' | 'atelierPlay' | 'atelierAll' | 'atelierNone' | 'pause' | 'resume' | 'quit' | 'next' | 'replay' | 'back' | 'suite' | 'precedents' | LevelButtonId | AtelierButtonId | TalismanId;
 
 /** Rectangle d'un bouton, en pixels CSS de l'écran. */
 export interface ButtonRect {

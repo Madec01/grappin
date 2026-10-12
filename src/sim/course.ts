@@ -2,6 +2,7 @@ import { createRng, type Rng } from '../core/math/rng';
 import type { Vec2 } from '../core/math/vec2';
 import { environmentOf, eventsAt, type EventKind, type ScheduledEvent } from './events';
 import { buildPlainSegment, buildSegment, tierProfile, type IdCounters, type Segment, type SegmentContext, type TierProfile } from './generator';
+import { atelierEvents, atelierProfile, type AtelierId } from '../data/atelier';
 import { buildScene, type SceneId } from '../data/scenes';
 import type { Anchor, Obstacle, Ring, SimState, Zone } from './state';
 import type { Tuning } from './tuning';
@@ -24,6 +25,8 @@ export type CoursePlan =
   | { readonly kind: 'infinite'; readonly startY: number }
   /** Scène de démonstration d'une mécanique : un premier segment construit à la main, puis la course libre continue. */
   | { readonly kind: 'scene'; readonly sceneId: SceneId; readonly startY: number }
+  /** L'atelier du mode test : une course libre dont chaque segment porte les éléments choisis, et leurs événements à chaque segment. */
+  | { readonly kind: 'atelier'; readonly startY: number; readonly selection: readonly AtelierId[] }
   | {
       readonly kind: 'level';
       readonly levelId: number;
@@ -79,9 +82,8 @@ const FREE_EVENT_LENGTH = 20;
  * Course libre : tire éventuellement un événement qui commence deux mètres
  * au-dessus du segment qui débute à `segmentY`, pendant le premier vol.
  */
-function scheduleFreeEvent(state: SimState, rng: Rng, tier: number, segmentY: number): void {
-  const kinds = freeEventsFor(tier);
-  if (kinds.length === 0 || rng.next() >= FREE_EVENT_CHANCE) return;
+function scheduleFreeEvent(state: SimState, rng: Rng, kinds: readonly EventKind[], chance: number, segmentY: number): void {
+  if (kinds.length === 0 || rng.next() >= chance) return;
   // Jamais deux événements qui se chevauchent : le précédent doit être fini avant ce segment. Et jamais deux fois le même de suite.
   const last = state.schedule.at(-1);
   if (last && state.groundY + last.at + last.length + 6 > segmentY) return;
@@ -154,8 +156,10 @@ export function extendCourse(state: SimState, untilY: number, tuning: Tuning): v
   while (course.lastY < limit) {
     const from = state.anchors.at(-1)?.pos ?? null;
     const tier = Math.floor(course.lastY / tuning.tierHeight);
-    const profile = course.plan.kind === 'level' ? course.plan.profile : tierProfile(tier);
-    if (course.plan.kind === 'infinite') scheduleFreeEvent(state, rng, tier, course.lastY);
+    const profile = course.plan.kind === 'level' ? course.plan.profile : course.plan.kind === 'atelier' ? atelierProfile(course.plan.selection) : tierProfile(tier);
+    if (course.plan.kind === 'infinite') scheduleFreeEvent(state, rng, freeEventsFor(tier), FREE_EVENT_CHANCE, course.lastY);
+    // L'atelier : les événements choisis, à chaque segment où le précédent est fini.
+    if (course.plan.kind === 'atelier') scheduleFreeEvent(state, rng, atelierEvents(course.plan.selection), 1, course.lastY);
     const conditions = segmentContext(state, course.lastY);
     const context = state.anchors.slice(-CONTEXT_ANCHORS);
     const contextObstacles = state.obstacles.filter((o) => o.y1 >= course.lastY - 8);

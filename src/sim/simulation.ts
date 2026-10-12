@@ -119,7 +119,7 @@ export class Simulation {
       s.hero.pos = pulledPosition(held.pos, s.pull);
       s.hero.vel = { x: 0, y: 0 };
     } else if (s.rope && held) {
-      const swung = swingStep(s.hero, held.pos, s.rope.length, this.tuning, s.env, s.zones);
+      const swung = swingStep(s.hero, held.pos, s.rope.length, this.tuning, s.env, s.zones, held.motor ?? null);
       s.hero.pos = swung.body.pos;
       s.hero.vel = swung.body.vel;
       s.rope.length = swung.ropeLength;
